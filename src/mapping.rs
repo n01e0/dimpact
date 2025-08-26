@@ -1,6 +1,6 @@
-use crate::diff::{Change, ChangeKind, FileChanges};
+use crate::diff::{ChangeKind, FileChanges};
 use crate::ir::{Symbol, TextRange};
-use crate::languages::{LanguageAnalyzer, rust::RustAnalyzer};
+use crate::languages::{LanguageAnalyzer, Engine, rust_analyzer};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -20,6 +20,7 @@ pub struct ChangedOutput {
 pub fn compute_changed_symbols(
     diffs: &[FileChanges],
     lang: LanguageMode,
+    engine: Engine,
 ) -> anyhow::Result<ChangedOutput> {
     let changed_files: Vec<String> = diffs
         .iter()
@@ -43,15 +44,14 @@ pub fn compute_changed_symbols(
     }
 
     let analyzer: Box<dyn LanguageAnalyzer> = match lang {
-        LanguageMode::Auto | LanguageMode::Rust => Box::new(RustAnalyzer::new()),
+        LanguageMode::Auto | LanguageMode::Rust => rust_analyzer(engine),
     };
 
     let mut changed_symbols = Vec::new();
     for (path, lines) in changed_lines_by_file.iter() {
         // Skip non-rust when mode is Rust
-        if let LanguageMode::Rust = lang {
-            if !path.ends_with(".rs") { continue; }
-        }
+        if let LanguageMode::Rust = lang
+            && !path.ends_with(".rs") { continue; }
         let Ok(source) = fs::read_to_string(path) else { continue };
         let symbols = analyzer.symbols_in_file(path, &source);
         for s in symbols {
@@ -76,9 +76,11 @@ mod tests {
     use super::*;
     use crate::diff::{parse_unified_diff};
     use tempfile::tempdir;
-    use std::io::Write;
+    use serial_test::serial;
+    
 
     #[test]
+    #[serial]
     fn changed_symbols_basic() {
         let dir = tempdir().unwrap();
         let file = dir.path().join("main.rs");
@@ -91,15 +93,13 @@ fn bar() {}
         fs::write(&file, code).unwrap();
 
         // Construct a diff snippet that adds a line inside foo()
-        let diff = format!(
-            "diff --git a/main.rs b/main.rs\n--- a/main.rs\n+++ b/main.rs\n@@ -1,3 +1,4 @@\n fn foo() {{\n-    println!(\"one\");\n+    println!(\"one\");\n+    println!(\"two\");\n }}\n" 
-        );
+        let diff = "diff --git a/main.rs b/main.rs\n--- a/main.rs\n+++ b/main.rs\n@@ -1,3 +1,4 @@\n fn foo() {\n-    println!(\"one\");\n+    println!(\"one\");\n+    println!(\"two\");\n }\n".to_string();
 
         let parsed = parse_unified_diff(&diff).unwrap();
         // Compute with working dir file; change current dir temporarily
         let cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
-        let out = compute_changed_symbols(&parsed, LanguageMode::Rust).unwrap();
+        let out = compute_changed_symbols(&parsed, LanguageMode::Rust, crate::languages::Engine::Regex).unwrap();
         std::env::set_current_dir(cwd).unwrap();
 
         assert!(out.changed_files.iter().any(|p| p.ends_with("main.rs")));
@@ -107,4 +107,3 @@ fn bar() {}
         assert!(!out.changed_symbols.iter().any(|s| s.name == "bar"));
     }
 }
-

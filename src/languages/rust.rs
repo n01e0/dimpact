@@ -4,6 +4,12 @@ use regex::Regex;
 
 pub struct RustAnalyzer;
 
+impl Default for RustAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RustAnalyzer {
     pub fn new() -> Self { Self }
 }
@@ -16,7 +22,7 @@ fn find_block_end(source: &str, start_line_idx: usize, open_brace_on_line: bool)
     for (i, line) in source.lines().enumerate().skip(start_line_idx) {
         for ch in line.chars() {
             if ch == '{' { depth += 1; started = true; }
-            if ch == '}' { if depth > 0 { depth -= 1; } }
+            if ch == '}' { depth = depth.saturating_sub(1); }
         }
         if open_brace_on_line && i == start_line_idx { // include brace on same line
             if !started { depth += 1; started = true; }
@@ -81,24 +87,117 @@ impl crate::languages::LanguageAnalyzer for RustAnalyzer {
     }
 
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
-        let re_call = Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*(!)?\s*\(").unwrap();
+        // qualified free fn: a::b::c(
+        let re_qcall = Regex::new(r"([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*\(").unwrap();
+        // simple free fn: name(
+        let re_call = Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(!)?\s*\(").unwrap();
+        // method: .name(
         let re_method = Regex::new(r"\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap();
         let mut refs = Vec::new();
         for (i, line) in source.lines().enumerate() {
             let ln = (i as u32) + 1;
+            // qualified calls first to capture a::b::c(...)
+            for cap in re_qcall.captures_iter(line) {
+                let full = cap.get(1).unwrap().as_str();
+                if full.contains("::") {
+                    let mut parts: Vec<&str> = full.split("::").collect();
+                    if let Some(last) = parts.pop() {
+                        refs.push(UnresolvedRef {
+                            name: last.to_string(),
+                            kind: RefKind::Call,
+                            file: path.to_string(),
+                            line: ln,
+                            qualifier: Some(parts.join("::")),
+                            is_method: false,
+                        });
+                    }
+                }
+            }
             for cap in re_method.captures_iter(line) {
                 let name = cap.get(1).unwrap().as_str();
-                refs.push(UnresolvedRef { name: name.to_string(), kind: RefKind::Call, file: path.to_string(), line: ln });
+                refs.push(UnresolvedRef { name: name.to_string(), kind: RefKind::Call, file: path.to_string(), line: ln, qualifier: None, is_method: true });
             }
             for cap in re_call.captures_iter(line) {
                 if cap.get(2).map(|m| m.as_str() == "!").unwrap_or(false) {
                     continue; // likely a macro like println!
                 }
                 let name = cap.get(1).unwrap().as_str();
-                refs.push(UnresolvedRef { name: name.to_string(), kind: RefKind::Call, file: path.to_string(), line: ln });
+                // skip if already recorded as qualified call on same line
+                if refs.iter().any(|r| r.line == ln && r.name == name && r.qualifier.is_some()) { continue; }
+                refs.push(UnresolvedRef { name: name.to_string(), kind: RefKind::Call, file: path.to_string(), line: ln, qualifier: None, is_method: false });
             }
         }
         refs
+    }
+
+    fn imports_in_file(&self, path: &str, source: &str) -> std::collections::HashMap<String, String> {
+        fn normalize(s: &str) -> String { s.trim().to_string() }
+        fn flatten(items: &str, prefix: &str, out: &mut std::collections::HashMap<String, String>) {
+            let mut depth: i32 = 0; let mut cur = String::new();
+            let push_item = |tok: &str, prefix: &str, out: &mut std::collections::HashMap<String, String>| {
+                let tok = tok.trim(); if tok.is_empty() { return; }
+                if tok == "self" {
+                    let alias = prefix.split("::").filter(|s| !s.is_empty()).last().unwrap_or(prefix).trim();
+                    out.insert(alias.to_string(), normalize(prefix));
+                    return;
+                }
+                if tok == "*" {
+                    out.insert(format!("__glob__{}", prefix), prefix.to_string());
+                    return;
+                }
+                if let Some(brace) = tok.find('{') {
+                    let pfx = format!("{}::{}", prefix, tok[..brace].trim().trim_end_matches("::"));
+                    let inner = tok[brace+1..].trim_end_matches('}');
+                    flatten(inner, &pfx, out);
+                    return;
+                }
+                let (name, alias) = if let Some((n,a)) = tok.split_once(" as ") { (n.trim(), a.trim()) } else { (tok, tok) };
+                let full = if prefix.is_empty() { name.to_string() } else { format!("{}::{}", prefix, name) };
+                out.insert(alias.to_string(), normalize(&full));
+            };
+            for ch in items.chars() {
+                match ch {
+                    '{' => { depth+=1; cur.push(ch); }
+                    '}' => { depth=depth.saturating_sub(1); cur.push(ch); }
+                    ',' if depth==0 => { let t = cur.trim().to_string(); if !t.is_empty() { push_item(&t, prefix, out); } cur.clear(); }
+                    _ => cur.push(ch),
+                }
+            }
+            let t = cur.trim().to_string(); if !t.is_empty() { push_item(&t, prefix, out); }
+        }
+        let mut map = std::collections::HashMap::new();
+        for mut line in source.lines().map(|l| l.trim()) {
+            if !(line.starts_with("use ") || line.starts_with("pub use ")) { continue; }
+            if !line.ends_with(';') { continue; }
+            if line.starts_with("pub use ") { line = &line[8..]; } else { line = &line[4..]; }
+            line = &line[..line.len()-1];
+            if let Some(brace_pos) = line.find('{') {
+                let prefix = line[..brace_pos].trim_end_matches("::").trim();
+                let rest = &line[brace_pos+1..line.rfind('}').unwrap_or(line.len())];
+                flatten(rest, prefix, &mut map);
+            } else {
+                let (path_spec, alias) = if let Some((p, a)) = line.split_once(" as ") { (p.trim(), a.trim()) } else { (line, line.split("::").last().unwrap_or(line)) };
+                if path_spec.ends_with("::*") {
+                    let pfx = path_spec.trim_end_matches("::*");
+                    map.insert(format!("__glob__{}", pfx), pfx.to_string());
+                } else {
+                    map.insert(alias.to_string(), normalize(path_spec));
+                }
+            }
+        }
+        // mod declarations map: mod foo; -> current_mod::foo
+        let current_mod = super::super::impact::module_path_for_file(path);
+        for l in source.lines() {
+            let t = l.trim();
+            if t.starts_with("mod ") {
+                let name = t[4..].trim().trim_end_matches(';').trim();
+                if !name.is_empty() {
+                    let mp = if current_mod.is_empty() { name.to_string() } else { format!("{}::{}", current_mod, name) };
+                    map.insert(name.to_string(), mp);
+                }
+            }
+        }
+        map
     }
 }
 
@@ -139,5 +238,28 @@ enum E { A, B }
         assert!(names.contains(&"bar"));
         assert!(names.contains(&"baz"));
         assert!(!names.contains(&"println"));
+    }
+
+    #[test]
+    fn extract_qualified_refs() {
+        let src = r#"fn foo() { crate::utils::call(); a::b::c(); }"#;
+        let ana = RustAnalyzer::new();
+        let refs = ana.unresolved_refs("lib.rs", src);
+        assert!(refs.iter().any(|r| r.name == "call" && r.qualifier.as_deref() == Some("crate::utils")));
+        assert!(refs.iter().any(|r| r.name == "c" && r.qualifier.as_deref() == Some("a::b")));
+    }
+
+    #[test]
+    fn parse_imports_variants() {
+        let src = r#"use a::b::c;
+use x as y;
+use a::b::{d, e as f};
+"#;
+        let ana = RustAnalyzer::new();
+        let m = ana.imports_in_file("lib.rs", src);
+        assert_eq!(m.get("c").unwrap(), "a::b::c");
+        assert_eq!(m.get("y").unwrap(), "x");
+        assert_eq!(m.get("d").unwrap(), "a::b::d");
+        assert_eq!(m.get("f").unwrap(), "a::b::e");
     }
 }

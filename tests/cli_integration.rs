@@ -1,5 +1,4 @@
 use assert_cmd::cargo::CommandCargoExt;
-use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::fs;
 use std::io::Write;
@@ -94,4 +93,3 @@ fn e2e_git_diff_into_dimpact_yaml() {
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     assert!(stdout.contains("- old_path:"));
 }
-

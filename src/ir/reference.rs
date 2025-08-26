@@ -13,6 +13,8 @@ pub struct UnresolvedRef {
     pub kind: RefKind,
     pub file: String,
     pub line: u32,
+    pub qualifier: Option<String>, // e.g., "a::b" for a::b::name()
+    pub is_method: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -46,4 +48,3 @@ impl SymbolIndex {
         self.by_file.get(file)?.iter().find(|s| s.range.start_line <= line && line <= s.range.end_line)
     }
 }
-

@@ -1,4 +1,3 @@
-use assert_cmd::prelude::*;
 use assert_cmd::cargo::CommandCargoExt;
 use predicates::prelude::*;
 use std::fs;
@@ -76,4 +75,3 @@ fn cli_mode_changed_reports_rust_symbol() {
     let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert!(v["changed_symbols"].is_array());
 }
-

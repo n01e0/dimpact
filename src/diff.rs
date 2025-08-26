@@ -67,7 +67,7 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
     let mut cur_changes: Vec<Change> = Vec::new();
 
     // helper to flush current file
-    let mut flush_file = |files: &mut Vec<FileChanges>, cur_old_path: &mut Option<String>, cur_new_path: &mut Option<String>, cur_changes: &mut Vec<Change>| {
+    let flush_file = |files: &mut Vec<FileChanges>, cur_old_path: &mut Option<String>, cur_new_path: &mut Option<String>, cur_changes: &mut Vec<Change>| {
         if !cur_changes.is_empty() || cur_old_path.is_some() || cur_new_path.is_some() {
             files.push(FileChanges {
                 old_path: cur_old_path.take(),

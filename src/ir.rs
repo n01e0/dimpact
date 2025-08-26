@@ -45,3 +45,4 @@ impl SymbolId {
         Self(format!("{}:{}:{}:{}:{}", lang, file, k, name, start_line))
     }
 }
+
