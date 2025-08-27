@@ -1,0 +1,19 @@
+language: ruby
+queries:
+  declarations: |
+    ; method definitions
+    (method name: (identifier) @name) @decl
+    (singleton_method name: (identifier) @name) @decl
+    ; class/module
+    (class name: (constant) @name) @decl
+    (module name: (constant) @name) @decl
+  calls: |
+    ; foo(), obj.foo()
+    (call method: (identifier) @name) @call
+  imports: |
+    (call method: (identifier) @name (argument_list (string))) @use
+  control: |
+    (if) @ctrl
+    (while) @ctrl
+    (until) @ctrl
+    (for) @ctrl

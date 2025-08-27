@@ -1,4 +1,3 @@
-#![cfg(feature = "ts")]
 use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
@@ -21,30 +20,26 @@ fn git(cwd: &std::path::Path, args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn ab_compare_changed_smoke() {
+fn ts_changed_impact_callers() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_path_buf();
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "tester@example.com"]);
     git(&repo, &["config", "user.name", "Tester"]);
-    fs::write(repo.join("main.rs"), "fn foo() {}\nfn bar() {}\n").unwrap();
+    fs::write(repo.join("a.ts"), "function bar(): void {}\nfunction foo() { bar(); }\n").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "init", "-q"]);
-    fs::write(repo.join("main.rs"), "fn foo() { let _x=1; }\nfn bar() {}\n").unwrap();
-    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
-    let diff = String::from_utf8(diff_out.stdout).unwrap();
-
+    fs::write(repo.join("a.ts"), "function bar(): void { let x = 1; }\nfunction foo() { bar(); }\n").unwrap();
+    let diff = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    cmd.current_dir(&repo)
-        .arg("--mode").arg("changed")
-        .arg("--lang").arg("rust")
-        .arg("--ab-compare")
+    let assert = cmd.current_dir(&repo)
+        .arg("--mode").arg("impact")
+        .arg("--direction").arg("callers")
+        .arg("--lang").arg("auto")
         .arg("--format").arg("json")
-        .write_stdin(diff);
-    let assert = cmd.assert().success();
-    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert!(v["only_in_regex"].is_array());
-    assert!(v["only_in_ts"].is_array());
+        .write_stdin(String::from_utf8(diff.stdout).unwrap())
+        .assert().success();
+    let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
+    assert!(out.contains("\"foo\""), "impact should include foo, got: {}", out);
 }
 

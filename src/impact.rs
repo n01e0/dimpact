@@ -1,6 +1,6 @@
 use crate::ir::Symbol;
 use crate::ir::reference::{Reference, SymbolIndex, UnresolvedRef};
-use crate::languages::{LanguageAnalyzer, Engine, rust_analyzer};
+use crate::languages::{LanguageAnalyzer, analyzer_for_path, LanguageKind};
 use walkdir::WalkDir;
 use serde::{Serialize, Deserialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -30,8 +30,7 @@ pub struct ImpactOutput {
 }
 
 /// Build symbol index and resolved reference edges for the current workspace (cwd).
-pub fn build_project_graph(engine: Engine) -> anyhow::Result<(SymbolIndex, Vec<Reference>)> {
-    let analyzer = rust_analyzer(engine); // for now only rust
+pub fn build_project_graph() -> anyhow::Result<(SymbolIndex, Vec<Reference>)> {
     let mut symbols = Vec::new();
     let mut urefs = Vec::new();
     let mut file_imports: std::collections::HashMap<String, std::collections::HashMap<String, String>> = std::collections::HashMap::new();
@@ -45,9 +44,16 @@ pub fn build_project_graph(engine: Engine) -> anyhow::Result<(SymbolIndex, Vec<R
         .filter_map(Result::ok) {
         let path = entry.path();
         if path.is_file() {
-            if let Some(ext) = path.extension() { if ext != "rs" { continue; } } else { continue; }
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            if ext != "rs" && ext != "rb" && ext != "js" && ext != "ts" && ext != "tsx" { continue; }
             let path_str = path.strip_prefix("./").unwrap_or(path).to_string_lossy().to_string();
             let Ok(src) = fs::read_to_string(path) else { continue; };
+            let kind = if ext == "rs" { LanguageKind::Rust }
+                else if ext == "rb" { LanguageKind::Ruby }
+                else if ext == "js" { LanguageKind::Javascript }
+                else if ext == "ts" { LanguageKind::Typescript }
+                else { LanguageKind::Tsx };
+            let Some(analyzer) = analyzer_for_path(&path_str, kind) else { continue };
             symbols.extend(analyzer.symbols_in_file(&path_str, &src));
             urefs.extend(analyzer.unresolved_refs(&path_str, &src));
             let im = analyzer.imports_in_file(&path_str, &src);
@@ -133,8 +139,11 @@ fn score_candidate(from_file: &str, qualifier: Option<&str>, imported_prefix: Op
         if !ip.is_empty() && file_matches_module_path(&cand.file, ip) { score += 15; }
     }
     // prefer method symbol if call site looked like a method
-    if call_is_method && matches!(cand.kind, crate::ir::SymbolKind::Method) { score += 25; }
-    if !call_is_method && matches!(cand.kind, crate::ir::SymbolKind::Function) { score += 5; }
+    if call_is_method {
+        if matches!(cand.kind, crate::ir::SymbolKind::Method) { score += 25; }
+        // Ruby: def は Functionとして表現されることが多いので、メソッド的呼び出しでも許容
+        if cand.language == "ruby" && matches!(cand.kind, crate::ir::SymbolKind::Function) { score += 20; }
+    } else if matches!(cand.kind, crate::ir::SymbolKind::Function) { score += 5; }
     score
 }
 
@@ -142,8 +151,16 @@ fn file_matches_module_path(file: &str, module_path: &str) -> bool {
     if module_path.is_empty() { return false; }
     let base = module_path.replace("::", "/");
     let file_norm = if let Ok(s) = std::path::Path::new(file).strip_prefix("./") { s.to_string_lossy() } else { std::borrow::Cow::from(file) };
-    // Match either <base>.rs or <base>/mod.rs
-    file_norm.ends_with(&(base.clone() + ".rs")) || file_norm.ends_with(&(base + "/mod.rs"))
+    // Match either <base> with supported extensions (and Rust mod.rs), and JS/TS index files
+    file_norm.ends_with(&(base.clone() + ".rs"))
+        || file_norm.ends_with(&(base.clone() + ".rb"))
+        || file_norm.ends_with(&(base.clone() + ".js"))
+        || file_norm.ends_with(&(base.clone() + ".ts"))
+        || file_norm.ends_with(&(base.clone() + ".tsx"))
+        || file_norm.ends_with(&(base.clone() + "/index.js"))
+        || file_norm.ends_with(&(base.clone() + "/index.ts"))
+        || file_norm.ends_with(&(base.clone() + "/index.tsx"))
+        || file_norm.ends_with(&(base + "/mod.rs"))
 }
 
 fn normalize_qualifier_with_imports(q: &str, imports: &std::collections::HashMap<String, String>, from_mod: &str) -> Option<String> {
@@ -171,8 +188,13 @@ pub fn module_path_for_file(file: &str) -> String {
         let dir = p.parent().unwrap_or_else(|| std::path::Path::new(""));
         return dir.to_string_lossy().replace('/', "::");
     }
-    if s.ends_with(".rs") {
-        return s.trim_end_matches(".rs").replace('/', "::");
+    if s.ends_with("/index.js") || s.ends_with("/index.ts") || s.ends_with("/index.tsx") {
+        let dir = p.parent().unwrap_or_else(|| std::path::Path::new(""));
+        return dir.to_string_lossy().replace('/', "::");
+    }
+    if s.ends_with(".rs") || s.ends_with(".rb") || s.ends_with(".js") || s.ends_with(".ts") || s.ends_with(".tsx") {
+        let no_ext = s.trim_end_matches(".rs").trim_end_matches(".rb").trim_end_matches(".js").trim_end_matches(".ts").trim_end_matches(".tsx");
+        return no_ext.replace('/', "::");
     }
     s.replace('/', "::")
 }
@@ -269,7 +291,7 @@ fn foo() { bar(); }
         fs::write(&f, code).unwrap();
         let cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(td.path()).unwrap();
-        let (index, refs) = build_project_graph(crate::languages::Engine::Regex).unwrap();
+        let (index, refs) = build_project_graph().unwrap();
         let bar = index.symbols.iter().find(|s| s.name == "bar").unwrap().clone();
         let out = compute_impact(&[bar], &index, &refs, &ImpactOptions::default());
         std::env::set_current_dir(cwd).unwrap();

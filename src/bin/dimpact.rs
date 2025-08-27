@@ -2,7 +2,6 @@ use clap::{Parser, ValueEnum};
 use dimpact::{parse_unified_diff, DiffParseError};
 use dimpact::{compute_changed_symbols, ChangedOutput, LanguageMode};
 use dimpact::{build_project_graph, compute_impact, ImpactDirection, ImpactOptions, ImpactOutput};
-use dimpact::Engine;
 use is_terminal::IsTerminal;
 use std::io::{self, Read};
 
@@ -20,13 +19,11 @@ enum Mode {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-enum LangOpt { Auto, Rust }
+enum LangOpt { Auto, Rust, Ruby, Javascript, Typescript, Tsx }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum DirectionOpt { Callers, Callees, Both }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum EngineOpt { Regex, Ts }
 
 #[derive(Debug, Parser)]
 #[command(name = "dimpact", version, about = "Analyze git diff and serialize changes")] 
@@ -39,7 +36,7 @@ struct Args {
     #[arg(long = "mode", value_enum, default_value_t = Mode::Diff)]
     mode: Mode,
 
-    /// Language mode for symbol extraction (when mode=changed)
+    /// Language mode for symbol extraction / detection
     #[arg(long = "lang", value_enum, default_value_t = LangOpt::Auto)]
     lang: LangOpt,
 
@@ -55,13 +52,7 @@ struct Args {
     #[arg(long = "with-edges", default_value_t = false)]
     with_edges: bool,
 
-    /// Analysis engine: regex or ts (Tree-sitter). Default: ts (falls back to regex if ts feature is not built).
-    #[arg(long = "engine", value_enum, default_value_t = EngineOpt::Ts)]
-    engine: EngineOpt,
-
-    /// Run A/B comparison between regex and ts engines (mode=changed only)
-    #[arg(long = "ab-compare", default_value_t = false)]
-    ab_compare: bool,
+    // TS fixed; engine selection and A/B compare removed
 }
 
 fn main() -> anyhow::Result<()> {
@@ -91,30 +82,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Mode::Changed => {
-            if args.ab_compare {
-                #[cfg(feature = "ts")]
-                {
-                    let lang = match args.lang { LangOpt::Auto => LanguageMode::Auto, LangOpt::Rust => LanguageMode::Rust };
-                    let regex_report: ChangedOutput = compute_changed_symbols(&files, lang, Engine::Regex)?;
-                    let ts_report: ChangedOutput = compute_changed_symbols(&files, lang, Engine::Ts)?;
-                    let report = build_ab_report(&regex_report, &ts_report);
-                    match args.format {
-                        OutputFormat::Json => { println!("{}", serde_json::to_string_pretty(&report)?); }
-                        OutputFormat::Yaml => { print!("{}", serde_yaml::to_string(&report)?); }
-                    }
-                    return Ok(());
-                }
-                #[cfg(not(feature = "ts"))]
-                {
-                    anyhow::bail!("--ab-compare requires building with 'ts' feature")
-                }
-            }
-            let lang = match args.lang { LangOpt::Auto => LanguageMode::Auto, LangOpt::Rust => LanguageMode::Rust };
-            let engine = match args.engine { EngineOpt::Regex => Engine::Regex, EngineOpt::Ts => Engine::Ts };
-            if matches!(args.engine, EngineOpt::Ts) && !cfg!(feature = "ts") {
-                eprintln!("warning: --engine ts requested but binary built without 'ts' feature; falling back to regex engine");
-            }
-            let report: ChangedOutput = compute_changed_symbols(&files, lang, engine)?;
+            let lang = match args.lang {
+                LangOpt::Auto => LanguageMode::Auto,
+                LangOpt::Rust => LanguageMode::Rust,
+                LangOpt::Ruby => LanguageMode::Ruby,
+                LangOpt::Javascript => LanguageMode::Javascript,
+                LangOpt::Typescript => LanguageMode::Typescript,
+                LangOpt::Tsx => LanguageMode::Tsx,
+            };
+            let report: ChangedOutput = compute_changed_symbols(&files, lang)?;
             match args.format {
                 OutputFormat::Json => {
                     let out = serde_json::to_string_pretty(&report)?;
@@ -127,43 +103,16 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Mode::Impact => {
-            if args.ab_compare {
-                #[cfg(feature = "ts")]
-                {
-                    let lang = match args.lang { LangOpt::Auto => LanguageMode::Auto, LangOpt::Rust => LanguageMode::Rust };
-                    // compute changed with both engines
-                    let changed_regex: ChangedOutput = compute_changed_symbols(&files, lang, Engine::Regex)?;
-                    let changed_ts: ChangedOutput = compute_changed_symbols(&files, lang, Engine::Ts)?;
-                    // build graphs and impact
-                    let (index_r, refs_r) = build_project_graph(Engine::Regex)?;
-                    let (index_t, refs_t) = build_project_graph(Engine::Ts)?;
-                    let direction = match args.direction {
-                        DirectionOpt::Callers => ImpactDirection::Callers,
-                        DirectionOpt::Callees => ImpactDirection::Callees,
-                        DirectionOpt::Both => ImpactDirection::Both,
-                    };
-                    let opts = ImpactOptions { direction, max_depth: args.max_depth.or(Some(100)), with_edges: Some(args.with_edges) };
-                    let impact_r: ImpactOutput = compute_impact(&changed_regex.changed_symbols, &index_r, &refs_r, &opts);
-                    let impact_t: ImpactOutput = compute_impact(&changed_ts.changed_symbols, &index_t, &refs_t, &opts);
-                    let report = build_ab_impact_report(&impact_r, &impact_t);
-                    match args.format {
-                        OutputFormat::Json => { println!("{}", serde_json::to_string_pretty(&report)?); }
-                        OutputFormat::Yaml => { print!("{}", serde_yaml::to_string(&report)?); }
-                    }
-                    return Ok(());
-                }
-                #[cfg(not(feature = "ts"))]
-                {
-                    anyhow::bail!("--ab-compare requires building with 'ts' feature")
-                }
-            }
-            let lang = match args.lang { LangOpt::Auto => LanguageMode::Auto, LangOpt::Rust => LanguageMode::Rust };
-            let engine = match args.engine { EngineOpt::Regex => Engine::Regex, EngineOpt::Ts => Engine::Ts };
-            if matches!(args.engine, EngineOpt::Ts) && !cfg!(feature = "ts") {
-                eprintln!("warning: --engine ts requested but binary built without 'ts' feature; falling back to regex engine");
-            }
-            let changed: ChangedOutput = compute_changed_symbols(&files, lang, engine)?;
-            let (index, refs) = build_project_graph(engine)?;
+            let lang = match args.lang {
+                LangOpt::Auto => LanguageMode::Auto,
+                LangOpt::Rust => LanguageMode::Rust,
+                LangOpt::Ruby => LanguageMode::Ruby,
+                LangOpt::Javascript => LanguageMode::Javascript,
+                LangOpt::Typescript => LanguageMode::Typescript,
+                LangOpt::Tsx => LanguageMode::Tsx,
+            };
+            let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
+            let (index, refs) = build_project_graph()?;
             let direction = match args.direction {
                 DirectionOpt::Callers => ImpactDirection::Callers,
                 DirectionOpt::Callees => ImpactDirection::Callees,
@@ -187,43 +136,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(serde::Serialize)]
-struct AbCompareReport<'a> {
-    regex: &'a ChangedOutput,
-    ts: &'a ChangedOutput,
-    only_in_regex: Vec<String>,
-    only_in_ts: Vec<String>,
-    intersection: usize,
-}
-
-fn build_ab_report<'a>(regex: &'a ChangedOutput, ts: &'a ChangedOutput) -> AbCompareReport<'a> {
-    use std::collections::HashSet;
-    let set_r: HashSet<&str> = regex.changed_symbols.iter().map(|s| s.id.0.as_str()).collect();
-    let set_t: HashSet<&str> = ts.changed_symbols.iter().map(|s| s.id.0.as_str()).collect();
-    let only_r: Vec<String> = set_r.difference(&set_t).map(|s| s.to_string()).collect();
-    let only_t: Vec<String> = set_t.difference(&set_r).map(|s| s.to_string()).collect();
-    let inter = set_r.intersection(&set_t).count();
-    AbCompareReport { regex, ts, only_in_regex: only_r, only_in_ts: only_t, intersection: inter }
-}
-
-#[derive(serde::Serialize)]
-struct AbCompareImpactReport<'a> {
-    regex: &'a ImpactOutput,
-    ts: &'a ImpactOutput,
-    only_in_regex_symbols: Vec<String>,
-    only_in_ts_symbols: Vec<String>,
-    intersection_symbols: usize,
-}
-
-fn build_ab_impact_report<'a>(regex: &'a ImpactOutput, ts: &'a ImpactOutput) -> AbCompareImpactReport<'a> {
-    use std::collections::HashSet;
-    let set_r: HashSet<&str> = regex.impacted_symbols.iter().map(|s| s.id.0.as_str()).collect();
-    let set_t: HashSet<&str> = ts.impacted_symbols.iter().map(|s| s.id.0.as_str()).collect();
-    let only_r: Vec<String> = set_r.difference(&set_t).map(|s| s.to_string()).collect();
-    let only_t: Vec<String> = set_t.difference(&set_r).map(|s| s.to_string()).collect();
-    let inter = set_r.intersection(&set_t).count();
-    AbCompareImpactReport { regex, ts, only_in_regex_symbols: only_r, only_in_ts_symbols: only_t, intersection_symbols: inter }
-}
+// A/B compare helpers removed in TS-only mode
 
 fn read_diff_from_stdin() -> anyhow::Result<String> {
     if std::io::stdin().is_terminal() {

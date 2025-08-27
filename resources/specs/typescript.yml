@@ -1,0 +1,25 @@
+language: typescript
+queries:
+  declarations: |
+    ; function declarations
+    (function_declaration name: (identifier) @name) @decl
+    ; class declarations
+    (class_declaration name: (type_identifier) @name) @decl
+    ; class methods
+    (method_definition name: (property_identifier) @name) @decl
+    ; interface method signatures (no body but useful for symbol set)
+    (method_signature name: (property_identifier) @name) @decl
+  calls: |
+    ; simple calls: foo()
+    (call_expression function: (identifier) @name) @call
+    ; member calls: obj.foo()
+    (call_expression function: (member_expression property: (property_identifier) @name)) @call
+  imports: |
+    ; import from 'mod'
+    (import_statement (string) @mod)
+    ; require('mod') commonjs in TS may exist with allowJs
+    (call_expression function: (identifier) @name arguments: (arguments (string) @mod)) @use
+  control: |
+    (if_statement) @ctrl
+    (for_statement) @ctrl
+    (while_statement) @ctrl

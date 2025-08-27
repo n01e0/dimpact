@@ -13,8 +13,11 @@ thiserror = "1.0"
 anyhow = "1.0"
 regex = "1.10"
 walkdir = "2.5"
-tree-sitter = { version = "0.22", optional = true }
-tree-sitter-rust = { version = "0.21", optional = true }
+tree-sitter = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
@@ -22,7 +25,3 @@ assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3.10"
 serial_test = "3.0"
-
-[features]
-default = ["ts"]
-ts = ["dep:tree-sitter", "dep:tree-sitter-rust"]

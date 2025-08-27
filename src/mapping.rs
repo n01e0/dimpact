@@ -1,6 +1,6 @@
 use crate::diff::{ChangeKind, FileChanges};
 use crate::ir::{Symbol, TextRange};
-use crate::languages::{LanguageAnalyzer, Engine, rust_analyzer};
+use crate::languages::{LanguageAnalyzer, analyzer_for_path, LanguageKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -9,6 +9,10 @@ use std::fs;
 pub enum LanguageMode {
     Auto,
     Rust,
+    Ruby,
+    Javascript,
+    Typescript,
+    Tsx,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,7 +24,6 @@ pub struct ChangedOutput {
 pub fn compute_changed_symbols(
     diffs: &[FileChanges],
     lang: LanguageMode,
-    engine: Engine,
 ) -> anyhow::Result<ChangedOutput> {
     let changed_files: Vec<String> = diffs
         .iter()
@@ -43,15 +46,17 @@ pub fn compute_changed_symbols(
         }
     }
 
-    let analyzer: Box<dyn LanguageAnalyzer> = match lang {
-        LanguageMode::Auto | LanguageMode::Rust => rust_analyzer(engine),
-    };
-
     let mut changed_symbols = Vec::new();
     for (path, lines) in changed_lines_by_file.iter() {
-        // Skip non-rust when mode is Rust
-        if let LanguageMode::Rust = lang
-            && !path.ends_with(".rs") { continue; }
+        let kind = match lang {
+            LanguageMode::Auto => LanguageKind::Auto,
+            LanguageMode::Rust => LanguageKind::Rust,
+            LanguageMode::Ruby => LanguageKind::Ruby,
+            LanguageMode::Javascript => LanguageKind::Javascript,
+            LanguageMode::Typescript => LanguageKind::Typescript,
+            LanguageMode::Tsx => LanguageKind::Tsx,
+        };
+        let Some(analyzer) = analyzer_for_path(path, kind) else { continue };
         let Ok(source) = fs::read_to_string(path) else { continue };
         let symbols = analyzer.symbols_in_file(path, &source);
         for s in symbols {
@@ -99,7 +104,7 @@ fn bar() {}
         // Compute with working dir file; change current dir temporarily
         let cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
-        let out = compute_changed_symbols(&parsed, LanguageMode::Rust, crate::languages::Engine::Regex).unwrap();
+        let out = compute_changed_symbols(&parsed, LanguageMode::Rust).unwrap();
         std::env::set_current_dir(cwd).unwrap();
 
         assert!(out.changed_files.iter().any(|p| p.ends_with("main.rs")));

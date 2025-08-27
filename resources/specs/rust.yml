@@ -1,0 +1,24 @@
+language: rust
+queries:
+  declarations: |
+    ; functions
+    (function_item name: (identifier) @name) @decl
+    ; types
+    (struct_item name: (type_identifier) @name) @decl
+    (enum_item name: (type_identifier) @name) @decl
+    (trait_item name: (type_identifier) @name) @decl
+  calls: |
+    ; foo()
+    (call_expression function: (identifier) @name) @call
+    ; a::b::c()
+    (call_expression function: (scoped_identifier) @qname) @call
+    ; x.foo()
+    (call_expression function: (field_expression field: (field_identifier) @method)) @call
+  imports: |
+    (use_declaration) @use
+  control: |
+    (if_expression) @ctrl
+    (match_expression) @ctrl
+    (loop_expression) @ctrl
+    (for_expression) @ctrl
+    (while_expression) @ctrl

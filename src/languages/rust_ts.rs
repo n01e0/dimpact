@@ -1,4 +1,3 @@
-#![cfg(feature = "ts")]
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::ir::reference::{RefKind, UnresolvedRef};
 use std::cell::RefCell;
@@ -10,7 +9,8 @@ pub struct RustTsAnalyzer {
 impl RustTsAnalyzer {
     pub fn new() -> Self {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_rust::language()).expect("load ts-rust");
+        let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
+        parser.set_language(&lang).expect("load ts-rust");
         Self { parser: RefCell::new(parser) }
     }
 }
