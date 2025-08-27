@@ -12,6 +12,8 @@ queries:
   calls: |
     ; simple calls: foo()
     (call_expression function: (identifier) @name) @call
+    ; member calls with qualifier capture when simple identifier
+    (call_expression function: (member_expression object: (identifier) @qual property: (property_identifier) @name)) @call
     ; member calls: obj.foo()
     (call_expression function: (member_expression property: (property_identifier) @name)) @call
   imports: |

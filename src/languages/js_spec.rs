@@ -55,7 +55,8 @@ impl LanguageAnalyzer for SpecJsAnalyzer {
                 // consider member call by checking if any capture kind is member_expression
                 let is_method = caps.iter().any(|c| c.kind == "member_expression");
                 let ln = byte_to_line(&offs, n.start);
-                out.push(UnresolvedRef { name, kind: RefKind::Call, file: path.to_string(), line: ln, qualifier: None, is_method });
+                let qual = caps.iter().find(|c| c.name == "qual").map(|q| std::str::from_utf8(&source.as_bytes()[q.start..q.end]).unwrap_or("").to_string());
+                out.push(UnresolvedRef { name, kind: RefKind::Call, file: path.to_string(), line: ln, qualifier: qual.filter(|s| !s.is_empty()), is_method });
             }
         }
         out
@@ -64,18 +65,46 @@ impl LanguageAnalyzer for SpecJsAnalyzer {
     fn imports_in_file(&self, path: &str, source: &str) -> std::collections::HashMap<String, String> {
         use regex::Regex;
         let mut map = std::collections::HashMap::new();
-        let re_import = Regex::new(r#"(?m)^\s*import[^{]*from\s+['\"]([^'\"]+)['\"]"#).unwrap();
+        let re_from = Regex::new(r#"(?m)^\s*import\s+(.+?)\s+from\s+['\"]([^'\"]+)['\"]"#).unwrap();
         let re_require = Regex::new(r#"(?m)require\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"#).unwrap();
-        for cap in re_import.captures_iter(source) {
-            let raw = cap.get(1).unwrap().as_str();
+        for cap in re_from.captures_iter(source) {
+            let head = cap.get(1).unwrap().as_str().trim();
+            let raw = cap.get(2).unwrap().as_str();
             if let Some(norm) = normalize_es_module_path(path, raw) {
-                map.insert(format!("__glob__{}", norm), norm);
+                // glob prefixes for module and module/index
+                map.insert(format!("__glob__{}", norm.clone()), norm.clone());
+                map.insert(format!("__glob__{}", format!("{}/index", norm)), format!("{}/index", norm));
+                // namespace import: * as A
+                if let Some(ns) = head.strip_prefix("* as ") {
+                    let alias = ns.trim();
+                    map.insert(alias.to_string(), norm.clone());
+                }
+                // default import: A from 'mod'
+                if head.starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '$') && !head.starts_with('{') {
+                    if let Some(first) = head.split(',').next() {
+                        let alias = first.trim();
+                        if !alias.is_empty() { map.insert(alias.to_string(), format!("{}::default", norm)); }
+                    }
+                }
+                // named imports: { a as b, c }
+                if head.starts_with('{') {
+                    let inner = head.trim().trim_start_matches('{').trim_end_matches('}');
+                    for seg in inner.split(',') {
+                        let seg = seg.trim(); if seg.is_empty() { continue; }
+                        if let Some((orig, alias)) = seg.split_once(" as ") {
+                            map.insert(alias.trim().to_string(), format!("{}::{}", norm, orig.trim()));
+                        } else {
+                            map.insert(seg.to_string(), format!("{}::{}", norm, seg));
+                        }
+                    }
+                }
             }
         }
         for cap in re_require.captures_iter(source) {
             let raw = cap.get(1).unwrap().as_str();
             if let Some(norm) = normalize_es_module_path(path, raw) {
-                map.insert(format!("__glob__{}", norm), norm);
+                map.insert(format!("__glob__{}", norm.clone()), norm.clone());
+                map.insert(format!("__glob__{}", format!("{}/index", norm)), format!("{}/index", norm));
             }
         }
         map

@@ -164,6 +164,8 @@ fn file_matches_module_path(file: &str, module_path: &str) -> bool {
 }
 
 fn normalize_qualifier_with_imports(q: &str, imports: &std::collections::HashMap<String, String>, from_mod: &str) -> Option<String> {
+    // Support both Ruby/Rust (::) and JS/TS (.) namespace separators
+    let q = q.replace('.', "::");
     // apply alias on first segment, then expand self/super/crate relative to from_mod
     let mut parts: Vec<&str> = q.split("::").collect();
     if parts.is_empty() { return None; }
@@ -175,7 +177,7 @@ fn normalize_qualifier_with_imports(q: &str, imports: &std::collections::HashMap
         }
         Some(expand_relative_path(from_mod, &new))
     } else {
-        Some(expand_relative_path(from_mod, q))
+        Some(expand_relative_path(from_mod, &q))
     }
 }
 

@@ -10,7 +10,9 @@ queries:
   calls: |
     ; simple calls: foo()
     (call_expression function: (identifier) @name) @call
-    ; member calls: obj.foo()
+    ; member calls: obj.foo() capturing qualifier when simple identifier
+    (call_expression function: (member_expression object: (identifier) @qual property: (property_identifier) @name)) @call
+    ; member calls without simple object capture
     (call_expression function: (member_expression property: (property_identifier) @name)) @call
   imports: |
     ; import from 'mod'
