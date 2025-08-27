@@ -1,5 +1,13 @@
 # LSP ベース解析エンジン設計（動的フォールバック版）
 
+この文書は LSP 連携の設計ノートです。まず現状の実装状況をまとめます。
+
+## 現状ステータス（要約）
+- エンジン選択: Auto は Tree‑Sitter 既定。LSP は Experimental（`--engine lsp`）。
+- LSP 実装: 能力行列とプローブ、可能な限り TS にフォールバック（strict=false）。
+- CLI: サブコマンド化（`diff`/`changed`/`impact`/`id`）。シード起点（`--seed-symbol`/`--seed-json`）、ID 生成（`--path/--line/--name` 任意、`--kind`/`--raw`）。
+- 言語判定: シードがあればシードの `language` を採用（混在はエラー）。
+
 ## 背景と目的
 - 現状は Tree‑Sitter（TS）＋独自ヒューリスティクスで参照解決し、毎回ワークスペース全体の走査が必要。大規模化でコスト/精度の両面が課題。
 - 目的は以下。
@@ -10,7 +18,7 @@
 ## 方針（動的フォールバック）
 - 言語や機能ごとに固定せず、実行時に LSP 能力を検出・プローブして最良経路を選択。利用不可/失敗時は段階的に次善策へフォールバック。
 - 新たに「解析エンジン」抽象を導入し、TS 実装と LSP 実装を差し替え可能にする。
-- CLI に `--engine auto|ts|lsp` を追加。既定は `auto`（可能なら LSP、無理なら自動で TS）。
+- CLI に `--engine auto|ts|lsp` を追加。現在は `auto`=TS 既定、`lsp` は Experimental。
 
 ## 能力検出とプローブ
 - 初期化応答 `initialize` の `serverCapabilities` を CapabilityMatrix に格納。
@@ -30,13 +38,14 @@ src/
       ruby.rs        // ruby-lsp/solargraph 等（機能差は動的判定）
 ```
 
-### Engine トレイト（案）
+### Engine トレイト（実装）
 ```rust
 pub enum EngineKind { Auto, Ts, Lsp }
 
 pub trait AnalysisEngine {
     fn changed_symbols(&self, diffs: &[FileChanges], lang: LanguageMode) -> anyhow::Result<ChangedOutput>;
-    fn impact(&self, changed: &[Symbol], opts: &ImpactOptions) -> anyhow::Result<ImpactOutput>;
+    fn impact(&self, diffs: &[FileChanges], lang: LanguageMode, opts: &ImpactOptions) -> anyhow::Result<ImpactOutput>;
+    fn impact_from_symbols(&self, changed: &[Symbol], lang: LanguageMode, opts: &ImpactOptions) -> anyhow::Result<ImpactOutput>;
 }
 ```
 - TS 実装は既存関数：`compute_changed_symbols` と `build_project_graph`+`compute_impact`。
@@ -53,7 +62,7 @@ pub trait AnalysisEngine {
 2) 階層未対応でも `references`/`definition` が使える場合：
    - callers: 参照点を `documentSymbol` で「包含シンボル」にマップして呼び元ノード集合を作る。
    - callees: 定義/実装点から呼び先候補を集約。
-3) それでも不可なら TS の `build_project_graph`+`compute_impact` にフォールバック。
+3) それでも不可なら TS の `build_project_graph`+`compute_impact` にフォールバック。strict=true ではエラー。
 4) `with_edges` は得られた関係から `Reference` を構築し直す（LSP 階層→エッジ化、参照→逆引きエッジ化）。
 
 ### 多言語の同時処理
@@ -71,11 +80,14 @@ pub trait AnalysisEngine {
 - 非同期ランタイムは初期段階では導入せず、blocking IO + スレッドで十分。
 
 ## TS 実装の位置づけ
-- 既存の `languages/*` と `impact.rs` をそのまま活用。LSP 未対応の言語/機能のフォールバックとして常に利用可能に保つ。
-- CLI `--engine ts` で強制選択できるようにし、再現性を担保。
+- 既存の `languages/*` と `impact.rs`` を活用。LSP 未対応の言語/機能のフォールバックとして常に利用可能。
+- 現在は Auto=TS 既定。`--engine ts` で強制指定も可能。
 
-## CLI/公開API への影響
-- 追加フラグ: `--engine auto|ts|lsp`、`--engine-lsp-strict`、`--engine-dump-capabilities`（診断用）。
+## CLI/公開API の現状
+- サブコマンド: `diff`/`changed`/`impact`/`id`
+- エンジン: `--engine auto|ts|lsp`（auto=TS 既定）, `--engine-lsp-strict`, `--engine-dump-capabilities`
+- シード: `--seed-symbol`, `--seed-json`。シードがあれば言語は自動判定。
+- ID 生成: `id --path/--line/--name [--kind] [--raw]`
 - 出力スキーマは維持。LSP でも `ImpactOutput` を構築し、`with_edges` は得られた関係で埋める。
 
 ## 設定（YAML）
@@ -181,10 +193,73 @@ output:
 - 統合（feature `lsp`）: サーバがある環境でのみ実行。`--engine auto` が能力に応じて正しくフォールバックすることを検証。
 - 互換性: 既存 `tests/*.rs` と同等の出力を `--engine lsp` でも満たす（`--direction`/`--max-depth`/`with_edges`）。
 
-## 段階的ロールアウト
-- Phase 1: Rust/LSP を実装（動的フォールバック含む）。Ruby はサーバ能力が足りない箇所のみ TS に自動移行。
-- Phase 2: セッション再利用（簡易デーモン）、メトリクス収集、`auto` を既定に昇格。
-- Phase 3: Ruby/その他言語の機能差吸収と精度改善。
+## 段階的ロールアウト（更新）
+- Phase 1: LSP 実装＋TS フォールバック（完了）。Auto は TS 既定、LSP は Experimental。
+- Phase 2: セッション再利用（簡易デーモン）、メトリクス収集、LSP 精度とカバレッジ改善。
+- Phase 3: 各言語の機能差吸収、Hybrid（TS 変更抽出＋LSP 影響伝播）の強化。
+
+## 今後の設計: ハイブリッド/キャッシュ/レポート
+
+### 1) 真のハイブリッド化（TS 変更抽出 + LSP 影響伝播）
+- 目的: TS の堅牢な変更抽出に LSP の参照解決を組み合わせ、精度の高い影響伝播を実現（Experimental を前提）。
+- アーキテクチャ:
+  - 新エンジン `HybridEngine`（内部で TS と LSP を組み合わせ）を追加。`--engine hybrid` で選択（将来 `auto` 切替の候補）。
+  - フロー: `compute_changed_symbols(TS)` → 変更シンボル → `impact_from_symbols(LSP)` → 不可なら `impact_from_symbols(TS)` にフォールバック。
+  - LSP の戦略優先度（Callers/Callees 共通）:
+    1. callHierarchy BFS（incoming/outgoing）
+    2. references/definition → enclosing symbol 合成
+    3. それでも不足なら TS Graph に落とす（strict=true ではエラー）
+- 仕様:
+  - CLI: `--engine hybrid`（既定は変更せず `auto=ts` 維持）。`--engine-lsp-strict` は Hybrid の LSP 部に適用。
+  - ロギング: 変更抽出/影響戦略/フォールバック決定を `info`/`debug` で明示（capabilities, 戦略名, ノード/エッジ件数）。
+  - テスト: LSP モックで callHierarchy/refs あり/なしの両系統、strict の成否、TS フォールバックの妥当性を検証。
+
+### 2) インクリメンタルキャッシュ（Graph のディスク保存）
+- 目的: プロジェクト全体の参照グラフ構築コストを削減。差分のみ再計算。
+- データモデル（v1 提案）:
+  - `SymbolIndex`: `SymbolId -> Symbol{file, kind, range, language}`
+  - `RefGraph`: 有向エッジ集合 `Reference{from: SymbolId, to: SymbolId, kind}`
+  - `FileMap`: `file -> { mtime, hash, symbols:[SymbolId] }`
+  - `Meta`: `{ tool_version, schema: v1, language, engine_kind, opts_hash }`
+- 格納/配置:
+  - 既定パス: `target/.dimpact-cache/v1/{language}-{engine}.bin`（bincode or msgpack）。オプションで JSON。
+  - 1 言語あたり 1 キャッシュ。Mixed 言語は別ファイル。
+- 無効化ポリシー:
+  - `mtime` or `sha1(file)` が一致するファイルは再解析スキップ。差分ファイルのみ symbols/edges を再構築。
+  - `tool_version`/`schema` 変更時は全無効化。`opts_hash`（direction など結果に影響する構成）も含める。
+- API/CLI:
+  - `build_project_graph()` を `GraphProvider` trait に抽象化し、`CachedGraphProvider` 実装を追加。
+  - フラグ: `--cache {on|off|rebuild}`、`--cache-dir <path>`、`--cache-format {bin|json}`。
+  - `impact` はキャッシュを透過的に利用（LSP/TS いずれも Graph に落とす経路あり）。
+- 並列化/安全性:
+  - ファイル単位で並列パース（Rayon 等）。ロックはファイル粒度（temp 書き換え → 原子的 rename）。
+  - 未信頼リポでは JSON のみ保存、パスの正規化を徹底。
+
+### 3) レポート/可視化（DOT/HTML）
+- 目的: 影響結果の可視化と共有を容易にし、採用・レビュー体験を高める。
+- DOT 出力:
+  - CLI: `-f dot`（`ImpactOutput` を Graphviz DOT に直列化）。`with_edges` が false の場合はノードのみ。
+  - オプション: `--dot-label '{name|id|file}'`、`--dot-direction {callers|callees|both}`（色分け）。
+  - CI 例: `... | dot -Tpng > impact.png` をアーティファクト化。
+- HTML 出力:
+  - CLI: `-f html`（単一 HTML に埋め込み）。`<script>` 内に JSON を埋め、Cytoscape.js or D3.js で描画。
+  - 追加: 右ペインにノード詳細（ファイル/行/参照元）を表示、フィルタ UI（depth, kind, file）。
+  - オプション: `--html-standalone`（外部依存なし）、`--html-title`。
+- 実装:
+  - 変換層 `render::{to_dot, to_html}` を追加。`ImpactOutput` を入力とし、出力文字列を返す純関数。
+  - テスト: スナップショット（DOT/HTML の構造）＋最小インタラクションの E2E。
+
+## 影響範囲と互換性
+- 既存 API（`ImpactOutput`）は維持。新機能はエンジンや出力層の追加に留める。
+- 互換性注意点:
+  - Hybrid の導入は `--engine hybrid` で opt-in（`auto=ts` を維持）。
+  - キャッシュは既定 off から開始し、パフォーマンス実績が確認でき次第 on に昇格を検討。
+  - DOT/HTML は `-f json|yaml` を侵さず並列で提供。
+
+## マイルストーン（提案）
+- M1: DOT 出力（1 週間）→ HTML（+1 週間）
+- M2: Incremental Cache（2–3 週間、並列化含む）
+- M3: HybridEngine（2 週間、LSP 戦略の整備＋フォールバックの整理）
 
 ## オープンクエスチョン
 - サーバ差異（特に Ruby 系）をどこまで抽象化するか。

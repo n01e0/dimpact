@@ -1,0 +1,27 @@
+use crate::{
+    compute_changed_symbols, build_project_graph, compute_impact,
+    ChangedOutput, FileChanges, LanguageMode,
+    ImpactOptions, ImpactOutput,
+};
+
+#[derive(Default)]
+pub struct TsEngine;
+
+impl super::AnalysisEngine for TsEngine {
+    fn changed_symbols(&self, diffs: &[FileChanges], lang: LanguageMode) -> anyhow::Result<ChangedOutput> {
+        compute_changed_symbols(diffs, lang)
+    }
+
+    fn impact(&self, diffs: &[FileChanges], lang: LanguageMode, opts: &ImpactOptions) -> anyhow::Result<ImpactOutput> {
+        let changed: ChangedOutput = compute_changed_symbols(diffs, lang)?;
+        let (index, refs) = build_project_graph()?;
+        let out = compute_impact(&changed.changed_symbols, &index, &refs, opts);
+        Ok(out)
+    }
+
+    fn impact_from_symbols(&self, changed: &[crate::ir::Symbol], _lang: LanguageMode, opts: &ImpactOptions) -> anyhow::Result<ImpactOutput> {
+        let (index, refs) = build_project_graph()?;
+        let out = compute_impact(changed, &index, &refs, opts);
+        Ok(out)
+    }
+}
