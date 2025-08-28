@@ -7,6 +7,7 @@
 - LSP 実装: 能力行列とプローブ、可能な限り TS にフォールバック（strict=false）。
 - CLI: サブコマンド化（`diff`/`changed`/`impact`/`id`）。シード起点（`--seed-symbol`/`--seed-json`）、ID 生成（`--path/--line/--name` 任意、`--kind`/`--raw`）。
 - 言語判定: シードがあればシードの `language` を採用（混在はエラー）。
+ - インクリメンタルキャッシュ（M1）: SQLite にシンボル/エッジを保存。`cache build/stats/clear` 実装。TS エンジンは既定でキャッシュを使用し、初回は全量ビルド、以降は変更ファイルのみ更新。
 
 ## 背景と目的
 - 現状は Tree‑Sitter（TS）＋独自ヒューリスティクスで参照解決し、毎回ワークスペース全体の走査が必要。大規模化でコスト/精度の両面が課題。
@@ -35,6 +36,7 @@ src/
     lsp/
       mod.rs         // LspSession, CapabilityMatrix, JSON-RPC
       rust.rs        // rust-analyzer 連携（DocumentSymbol/CallHierarchy/References）
+  cache.rs           // SQLite キャッシュ: パス解決, DDL, build/update/load
       ruby.rs        // ruby-lsp/solargraph 等（機能差は動的判定）
 ```
 
@@ -48,7 +50,7 @@ pub trait AnalysisEngine {
     fn impact_from_symbols(&self, changed: &[Symbol], lang: LanguageMode, opts: &ImpactOptions) -> anyhow::Result<ImpactOutput>;
 }
 ```
-- TS 実装は既存関数：`compute_changed_symbols` と `build_project_graph`+`compute_impact`。
+- TS 実装はキャッシュ統合：初回 `cache::build_all`、以降 `cache::update_paths` → `cache::load_graph` → `compute_impact`。
 - LSP 実装はオンデマンド問い合わせで解決（全量グラフを常に構築しない）。
 
 ## アルゴリズム（動的チェーン）
@@ -194,9 +196,9 @@ output:
 - 互換性: 既存 `tests/*.rs` と同等の出力を `--engine lsp` でも満たす（`--direction`/`--max-depth`/`with_edges`）。
 
 ## 段階的ロールアウト（更新）
-- Phase 1: LSP 実装＋TS フォールバック（完了）。Auto は TS 既定、LSP は Experimental。
-- Phase 2: セッション再利用（簡易デーモン）、メトリクス収集、LSP 精度とカバレッジ改善。
-- Phase 3: 各言語の機能差吸収、Hybrid（TS 変更抽出＋LSP 影響伝播）の強化。
+- Phase 1 (完了): TS 既定 + LSP Experimental。キャッシュM1（SQLite, ファイル単位の増分更新, `cache` サブコマンド）。
+- Phase 2: キャッシュM2（シンボルIDのファジーマッチ/付替え、`verify --repair`、Git優先検知）と LSP 精度の改善。
+- Phase 3: `--watch`、Hybrid強化（TS変更＋LSP伝播）、サイズ管理/GC強化、常駐化。
 
 ## 今後の設計: ハイブリッド/キャッシュ/レポート
 

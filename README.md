@@ -34,6 +34,7 @@ CLI Overview
   - `changed`: compute changed symbols from stdin diff
   - `impact`: compute impact from stdin diff or seeds
   - `id`: generate Symbol IDs from file/line/name
+  - `cache`: build/stats/clear the incremental cache
 - Seeds:
   - `--seed-symbol LANG:PATH:KIND:NAME:LINE` (repeatable)
   - `--seed-json <json|string|path|->` accepts array of strings or objects
@@ -73,3 +74,14 @@ Usage Examples
 
 License
 - See repository license if present; otherwise contact maintainers.
+Cache
+- Purpose: persist symbols and reference edges to speed up impact analysis.
+- Storage: single SQLite DB `index.db` stored in either location:
+  - Local (default): `<repo_root>/.dimpact/cache/v1/index.db`
+  - Global: `$XDG_CONFIG_HOME/dimpact/cache/v1/<repo_key>/index.db`
+- Control via subcommands:
+  - Build: `dimpact cache build --scope local|global [--dir PATH]`
+  - Stats: `dimpact cache stats --scope local|global [--dir PATH]`
+  - Clear: `dimpact cache clear --scope local|global [--dir PATH]`
+- Impact integration: the TS engine uses the cache by default. On first use it builds the cache; on subsequent runs it updates only changed files.
+- Env overrides: `DIMPACT_CACHE_SCOPE=local|global`, `DIMPACT_CACHE_DIR=/custom/dir`.

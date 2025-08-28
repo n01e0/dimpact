@@ -65,7 +65,7 @@ pub fn build_project_graph() -> anyhow::Result<(SymbolIndex, Vec<Reference>)> {
     Ok((index, refs))
 }
 
-fn resolve_references(
+pub(crate) fn resolve_references(
     index: &SymbolIndex,
     urefs: &[UnresolvedRef],
     file_imports: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,

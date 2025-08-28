@@ -20,6 +20,8 @@ tree-sitter-javascript = "0.23"
 tree-sitter-typescript = "0.23"
 log = "0.4.27"
 env_logger = "0.11.8"
+rusqlite = { version = "0.31", features = ["bundled"] }
+blake3 = "1.5"
 
 [dev-dependencies]
 pretty_assertions = "1.4"

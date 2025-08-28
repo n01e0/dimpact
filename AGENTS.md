@@ -4,7 +4,7 @@
 
 ## Project Structure & Module Organization
 - `src/`: コア実装
-  - `bin/dimpact.rs`: CLI エントリーポイント（subcommands: diff/changed/impact/id）
+  - `bin/dimpact.rs`: CLI エントリーポイント（subcommands: diff/changed/impact/id/cache）
   - `diff.rs`: 統一 diff パーサ
   - `mapping.rs`: 変更行→シンボル対応づけ
   - `impact.rs`: 参照グラフ構築と影響分析
@@ -13,6 +13,7 @@
   - `engine.rs`: エンジン選択（Auto/Ts/Lsp）
   - `engine/ts.rs`: Tree‑Sitter エンジン
   - `engine/lsp.rs`: LSP エンジン（Experimental）
+  - `cache.rs`: SQLite キャッシュ（シンボル/エッジ永続化、パス解決）
 - `resources/specs/*.yml`: tree‑sitter クエリ定義
 - `tests/`: 統合テスト（CLI を実行して検証）
 - `scripts/`: 補助スクリプト（`scripts/dimpact-e2e.sh` など）
@@ -26,6 +27,7 @@
 - 影響解析（diff）: `git diff --no-ext-diff | cargo run --quiet --bin dimpact -- impact --direction callers --max-depth 2 --with-edges`
 - 影響解析（シード）: `cargo run --quiet --bin dimpact -- impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers`
 - ID 生成: `cargo run --quiet --bin dimpact -- id --path src/lib.rs --line 12 --name foo --kind fn --raw`
+ - キャッシュ: `cargo run --quiet --bin dimpact -- cache build --scope local` / `cache stats` / `cache clear`
 
 ## Coding Style & Naming Conventions
 - Rust 2024 edition。`cargo fmt` に従う 4 スペースインデント推奨。
@@ -56,3 +58,6 @@
   - シードがあれば言語は自動判定（混在はエラー）
 - ID 生成: `--path/--line/--name` はいずれも任意。`--kind fn|method|struct|enum|trait|mod` で絞り込み。`--raw` で ID を複数行出力。
 - Engine: `--engine auto|ts|lsp`（Auto=TS 既定、LSP=Experimental）。`--engine-lsp-strict`、`--engine-dump-capabilities`（診断）
+ - Cache: `dimpact cache <build|stats|clear> [--scope local|global] [--dir PATH]`
+   - 既定: Local（リポジトリルート配下 `.dimpact/cache/v1`）。Global は `$XDG_CONFIG_HOME/dimpact/cache/v1/<repo_key>`。
+   - 環境変数: `DIMPACT_CACHE_SCOPE=local|global`, `DIMPACT_CACHE_DIR=/custom/dir`。

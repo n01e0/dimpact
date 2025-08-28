@@ -6,6 +6,7 @@ pub mod ts_core;
 pub mod impact;
 pub mod engine;
 pub mod render;
+pub mod cache;
 
 pub use diff::{parse_unified_diff, Change, ChangeKind, DiffParseError, FileChanges};
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};

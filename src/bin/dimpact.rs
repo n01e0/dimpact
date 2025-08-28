@@ -43,6 +43,9 @@ enum KindOpt {
     #[value(alias = "module")] Mod,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CacheScopeOpt { Local, Global }
+
 
 #[derive(Debug, Parser)]
 #[command(name = "dimpact", version, about = "Analyze git diff and serialize changes")] 
@@ -145,6 +148,34 @@ enum Command {
         /// If exactly one candidate, print plain ID
         #[arg(long = "raw", default_value_t = false)] raw: bool,
     },
+    /// Manage incremental analysis cache
+    Cache{
+        #[command(subcommand)] cmd: CacheCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CacheCmd {
+    /// Build or rebuild cache for workspace
+    Build{
+        /// Cache scope: local (repo) or global (XDG_CONFIG_HOME)
+        #[arg(long = "scope", value_enum, default_value_t = CacheScopeOpt::Local)]
+        scope: CacheScopeOpt,
+        /// Override cache directory (takes precedence over scope)
+        #[arg(long = "dir")] dir: Option<String>,
+    },
+    /// Show cache stats (files/symbols/edges)
+    Stats{
+        #[arg(long = "scope", value_enum, default_value_t = CacheScopeOpt::Local)]
+        scope: CacheScopeOpt,
+        #[arg(long = "dir")] dir: Option<String>,
+    },
+    /// Clear cache (delete DB file)
+    Clear{
+        #[arg(long = "scope", value_enum, default_value_t = CacheScopeOpt::Local)]
+        scope: CacheScopeOpt,
+        #[arg(long = "dir")] dir: Option<String>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -165,6 +196,7 @@ fn main() -> anyhow::Result<()> {
                 run_impact(args.format, lang, direction, max_depth, with_edges, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json)
             }
             Command::Id{ path, line, name, lang, kind, raw } => run_id(args.format, path.as_deref(), line, name.as_deref(), lang, kind, raw),
+            Command::Cache{ cmd } => run_cache(cmd),
         }?;
         return Ok(());
     }
@@ -181,6 +213,33 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn run_cache(cmd: CacheCmd) -> anyhow::Result<()> {
+    match cmd {
+        CacheCmd::Build{ scope, dir } => {
+            let scope = match scope { CacheScopeOpt::Local => dimpact::cache::CacheScope::Local, CacheScopeOpt::Global => dimpact::cache::CacheScope::Global };
+            let path_override = dir.as_deref().map(std::path::Path::new);
+            let mut db = dimpact::cache::open(scope, path_override)?;
+            let st = dimpact::cache::build_all(&mut db.conn)?;
+            eprintln!("cache build: files={} symbols={} edges={}", st.files, st.symbols, st.edges);
+        }
+        CacheCmd::Stats{ scope, dir } => {
+            let scope = match scope { CacheScopeOpt::Local => dimpact::cache::CacheScope::Local, CacheScopeOpt::Global => dimpact::cache::CacheScope::Global };
+            let path_override = dir.as_deref().map(std::path::Path::new);
+            let db = dimpact::cache::open(scope, path_override)?;
+            let st = dimpact::cache::stats(&db.conn)?;
+            println!("{{\"files\":{},\"symbols\":{},\"edges\":{}}}", st.files, st.symbols, st.edges);
+        }
+        CacheCmd::Clear{ scope, dir } => {
+            let scope = match scope { CacheScopeOpt::Local => dimpact::cache::CacheScope::Local, CacheScopeOpt::Global => dimpact::cache::CacheScope::Global };
+            let path_override = dir.as_deref().map(std::path::Path::new);
+            let paths = dimpact::cache::resolve_paths(scope, path_override, None)?;
+            dimpact::cache::clear(&paths)?;
+            eprintln!("cache cleared: {}", paths.db.display());
+        }
+    }
     Ok(())
 }
 
