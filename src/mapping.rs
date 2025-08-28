@@ -35,11 +35,15 @@ pub fn compute_changed_symbols(
         if let Some(path) = &fc.new_path {
             let set = changed_lines_by_file.entry(path.clone()).or_default();
             for ch in &fc.changes {
-                if let Some(nl) = ch.new_line {
-                    // count both Added and Context lines; Context lines can help expand range near removals
-                    // but primarily Added lines carry the change signal
-                    if matches!(ch.kind, ChangeKind::Added) || matches!(ch.kind, ChangeKind::Context) {
+                // count Added, Removed, and Context lines as changes
+                if matches!(ch.kind, ChangeKind::Added)
+                   || matches!(ch.kind, ChangeKind::Removed)
+                   || matches!(ch.kind, ChangeKind::Context) {
+                    // use new_line when available, else old_line for removals
+                    if let Some(nl) = ch.new_line {
                         set.insert(nl);
+                    } else if let Some(ol) = ch.old_line {
+                        set.insert(ol);
                     }
                 }
             }

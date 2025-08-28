@@ -3,7 +3,7 @@ use rusqlite::{params, Connection, Transaction};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::ir::reference::{Reference, SymbolIndex};
+use crate::ir::reference::{Reference, SymbolIndex, UnresolvedRef};
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::languages::{analyzer_for_path, LanguageKind};
 
@@ -149,8 +149,11 @@ pub fn clear(paths: &CachePaths) -> anyhow::Result<()> {
 }
 
 pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
-    // Rebuild from scratch using existing project graph builder
-    let (index, refs) = crate::impact::build_project_graph()?;
+    // Rebuild from scratch using parallel analysis
+    let files = list_workspace_files();
+    let (symbols, urefs, file_imports) = analyze_paths_parallel(&files);
+    let index = SymbolIndex::build(symbols);
+    let refs = crate::impact::resolve_references(&index, &urefs, &file_imports);
     let mut tx = conn.transaction()?;
     tx.execute("DELETE FROM symbols", [])?;
     tx.execute("DELETE FROM edges", [])?;
@@ -173,10 +176,10 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
     // Insert symbols
     {
         let mut sym_stmt = tx.prepare("INSERT INTO symbols(sid, file_id, name, kind, start_line, end_line, language, sig_hash, parent_sid) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
-        for s in &index.symbols {
-            let file_id = *file_ids.get(&s.file).unwrap();
-            sym_stmt.execute(params![&s.id.0, file_id, &s.name, kind_to_str(&s.kind), s.range.start_line as i64, s.range.end_line as i64, &s.language, sig_hash_for(s), Option::<String>::None])?;
-        }
+    for s in &index.symbols {
+        let file_id = *file_ids.get(&s.file).unwrap();
+        sym_stmt.execute(params![&s.id.0, file_id, &s.name, kind_to_str(&s.kind), s.range.start_line as i64, s.range.end_line as i64, &s.language, sig_hash_for(s), Option::<String>::None])?;
+    }
     }
 
     // Insert edges
@@ -185,10 +188,10 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
         for e in &refs {
             // file_id derived from e.file
             let file_id = *file_ids.entry(e.file.clone()).or_insert_with(|| {
-            tx.execute(
-                "INSERT INTO files(path, lang, digest, mtime, present) VALUES(?1, ?2, ?3, ?4, 1)",
-                params![&e.file, guess_lang_from_ext(&e.file), file_digest(&e.file), file_mtime(&e.file)],
-            ).unwrap();
+                tx.execute(
+                    "INSERT INTO files(path, lang, digest, mtime, present) VALUES(?1, ?2, ?3, ?4, 1)",
+                    params![&e.file, guess_lang_from_ext(&e.file), file_digest(&e.file), file_mtime(&e.file)],
+                ).unwrap();
                 tx.last_insert_rowid()
             });
             edge_stmt.execute(params![&e.from.0, &e.to.0, "call", file_id, e.line as i64])?;
@@ -201,68 +204,128 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
 
 pub fn update_paths(conn: &mut Connection, paths: &[String]) -> anyhow::Result<CacheStats> {
     if paths.is_empty() { return stats(conn); }
-    // First pass: parse changed files and write their symbols
-    for p in paths {
-        update_file_symbols(conn, p)?;
+    // Analyze changed files in parallel
+    let (symbols_by_file, urefs_by_file, imports_by_file) = analyze_specific_paths_parallel(paths);
+
+    // Write symbols in a single transaction
+    {
+        let tx = conn.transaction()?;
+        for p in paths {
+            let exists = fs::metadata(p).map(|m| m.is_file()).unwrap_or(false);
+            let lang = guess_lang_from_ext(p).to_string();
+            tx.execute(
+                "INSERT INTO files(path, lang, digest, mtime, present) VALUES(?1, ?2, ?3, ?4, ?5)\n                 ON CONFLICT(path) DO UPDATE SET lang=excluded.lang, digest=excluded.digest, mtime=excluded.mtime, present=excluded.present",
+                params![p, &lang, file_digest(p), file_mtime(p), if exists {1} else {0}],
+            )?;
+            let file_id: i64 = tx.query_row("SELECT id FROM files WHERE path=?1", params![p], |r| r.get(0))?;
+            tx.execute("DELETE FROM symbols WHERE file_id=?1", params![file_id])?;
+            tx.execute("DELETE FROM edges WHERE file_id=?1", params![file_id])?;
+            if let Some(syms) = symbols_by_file.get(p) {
+                let mut stmt = tx.prepare("INSERT INTO symbols(sid, file_id, name, kind, start_line, end_line, language, sig_hash, parent_sid) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
+                for s in syms {
+                    stmt.execute(params![&s.id.0, file_id, &s.name, kind_to_str(&s.kind), s.range.start_line as i64, s.range.end_line as i64, &s.language, sig_hash_for(s), Option::<String>::None])?;
+                }
+            }
+        }
+        tx.commit()?;
     }
 
-    // Build in-memory index from DB including new symbols
+    // Build index including newly inserted symbols
     let index = load_index(conn)?;
 
-    // Second pass: recompute edges for each changed file
-    for p in paths {
-        recompute_edges_for_file(conn, p, &index)?;
+    // Insert edges for changed files using prepared unresolved refs/imports
+    {
+        let tx = conn.transaction()?;
+        {
+            let mut edge_stmt = tx.prepare("INSERT INTO edges(from_sid, to_sid, kind, file_id, line) VALUES(?1, ?2, ?3, ?4, ?5)")?;
+            for p in paths {
+                let file_id: i64 = tx.query_row("SELECT id FROM files WHERE path=?1", params![p], |r| r.get(0))?;
+                let urefs = urefs_by_file.get(p).cloned().unwrap_or_default();
+                let imports = imports_by_file.get(p).cloned().unwrap_or_default();
+                let refs = crate::impact::resolve_references(&index, &urefs, &std::collections::HashMap::from([(p.clone(), imports)]));
+                for e in refs {
+                    edge_stmt.execute(params![&e.from.0, &e.to.0, "call", file_id, e.line as i64])?;
+                }
+            }
+        }
+        tx.commit()?;
     }
     stats(conn)
 }
 
-fn update_file_symbols(conn: &mut Connection, path: &str) -> anyhow::Result<()> {
-    let exists = fs::metadata(path).map(|m| m.is_file()).unwrap_or(false);
-    let lang = guess_lang_from_ext(path).to_string();
-    let mut tx = conn.transaction()?;
-    // Upsert into files
-    tx.execute(
-        "INSERT INTO files(path, lang, digest, mtime, present) VALUES(?1, ?2, ?3, ?4, ?5)\n         ON CONFLICT(path) DO UPDATE SET lang=excluded.lang, digest=excluded.digest, mtime=excluded.mtime, present=excluded.present",
-        params![path, &lang, file_digest(path), file_mtime(path), if exists {1} else {0}],
-    )?;
-    let file_id: i64 = tx.query_row("SELECT id FROM files WHERE path=?1", params![path], |r| r.get(0))?;
-    // Remove old symbols and edges for this file
-    tx.execute("DELETE FROM symbols WHERE file_id=?1", params![file_id])?;
-    tx.execute("DELETE FROM edges WHERE file_id=?1", params![file_id])?;
-
-    if exists {
-        let kind = LanguageKind::Auto;
-        let Some(analyzer) = analyzer_for_path(path, kind) else { tx.commit()?; return Ok(()) };
-        let Ok(src) = fs::read_to_string(path) else { tx.commit()?; return Ok(()) };
-        let symbols: Vec<Symbol> = analyzer.symbols_in_file(path, &src);
-        let mut stmt = tx.prepare("INSERT INTO symbols(sid, file_id, name, kind, start_line, end_line, language, sig_hash, parent_sid) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
-        for s in symbols {
-            stmt.execute(params![&s.id.0, file_id, &s.name, kind_to_str(&s.kind), s.range.start_line as i64, s.range.end_line as i64, &s.language, sig_hash_for(&s), Option::<String>::None])?;
+// Parallel build helpers
+fn list_workspace_files() -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in walkdir::WalkDir::new(".")
+        .into_iter()
+        .filter_entry(|e| {
+            let p = e.path();
+            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            !(name == ".git" || name == "target" || name == "node_modules" || name.starts_with('.'))
+        })
+        .filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_file() {
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            if ["rs","rb","js","ts","tsx"].contains(&ext) {
+                let path_str = path.strip_prefix("./").unwrap_or(path).to_string_lossy().to_string();
+                out.push(path_str);
+            }
         }
     }
-    tx.commit()?;
-    Ok(())
+    out
 }
 
-fn recompute_edges_for_file(conn: &mut Connection, path: &str, index: &SymbolIndex) -> anyhow::Result<()> {
-    let Ok(src) = fs::read_to_string(path) else { return Ok(()) };
-    let Some(analyzer) = analyzer_for_path(path, LanguageKind::Auto) else { return Ok(()) };
-    let urefs = analyzer.unresolved_refs(path, &src);
-    let imports = analyzer.imports_in_file(path, &src);
-    // resolve only for this file
-    let refs = crate::impact::resolve_references(index, &urefs, &std::collections::HashMap::from([(path.to_string(), imports)]));
-
-    let tx = conn.transaction()?;
-    let file_id: i64 = tx.query_row("SELECT id FROM files WHERE path=?1", params![path], |r| r.get(0))?;
-    {
-        // edges for this file were deleted in update_file_symbols; insert fresh
-        let mut stmt = tx.prepare("INSERT INTO edges(from_sid, to_sid, kind, file_id, line) VALUES(?1, ?2, ?3, ?4, ?5)")?;
-        for e in refs {
-            stmt.execute(params![&e.from.0, &e.to.0, "call", file_id, e.line as i64])?;
-        }
+fn analyze_paths_parallel(paths: &[String]) -> (Vec<Symbol>, Vec<UnresolvedRef>, std::collections::HashMap<String, std::collections::HashMap<String, String>>) {
+    use rayon::prelude::*;
+    let results: Vec<(Vec<Symbol>, Vec<UnresolvedRef>, (String, std::collections::HashMap<String, String>))> = paths.par_iter().map(|p| {
+        let kind = LanguageKind::Auto;
+        let Some(analyzer) = analyzer_for_path(p, kind) else { return (Vec::new(), Vec::new(), (p.clone(), Default::default())) };
+        let Ok(src) = fs::read_to_string(p) else { return (Vec::new(), Vec::new(), (p.clone(), Default::default())) };
+        let syms = analyzer.symbols_in_file(p, &src);
+        let urefs = analyzer.unresolved_refs(p, &src);
+        let im = analyzer.imports_in_file(p, &src);
+        (syms, urefs, (p.clone(), im))
+    }).collect();
+    let mut symbols = Vec::new();
+    let mut urefs_all = Vec::new();
+    let mut imports_map = std::collections::HashMap::new();
+    for (syms, urefs, (p, im)) in results {
+        symbols.extend(syms);
+        urefs_all.extend(urefs);
+        imports_map.insert(p, im);
     }
-    tx.commit()?;
-    Ok(())
+    (symbols, urefs_all, imports_map)
+}
+
+fn analyze_specific_paths_parallel(paths: &[String]) -> (
+    std::collections::HashMap<String, Vec<Symbol>>,
+    std::collections::HashMap<String, Vec<UnresolvedRef>>,
+    std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+) {
+    use rayon::prelude::*;
+    let results: Vec<(String, Vec<Symbol>, Vec<UnresolvedRef>, std::collections::HashMap<String, String>)> = paths.par_iter().map(|p| {
+        let p = p.clone();
+        if !std::path::Path::new(&p).is_file() {
+            return (p, Vec::new(), Vec::new(), Default::default());
+        }
+        let kind = LanguageKind::Auto;
+        let Some(analyzer) = analyzer_for_path(&p, kind) else { return (p, Vec::new(), Vec::new(), Default::default()) };
+        let Ok(src) = fs::read_to_string(&p) else { return (p, Vec::new(), Vec::new(), Default::default()) };
+        let syms = analyzer.symbols_in_file(&p, &src);
+        let urefs = analyzer.unresolved_refs(&p, &src);
+        let im = analyzer.imports_in_file(&p, &src);
+        (p, syms, urefs, im)
+    }).collect();
+    let mut syms_map = std::collections::HashMap::new();
+    let mut urefs_map = std::collections::HashMap::new();
+    let mut imports_map = std::collections::HashMap::new();
+    for (p, syms, urefs, im) in results {
+        syms_map.insert(p.clone(), syms);
+        urefs_map.insert(p.clone(), urefs);
+        imports_map.insert(p, im);
+    }
+    (syms_map, urefs_map, imports_map)
 }
 
 pub fn load_graph(conn: &Connection) -> anyhow::Result<(SymbolIndex, Vec<Reference>)> {

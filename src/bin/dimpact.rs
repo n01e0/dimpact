@@ -183,6 +183,12 @@ fn main() -> anyhow::Result<()> {
     let _ = env_logger::Builder::from_env(Env::default().default_filter_or(""))
         .format_timestamp(None)
         .try_init();
+    // Optional parallelism override for rayon (for cache build/update)
+    if let Ok(j) = std::env::var("DIMPACT_JOBS") {
+        if let Ok(n) = j.parse::<usize>() {
+            let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
+        }
+    }
     let args = Args::parse();
 
     // Prefer subcommands if provided; fallback to deprecated --mode
