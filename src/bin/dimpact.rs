@@ -4,6 +4,14 @@ use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{ImpactDirection, ImpactOptions, ImpactOutput};
 use dimpact::engine::{EngineKind, make_engine};
 use dimpact::EngineConfig;
+use dimpact::compute_changed_symbols;
+use dimpact::dfg::{DataFlowGraph, RustDfgBuilder, PdgBuilder};
+use dimpact::render::dfg_to_dot;
+use dimpact::compute_impact;
+use dimpact::ir::SymbolId;
+use dimpact::ir::reference::{Reference, RefKind};
+use dimpact::DfgBuilder;
+use dimpact::cache;
 use is_terminal::IsTerminal;
 use std::io::{self, Read};
 use env_logger::Env;
@@ -50,8 +58,8 @@ enum CacheScopeOpt { Local, Global }
 #[derive(Debug, Parser)]
 #[command(name = "dimpact", version, about = "Analyze git diff and serialize changes")] 
 struct Args {
-    /// Output format (json or yaml)
-    #[arg(short = 'f', long = "format", value_enum, default_value_t = OutputFormat::Json)]
+    /// Output format (json, yaml, dot, html)
+    #[arg(short = 'f', long = "format", value_enum, default_value_t = OutputFormat::Json, global = true)]
     format: OutputFormat,
 
     /// Deprecated: use subcommands (diff/changed/impact/id) instead
@@ -126,6 +134,8 @@ enum Command {
         direction: DirectionOpt,
         #[arg(long = "max-depth")] max_depth: Option<usize>,
         #[arg(long = "with-edges", default_value_t = false)] with_edges: bool,
+        /// Use PDG-based dependence analysis (experimental)
+        #[arg(long = "with-pdg", default_value_t = false)] with_pdg: bool,
         /// Analysis engine: auto (TS default), ts, lsp (experimental)
         #[arg(long = "engine", value_enum, default_value_t = EngineOpt::Auto)] engine: EngineOpt,
         #[arg(long = "engine-lsp-strict", default_value_t = false)] engine_lsp_strict: bool,
@@ -198,8 +208,8 @@ fn main() -> anyhow::Result<()> {
             Command::Changed{ lang, engine, engine_lsp_strict, engine_dump_capabilities } => {
                 run_changed(args.format, lang, engine, engine_lsp_strict, engine_dump_capabilities)
             }
-            Command::Impact{ lang, direction, max_depth, with_edges, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json } => {
-                run_impact(args.format, lang, direction, max_depth, with_edges, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json)
+            Command::Impact{ lang, direction, max_depth, with_edges, with_pdg, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json } => {
+                run_impact(args.format, lang, direction, max_depth, with_edges, with_pdg, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json)
             }
             Command::Id{ path, line, name, lang, kind, raw } => run_id(args.format, path.as_deref(), line, name.as_deref(), lang, kind, raw),
             Command::Cache{ cmd } => run_cache(cmd),
@@ -215,7 +225,20 @@ fn main() -> anyhow::Result<()> {
             run_changed(args.format, args.lang, args.engine, args.engine_lsp_strict, args.engine_dump_capabilities)?;
         }
         Mode::Impact => {
-            run_impact(args.format, args.lang, args.direction, args.max_depth, args.with_edges, args.engine, args.engine_lsp_strict, args.engine_dump_capabilities, args.seed_symbols, args.seed_json)?;
+            // PDG mode not available in deprecated mode
+            run_impact(
+                args.format,
+                args.lang,
+                args.direction,
+                args.max_depth,
+                args.with_edges,
+                false,
+                args.engine,
+                args.engine_lsp_strict,
+                args.engine_dump_capabilities,
+                args.seed_symbols,
+                args.seed_json,
+            )?;
         }
     }
 
@@ -423,12 +446,16 @@ fn run_impact(
     dir_opt: DirectionOpt,
     max_depth: Option<usize>,
     with_edges: bool,
+    with_pdg: bool,
     engine_opt: EngineOpt,
     lsp_strict: bool,
     dump_caps: bool,
     seed_symbols: Vec<String>,
     seed_json: Option<String>,
 ) -> anyhow::Result<()> {
+    if with_pdg {
+        eprintln!("PDG mode enabled (experimental): using stub fallback to call-graph impact");
+    }
     // Gather seeds
     let mut seeds: Vec<dimpact::Symbol> = Vec::new();
     if let Some(sj) = seed_json.as_ref() {
@@ -481,7 +508,58 @@ fn run_impact(
             Err(DiffParseError::MissingHeader) => Vec::new(),
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
-        log::info!("mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={}", ekind, files.len(), lang, direction, opts.max_depth, with_edges);
+        log::info!("mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} pdg={}",
+            ekind, files.len(), lang, direction, opts.max_depth, with_edges, with_pdg);
+        if with_pdg {
+            // Build changed symbols and project graph
+            let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
+            let (scope, dir_override) = cache::scope_from_env();
+            let mut db = cache::open(scope, dir_override.as_deref())?;
+            let st = cache::stats(&db.conn)?;
+            if st.symbols == 0 {
+                cache::build_all(&mut db.conn)?;
+            }
+            if !changed.changed_files.is_empty() {
+                cache::update_paths(&mut db.conn, &changed.changed_files)?;
+            }
+            let (index, refs) = cache::load_graph(&db.conn)?;
+            // Build DFG for changed files (stub for Rust only)
+            let mut combined = DataFlowGraph { nodes: Vec::new(), edges: Vec::new() };
+            for path in &changed.changed_files {
+                if path.ends_with(".rs") {
+                    if let Ok(src) = fs::read_to_string(path) {
+                        let dfg = RustDfgBuilder::build(path, &src);
+                        combined.nodes.extend(dfg.nodes);
+                        combined.edges.extend(dfg.edges);
+                    }
+                }
+            }
+            // Merge call graph into PDG
+            let pdg = PdgBuilder::build(&combined, &refs);
+            // If Dot output requested, visualize PDG
+            if matches!(fmt, OutputFormat::Dot) {
+                println!("{}", dfg_to_dot(&pdg));
+                return Ok(());
+            }
+            // Convert PDG edges to Reference list for impact calculation
+            let pdg_refs: Vec<Reference> = pdg.edges.into_iter().map(|e| Reference {
+                from: SymbolId(e.from),
+                to: SymbolId(e.to),
+                kind: RefKind::Call,
+                file: String::new(),
+                line: 0,
+            }).collect();
+            // Compute impact over PDG
+            let out: ImpactOutput = compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts);
+            match fmt {
+                OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
+                OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
+                OutputFormat::Dot => println!("{}", dimpact::to_dot(&out)),
+                OutputFormat::Html => println!("{}", dimpact::to_html(&out)),
+            }
+            return Ok(());
+        }
+        // Default call-graph based impact
         let out: ImpactOutput = engine.impact(&files, lang, &opts)?;
         match fmt {
             OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),

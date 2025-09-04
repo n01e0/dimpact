@@ -1,8 +1,55 @@
 use crate::impact::ImpactOutput;
 use crate::ir::SymbolKind;
+use crate::dfg::{DataFlowGraph, DependencyKind};
 
 fn esc_dot(s: &str) -> String {
     s.replace('"', "\\\"").replace('\n', " ")
+}
+
+/// Convert a DataFlowGraph (PDG) to GraphViz dot format.
+pub fn dfg_to_dot(graph: &DataFlowGraph) -> String {
+    use std::fmt::Write as _;
+    let mut buf = String::new();
+    buf.push_str("digraph pdg {\n");
+    buf.push_str("  rankdir=LR;\n  node [shape=oval, fontname=\"monospace\"];\n");
+    // Nodes
+    for node in &graph.nodes {
+        let label = format!("{}\n{}:{}", esc_dot(&node.name), esc_dot(&node.file), node.line);
+        let _ = writeln!(buf, "  \"{}\" [label=\"{}\"];", esc_dot(&node.id), label);
+    }
+    // Edges
+    for edge in &graph.edges {
+        let style = match edge.kind {
+            DependencyKind::Data => "solid",
+            DependencyKind::Control => "dashed",
+        };
+        let _ = writeln!(buf, "  \"{}\" -> \"{}\" [style={}];", esc_dot(&edge.from), esc_dot(&edge.to), style);
+    }
+    buf.push_str("}\n");
+    buf
+}
+// Unit tests for PDG dot rendering
+#[cfg(test)]
+mod dfg_render_tests {
+    use super::*;
+    use crate::dfg::{DataFlowGraph, DfgNode, DfgEdge, DependencyKind};
+
+    #[test]
+    fn test_dfg_to_dot_empty() {
+        let graph = DataFlowGraph { nodes: Vec::new(), edges: Vec::new() };
+        let dot = dfg_to_dot(&graph);
+        assert!(dot.starts_with("digraph pdg"));
+    }
+
+    #[test]
+    fn test_dfg_to_dot_simple() {
+        let node = DfgNode { id: "n1".to_string(), name: "x".to_string(), file: "f.rs".to_string(), line: 1 };
+        let edge = DfgEdge { from: "n1".to_string(), to: "n1".to_string(), kind: DependencyKind::Data };
+        let graph = DataFlowGraph { nodes: vec![node.clone()], edges: vec![edge] };
+        let dot = dfg_to_dot(&graph);
+        assert!(dot.contains("\"n1\""));
+        assert!(dot.contains("solid"));
+    }
 }
 
 pub fn to_dot(out: &ImpactOutput) -> String {
