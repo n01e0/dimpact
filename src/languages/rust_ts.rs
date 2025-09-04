@@ -1,6 +1,7 @@
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::ir::reference::{RefKind, UnresolvedRef};
 use std::cell::RefCell;
+use crate::languages::util::{line_offsets, byte_to_line};
 
 pub struct RustTsAnalyzer {
     parser: RefCell<tree_sitter::Parser>,
@@ -15,18 +16,6 @@ impl RustTsAnalyzer {
     }
 }
 
-fn line_lookup(src: &str) -> Vec<usize> {
-    let mut offs = vec![0usize];
-    for (i, b) in src.bytes().enumerate() { if b == b'\n' { offs.push(i+1); } }
-    offs
-}
-
-fn byte_to_line(offs: &[usize], byte: usize) -> u32 {
-    match offs.binary_search(&byte) {
-        Ok(i) => (i as u32) + 1,
-        Err(i) => i as u32,
-    }
-}
 
 impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
     fn language(&self) -> &'static str { "rust" }
@@ -34,7 +23,7 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
     fn symbols_in_file(&self, path: &str, source: &str) -> Vec<Symbol> {
         let tree = self.parser.borrow_mut().parse(source, None).unwrap();
         let root = tree.root_node();
-        let offs = line_lookup(source);
+        let offs = line_offsets(source);
         let mut out = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
@@ -96,7 +85,7 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
         let tree = self.parser.borrow_mut().parse(source, None).unwrap();
         let root = tree.root_node();
-        let offs = line_lookup(source);
+        let offs = line_offsets(source);
         let mut out = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {

@@ -1,6 +1,7 @@
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::ir::reference::{RefKind, UnresolvedRef};
 use crate::languages::{LanguageAnalyzer, rust::RustAnalyzer};
+use crate::languages::util::{line_offsets, byte_to_line};
 use crate::languages::rust_ts::RustTsAnalyzer;
 use crate::ts_core::{load_rust_spec, compile_queries_rust, QueryRunner, Capture};
 
@@ -19,15 +20,6 @@ impl SpecRustAnalyzer {
     }
 }
 
-fn line_lookup(src: &str) -> Vec<usize> {
-    let mut offs = vec![0usize];
-    for (i, b) in src.bytes().enumerate() { if b == b'\n' { offs.push(i+1); } }
-    offs
-}
-
-fn byte_to_line(offs: &[usize], byte: usize) -> u32 {
-    match offs.binary_search(&byte) { Ok(i) => (i as u32) + 1, Err(i) => i as u32 }
-}
 
 impl LanguageAnalyzer for SpecRustAnalyzer {
     fn language(&self) -> &'static str { "rust" }
@@ -39,7 +31,7 @@ impl LanguageAnalyzer for SpecRustAnalyzer {
 
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
         let mut out = Vec::new();
-        let offs = line_lookup(source);
+        let offs = line_offsets(source);
         for caps in self.runner.run_captures(source, &self.queries.calls) {
             let name_cap = caps.iter().find(|c| c.name == "name");
             let qname_cap = caps.iter().find(|c| c.name == "qname");

@@ -2,6 +2,8 @@ use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::ir::reference::{RefKind, UnresolvedRef};
 use crate::languages::LanguageAnalyzer;
 use crate::ts_core::{load_ruby_spec, compile_queries_ruby, QueryRunner, Capture};
+use crate::languages::path::normalize_path_like;
+use crate::languages::util::{line_offsets, byte_to_line};
 
 pub struct SpecRubyAnalyzer {
     queries: crate::ts_core::CompiledQueries,
@@ -17,15 +19,13 @@ impl SpecRubyAnalyzer {
     } 
 }
 
-fn line_lookup(src: &str) -> Vec<usize> { let mut offs=vec![0usize]; for (i,b) in src.bytes().enumerate(){ if b==b'\n'{offs.push(i+1);} } offs }
-fn byte_to_line(offs: &[usize], byte: usize) -> u32 { match offs.binary_search(&byte){ Ok(i)=>(i as u32)+1, Err(i)=> i as u32 } }
 
 impl LanguageAnalyzer for SpecRubyAnalyzer {
     fn language(&self) -> &'static str { "ruby" }
 
     fn symbols_in_file(&self, path: &str, source: &str) -> Vec<Symbol> {
         // Use TS queries for declarations; classify roughly by node kind
-        let offs = line_lookup(source);
+        let offs = line_offsets(source);
         let lines: Vec<&str> = source.lines().collect();
         let mut out = Vec::new();
         for caps in self.runner.run_captures(source, &self.queries.decl) {
@@ -68,7 +68,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
 
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
         let mut out = Vec::new();
-        let offs = line_lookup(source);
+        let offs = line_offsets(source);
         for caps in self.runner.run_captures(source, &self.queries.calls) {
             let name_cap = caps.iter().find(|c| c.name == "name");
             if let Some(n) = name_cap {
@@ -151,19 +151,6 @@ fn find_ruby_block_end(lines: &[&str], start: usize) -> usize {
     lines.len().saturating_sub(1)
 }
 
-// Normalize a path-like value by collapsing '.' and '..' without touching the filesystem.
-fn normalize_path_like(p: &std::path::Path) -> String {
-    use std::path::{Component, PathBuf};
-    let mut out = PathBuf::new();
-    for comp in p.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => { out.pop(); }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out.to_string_lossy().replace('\\', "/")
-}
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,8 @@ use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::ir::reference::{RefKind, UnresolvedRef};
 use crate::languages::LanguageAnalyzer;
 use crate::ts_core::{load_javascript_spec, compile_queries_javascript, QueryRunner, Capture};
+use crate::languages::path::{normalize_path_like, resolve_module_path};
+use crate::languages::util::{line_offsets, byte_to_line};
 
 pub struct SpecJsAnalyzer {
     queries: crate::ts_core::CompiledQueries,
@@ -17,14 +19,14 @@ impl SpecJsAnalyzer {
     }
 }
 
-fn line_lookup(src: &str) -> Vec<usize> { let mut offs=vec![0usize]; for (i,b) in src.bytes().enumerate(){ if b==b'\n'{offs.push(i+1);} } offs }
-fn byte_to_line(offs: &[usize], byte: usize) -> u32 { match offs.binary_search(&byte){ Ok(i)=>(i as u32)+1, Err(i)=> i as u32 } }
+// Import line_offsets from util
+// fn line_lookup(src: &str) -> Vec<usize> { ... }
 
 impl LanguageAnalyzer for SpecJsAnalyzer {
     fn language(&self) -> &'static str { "javascript" }
 
     fn symbols_in_file(&self, path: &str, source: &str) -> Vec<Symbol> {
-        let offs = line_lookup(source);
+        let offs = line_offsets(source);
         let mut out = Vec::new();
         for caps in self.runner.run_captures(source, &self.queries.decl) {
             if let Some(nc) = caps.iter().find(|c| c.name == "name") {
@@ -44,7 +46,7 @@ impl LanguageAnalyzer for SpecJsAnalyzer {
     }
 
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
-        let offs = line_lookup(source);
+        let offs = line_offsets(source);
         let mut out = Vec::new();
         for caps in self.runner.run_captures(source, &self.queries.calls) {
             // prefer property_identifier if present else identifier
@@ -112,29 +114,7 @@ impl LanguageAnalyzer for SpecJsAnalyzer {
 }
 
 fn normalize_es_module_path(cur_file: &str, raw: &str) -> Option<String> {
-    // Handle relative like './x', '../x', or bare 'pkg' (keep as-is without dot/leading slash)
-    let mut s = raw.trim().trim_end_matches(".js").trim_end_matches(".mjs").trim_end_matches(".cjs");
-    s = s.trim_end_matches(".ts").trim_end_matches(".tsx");
-    let s = s.replace('\\', "/");
-    if s.starts_with("./") || s.starts_with("../") {
-        let base = std::path::Path::new(cur_file).parent().unwrap_or_else(|| std::path::Path::new("."));
-        let joined = base.join(s);
-        Some(normalize_path_like(&joined))
-    } else {
-        // bare specifier — return as-is; resolver would need load paths
-        Some(s.trim_start_matches('/').to_string())
-    }
-}
-
-fn normalize_path_like(p: &std::path::Path) -> String {
-    use std::path::{Component, PathBuf};
-    let mut out = PathBuf::new();
-    for comp in p.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => { out.pop(); }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out.to_string_lossy().replace('\\', "/")
+    // Supported JS/TS extensions
+    let exts = [".js", ".mjs", ".cjs", ".ts", ".tsx"];
+    resolve_module_path(cur_file, raw, &exts)
 }

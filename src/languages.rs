@@ -14,6 +14,8 @@ pub mod rust_spec;
 pub mod ruby_spec;
 pub mod ts_spec;
 pub mod js_spec;
+pub mod util;
+pub mod path;
 
 // TS-only now
 
