@@ -3,7 +3,7 @@ use crate::{
     ChangedOutput, FileChanges, LanguageMode,
     ImpactOptions, ImpactOutput,
 };
-use crate::cache::{self, CacheScope};
+use crate::cache;
 
 #[derive(Default)]
 pub struct TsEngine;

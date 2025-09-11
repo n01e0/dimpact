@@ -1,6 +1,6 @@
 use crate::ir::Symbol;
 use crate::ir::reference::{Reference, SymbolIndex, UnresolvedRef};
-use crate::languages::{LanguageAnalyzer, analyzer_for_path, LanguageKind};
+use crate::languages::{analyzer_for_path, LanguageKind};
 use walkdir::WalkDir;
 use serde::{Serialize, Deserialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -77,7 +77,7 @@ pub(crate) fn resolve_references(
         // Determine candidate name, considering alias from imports
         let imports = file_imports.get(&r.file).cloned().unwrap_or_default();
         let mut target_name = r.name.as_str();
-        let mut qualifier = r.qualifier.as_deref();
+        let qualifier = r.qualifier.as_deref();
         // normalize qualifier using imports (handle alias on the first segment)
         let from_mod = module_path_for_file(&r.file);
         let norm_qual = qualifier.and_then(|q| normalize_qualifier_with_imports(q, &imports, &from_mod));
@@ -87,33 +87,88 @@ pub(crate) fn resolve_references(
             .iter()
             .filter_map(|(k,v)| if k.starts_with("__glob__") { Some(v.clone()) } else { None })
             .collect();
-        if qualifier.is_none() {
-            if let Some(full) = imports.get(&r.name) {
+        if qualifier.is_none() && let Some(full) = imports.get(&r.name) {
                 let prior = full.rsplit_once("::").map(|(p, _)| p).unwrap_or("");
-                imported_prefix = Some(expand_relative_path(&from_mod, prior));
+                let ip = if prior.contains("self::") || prior.contains("super::") || prior.contains("crate::") {
+                    expand_relative_path(&from_mod, prior)
+                } else {
+                    prior.to_string()
+                };
+                imported_prefix = Some(ip);
                 target_name = full.rsplit_once("::").map(|(_, n)| n).unwrap_or(full);
+        }
+
+        // Re-export fallback: if imported_prefix points to an aggregator module, try to map to the underlying module via its export map
+        if let Some(mut ip) = imported_prefix.clone() {
+            // resolve through aggregator chain (up to 10 hops, guard cycles)
+            let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for _ in 0..10 {
+                if !visited.insert(ip.clone()) { break; }
+                let mut agg_files: Vec<&String> = file_imports.keys()
+                    .filter(|f| file_matches_module_path(f, &ip))
+                    .collect();
+                if agg_files.len() > 1 {
+                    agg_files.sort_by_key(|f| if f.ends_with("/index.js") || f.ends_with("/index.ts") || f.ends_with("/index.tsx") { 0 } else { 1 });
+                }
+                let Some(agg_path) = agg_files.first() else { break };
+                let Some(exp_map) = file_imports.get(*agg_path) else { break };
+                for (k, v) in exp_map.iter() { if k.starts_with("__export_glob__") { glob_prefixes.push(v.clone()); } }
+                let key = format!("__export__{}", target_name);
+                if let Some(real) = exp_map.get(&key) {
+                    ip = real.rsplit_once("::").map(|(p, _)| p).unwrap_or("").to_string();
+                    imported_prefix = Some(ip.clone());
+                    target_name = real.rsplit_once("::").map(|(_, n)| n).unwrap_or(real);
+                    continue;
+                }
+                break;
             }
         }
 
-        // collect candidates by name
-        let Some(cands) = index.by_name.get(target_name) else { continue };
-        // If qualifier given, prefer candidates whose module path matches it
-        let filtered: Vec<&crate::ir::Symbol> = if let Some(q) = qualifier {
-            let v: Vec<_> = cands.iter().filter(|s| file_matches_module_path(&s.file, q)).collect();
-            if v.is_empty() { cands.iter().collect() } else { v }
-        } else { cands.iter().collect() };
-        // score candidates
-        let best = filtered
-            .into_iter()
-            .filter(|to_sym| matches!(to_sym.kind, crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method))
-            .max_by_key(|to_sym| {
-                let mut best = score_candidate(&r.file, qualifier, imported_prefix.as_deref(), to_sym, r.is_method);
-                for gp in &glob_prefixes {
-                    let s = score_candidate(&r.file, qualifier, Some(gp.as_str()), to_sym, r.is_method);
-                    if s > best { best = s; }
+        // Try candidates by exact name first
+        let mut best: Option<&crate::ir::Symbol> = None;
+        if let Some(cands) = index.by_name.get(target_name) {
+            // If qualifier given, prefer candidates whose module path matches it
+            let filtered: Vec<&crate::ir::Symbol> = if let Some(q) = qualifier {
+                let v: Vec<_> = cands.iter().filter(|s| file_matches_module_path(&s.file, q)).collect();
+                if v.is_empty() { cands.iter().collect() } else { v }
+            } else { cands.iter().collect() };
+            best = filtered
+                .into_iter()
+                .filter(|to_sym| matches!(to_sym.kind, crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method))
+                .max_by_key(|to_sym| {
+                    let mut best = score_candidate(&r.file, qualifier, imported_prefix.as_deref(), to_sym, r.is_method);
+                    for gp in &glob_prefixes {
+                        let s = score_candidate(&r.file, qualifier, Some(gp.as_str()), to_sym, r.is_method);
+                        if s > best { best = s; }
+                    }
+                    best
+                });
+        }
+
+        // Fallback: no same-name match → choose best symbol within the imported/qualified module
+        if best.is_none() {
+            let mut module_hints: Vec<String> = Vec::new();
+            if let Some(q) = qualifier { module_hints.push(q.to_string()); }
+            if let Some(ip) = &imported_prefix && !ip.is_empty() { module_hints.push(ip.clone()); }
+            for gp in &glob_prefixes { if !module_hints.contains(gp) { module_hints.push(gp.clone()); } }
+            if !module_hints.is_empty() {
+                let cands: Vec<&crate::ir::Symbol> = index.symbols.iter()
+                    .filter(|s| matches!(s.kind, crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method))
+                    .filter(|s| module_hints.iter().any(|mp| file_matches_module_path(&s.file, mp)))
+                    .collect();
+                if !cands.is_empty() {
+                    best = cands.into_iter().max_by_key(|to_sym| {
+                        let mut score = score_candidate(&r.file, qualifier, imported_prefix.as_deref(), to_sym, r.is_method);
+                        for gp in &glob_prefixes {
+                            let s = score_candidate(&r.file, qualifier, Some(gp.as_str()), to_sym, r.is_method);
+                            if s > score { score = s; }
+                        }
+                        score
+                    });
                 }
-                best
-            });
+            }
+        }
+
         if let Some(to_sym) = best {
             out.push(Reference {
                 from: from_sym.id.clone(),
@@ -132,12 +187,8 @@ fn score_candidate(from_file: &str, qualifier: Option<&str>, imported_prefix: Op
     if cand.file == from_file { score += 30; }
     // same directory
     if std::path::Path::new(&cand.file).parent() == std::path::Path::new(from_file).parent() { score += 10; }
-    if let Some(q) = qualifier {
-        if file_matches_module_path(&cand.file, q) { score += 20; }
-    }
-    if let Some(ip) = imported_prefix {
-        if !ip.is_empty() && file_matches_module_path(&cand.file, ip) { score += 15; }
-    }
+    if let Some(q) = qualifier && file_matches_module_path(&cand.file, q) { score += 20; }
+    if let Some(ip) = imported_prefix && !ip.is_empty() && file_matches_module_path(&cand.file, ip) { score += 15; }
     // prefer method symbol if call site looked like a method
     if call_is_method {
         if matches!(cand.kind, crate::ir::SymbolKind::Method) { score += 25; }
@@ -167,7 +218,7 @@ fn normalize_qualifier_with_imports(q: &str, imports: &std::collections::HashMap
     // Support both Ruby/Rust (::) and JS/TS (.) namespace separators
     let q = q.replace('.', "::");
     // apply alias on first segment, then expand self/super/crate relative to from_mod
-    let mut parts: Vec<&str> = q.split("::").collect();
+    let parts: Vec<&str> = q.split("::").collect();
     if parts.is_empty() { return None; }
     if let Some(mapped) = imports.get(parts[0]) {
         let mut new = mapped.to_string();

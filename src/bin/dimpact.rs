@@ -5,7 +5,7 @@ use dimpact::{ImpactDirection, ImpactOptions, ImpactOutput};
 use dimpact::engine::{EngineKind, make_engine};
 use dimpact::EngineConfig;
 use dimpact::compute_changed_symbols;
-use dimpact::dfg::{DataFlowGraph, RustDfgBuilder, PdgBuilder};
+use dimpact::dfg::{DataFlowGraph, RustDfgBuilder, RubyDfgBuilder, PdgBuilder};
 use dimpact::render::dfg_to_dot;
 use dimpact::compute_impact;
 use dimpact::ir::SymbolId;
@@ -194,10 +194,8 @@ fn main() -> anyhow::Result<()> {
         .format_timestamp(None)
         .try_init();
     // Optional parallelism override for rayon (for cache build/update)
-    if let Ok(j) = std::env::var("DIMPACT_JOBS") {
-        if let Ok(n) = j.parse::<usize>() {
-            let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
-        }
+    if let Ok(j) = std::env::var("DIMPACT_JOBS") && let Ok(n) = j.parse::<usize>() {
+        let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
     }
     let args = Args::parse();
 
@@ -440,6 +438,7 @@ fn run_changed(fmt: OutputFormat, lang_opt: LangOpt, engine_opt: EngineOpt, lsp_
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_impact(
     fmt: OutputFormat,
     lang_opt: LangOpt,
@@ -532,6 +531,10 @@ fn run_impact(
                         combined.nodes.extend(dfg.nodes);
                         combined.edges.extend(dfg.edges);
                     }
+                } else if path.ends_with(".rb") && let Ok(src) = fs::read_to_string(path) {
+                    let dfg = RubyDfgBuilder::build(path, &src);
+                    combined.nodes.extend(dfg.nodes);
+                    combined.edges.extend(dfg.edges);
                 }
             }
             // Merge call graph into PDG
@@ -623,20 +626,20 @@ fn run_id(fmt: OutputFormat, path: Option<&str>, line: Option<u32>, name: Option
     // Stepwise narrowing: path -> line -> name -> kind (each only if yields results)
     let mut current: Vec<dimpact::Symbol> = all_syms.clone();
     if let Some(p) = path {
-        let subset: Vec<_> = current.iter().cloned().filter(|s| s.file == p).collect();
+        let subset: Vec<_> = current.iter().filter(|s| s.file == p).cloned().collect();
         if !subset.is_empty() { current = subset; } else { current = all_syms.clone(); }
     }
     if let Some(ln) = line {
-        let subset: Vec<_> = current.iter().cloned().filter(|s| s.range.start_line <= ln && ln <= s.range.end_line).collect();
+        let subset: Vec<_> = current.iter().filter(|s| s.range.start_line <= ln && ln <= s.range.end_line).cloned().collect();
         if !subset.is_empty() { current = subset; }
     }
     if let Some(nm) = name {
-        let subset: Vec<_> = current.iter().cloned().filter(|s| s.name == nm).collect();
+        let subset: Vec<_> = current.iter().filter(|s| s.name == nm).cloned().collect();
         if !subset.is_empty() { current = subset; }
     }
     if let Some(kopt) = kind_opt {
         let want = map_kind_opt(kopt);
-        let subset: Vec<_> = current.iter().cloned().filter(|s| s.kind == want).collect();
+        let subset: Vec<_> = current.iter().filter(|s| s.kind == want).cloned().collect();
         if !subset.is_empty() { current = subset; }
     }
 
@@ -693,10 +696,9 @@ fn collect_candidate_files(path: Option<&str>, lang_opt: LangOpt) -> anyhow::Res
 }
 
 fn scan_dir(dir: &std::path::Path, exts: &[&str], out: &mut Vec<String>) -> anyhow::Result<()> {
-    if let Some(name) = dir.file_name().and_then(|s| s.to_str()) {
-        if [".git","target","node_modules"].contains(&name) {
-            return Ok(());
-        }
+    if let Some(name) = dir.file_name().and_then(|s| s.to_str())
+        && [".git","target","node_modules"].contains(&name) {
+        return Ok(());
     }
     let rd = match fs::read_dir(dir) { Ok(r) => r, Err(_) => return Ok(()) };
     for ent in rd {
@@ -713,6 +715,7 @@ fn scan_dir(dir: &std::path::Path, exts: &[&str], out: &mut Vec<String>) -> anyh
     Ok(())
 }
 
+#[allow(dead_code)]
 fn choose_most_specific(mut v: Vec<dimpact::Symbol>) -> dimpact::Symbol {
     v.sort_by_key(|s| (s.range.end_line - s.range.start_line, key_of_kind(&s.kind)));
     v.into_iter().next().unwrap()
@@ -740,6 +743,7 @@ fn map_kind_opt(k: KindOpt) -> dimpact::SymbolKind {
     }
 }
 
+#[allow(dead_code)]
 fn impact_from_diff(args: Args, files: Vec<dimpact::FileChanges>) -> anyhow::Result<()> {
     let lang = match args.lang {
         LangOpt::Auto => LanguageMode::Auto,

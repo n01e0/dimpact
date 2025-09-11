@@ -1,5 +1,4 @@
-/// Common utilities for language analyzers.
-
+//! Common utilities for language analyzers.
 /// Build a vector of byte offsets for each line start.
 /// The returned Vec has length = number of lines + 1,
 /// where element i is the starting byte index of line i (1-based).

@@ -86,9 +86,9 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
             continue;
         }
 
-        if line.starts_with("--- ") {
+        if let Some(rest) = line.strip_prefix("--- ") {
             // e.g., --- a/path or --- /dev/null
-            let old_path = line[4..].trim();
+            let old_path = rest.trim();
             cur_old_path = if old_path == "/dev/null" {
                 None
             } else {
@@ -96,8 +96,8 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
             };
             // Expect +++ to follow (not strictly enforced here)
             if let Some(next) = lines.next() {
-                if next.starts_with("+++ ") {
-                    let new_path = next[4..].trim();
+                if let Some(rest) = next.strip_prefix("+++ ") {
+                    let new_path = rest.trim();
                     cur_new_path = if new_path == "/dev/null" {
                         None
                     } else {
@@ -123,20 +123,20 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
                     break; // end of hunk/file
                 }
                 let body = lines.next().unwrap();
-                if body.starts_with('+') {
+                if let Some(stripped) = body.strip_prefix('+') {
                     cur_changes.push(Change {
                         kind: ChangeKind::Added,
                         old_line: None,
                         new_line: Some(new_ln),
-                        content: body[1..].to_string(),
+                        content: stripped.to_string(),
                     });
                     new_ln += 1;
-                } else if body.starts_with('-') {
+                } else if let Some(stripped) = body.strip_prefix('-') {
                     cur_changes.push(Change {
                         kind: ChangeKind::Removed,
                         old_line: Some(old_ln),
                         new_line: None,
-                        content: body[1..].to_string(),
+                        content: stripped.to_string(),
                     });
                     old_ln += 1;
                 } else if body.starts_with(' ') || body.is_empty() {
@@ -299,4 +299,3 @@ index 1111111..2222222 100644
         assert_eq!(added[2].new_line, Some(12));
     }
 }
-

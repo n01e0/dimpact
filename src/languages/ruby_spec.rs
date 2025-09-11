@@ -1,7 +1,7 @@
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::ir::reference::{RefKind, UnresolvedRef};
 use crate::languages::LanguageAnalyzer;
-use crate::ts_core::{load_ruby_spec, compile_queries_ruby, QueryRunner, Capture};
+use crate::ts_core::{load_ruby_spec, compile_queries_ruby, QueryRunner};
 use crate::languages::path::normalize_path_like;
 use crate::languages::util::{line_offsets, byte_to_line};
 
@@ -19,6 +19,10 @@ impl SpecRubyAnalyzer {
     } 
 }
 
+impl Default for SpecRubyAnalyzer {
+    fn default() -> Self { Self::new() }
+}
+
 
 impl LanguageAnalyzer for SpecRubyAnalyzer {
     fn language(&self) -> &'static str { "ruby" }
@@ -30,7 +34,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
         let mut out = Vec::new();
         for caps in self.runner.run_captures(source, &self.queries.decl) {
             if let Some(nc) = caps.iter().find(|c| c.name == "name") {
-                let name = std::str::from_utf8(&source.as_bytes()[nc.start..nc.end]).unwrap_or("");
+                let name = &source[nc.start..nc.end];
                 if name.is_empty() { continue; }
                 // Determine declaration kind from @decl node
                 let mut kind = SymbolKind::Function;
@@ -69,17 +73,17 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
         let mut out = Vec::new();
         let offs = line_offsets(source);
+        let re_sym_call = regex::Regex::new(r":([A-Za-z_][A-Za-z0-9_?!]*)").unwrap();
         for caps in self.runner.run_captures(source, &self.queries.calls) {
             let name_cap = caps.iter().find(|c| c.name == "name");
             if let Some(n) = name_cap {
-                let mut name = std::str::from_utf8(&source.as_bytes()[n.start..n.end]).unwrap_or("").to_string();
+                let mut name = source[n.start..n.end].to_string();
                 if name.is_empty() { continue; }
-                if name == "send" || name == "public_send" {
-                    if let Some(callnode) = caps.iter().find(|c| c.name == "call") {
-                        let text = &source.as_bytes()[callnode.start..callnode.end];
-                        if let Some(mat) = regex::Regex::new(r":([A-Za-z_][A-Za-z0-9_?!]*)").unwrap().captures(std::str::from_utf8(text).unwrap_or("")) {
-                            name = mat.get(1).unwrap().as_str().to_string();
-                        }
+                if (name == "send" || name == "public_send")
+                    && let Some(callnode) = caps.iter().find(|c| c.name == "call") {
+                    let text = &source[callnode.start..callnode.end];
+                    if let Some(mat) = re_sym_call.captures(text) {
+                        name = mat.get(1).unwrap().as_str().to_string();
                     }
                 }
                 let ln = if let Some(callnode) = caps.iter().find(|c| c.name == "call") { byte_to_line(&offs, callnode.start) } else { byte_to_line(&offs, n.start) };
@@ -89,7 +93,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
         // Fallback: paren-less bare call like `m` (no args, no receiver)
         use regex::Regex;
         let re_bare = Regex::new(r"^\s*([a-zA-Z_][A-Za-z0-9_?!]*)").unwrap();
-        let mut seen: std::collections::HashSet<(u32, String)> = out.iter().map(|r| (r.line, r.name.clone())).collect();
+        let seen: std::collections::HashSet<(u32, String)> = out.iter().map(|r| (r.line, r.name.clone())).collect();
         for (i, line) in source.lines().enumerate() {
             if let Some(cap) = re_bare.captures(line) {
                 let name = cap.get(1).unwrap().as_str();

@@ -32,7 +32,7 @@ CLI Overview
 - Subcommands:
   - `diff`: parse unified diff from stdin
   - `changed`: compute changed symbols from stdin diff
-  - `impact`: compute impact from stdin diff or seeds
+  - `impact`: compute impact from stdin diff or seeds (supports diff- and seed-based analyses)
   - `id`: generate Symbol IDs from file/line/name
   - `cache`: build/stats/clear the incremental cache
 - Seeds:
@@ -40,6 +40,23 @@ CLI Overview
   - `--seed-json <json|string|path|->` accepts array of strings or objects
   - When seeds are present, language is inferred from seeds (mixed languages error)
 - Output formats: `-f json|yaml|dot|html`
+  
+- Impact Options (subcommand `impact`):
+  - `--direction callers|callees|both` : traversal direction (default: callers)
+  - `--max-depth N`             : max traversal depth (default: 100)
+  - `--with-edges`              : include reference edges in output
+  - `--with-pdg`                : use PDG-based dependence analysis (experimental, Rust only)
+  - `--engine auto|ts|lsp`      : analysis engine (default: auto)
+  - `--engine-lsp-strict`       : strict mode for LSP engine
+  - `--engine-dump-capabilities`: dump engine capabilities to stderr
+  - `--seed-symbol LANG:PATH:KIND:NAME:LINE` : seed symbols by ID (repeatable)
+  - `--seed-json PATH|'-'|JSON` : seed symbols via JSON array or file or stdin
+  
+### PDG Visualization
+- Generate PDG in `dot` format with `--with-pdg` and `-f dot`:
+  ```
+  git diff --no-ext-diff | dimpact impact --with-pdg -f dot
+  ```
 
 Engine Selection
 - Auto: Tree‑Sitter by default (recommended)

@@ -1,12 +1,11 @@
-use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
+use crate::ir::Symbol;
 use crate::ir::reference::{RefKind, UnresolvedRef};
 use crate::languages::{LanguageAnalyzer, rust::RustAnalyzer};
 use crate::languages::util::{line_offsets, byte_to_line};
 use crate::languages::rust_ts::RustTsAnalyzer;
-use crate::ts_core::{load_rust_spec, compile_queries_rust, QueryRunner, Capture};
+use crate::ts_core::{load_rust_spec, compile_queries_rust, QueryRunner};
 
 pub struct SpecRustAnalyzer {
-    spec: crate::ts_core::Spec,
     queries: crate::ts_core::CompiledQueries,
     runner: QueryRunner,
 }
@@ -16,8 +15,12 @@ impl SpecRustAnalyzer {
         let spec = load_rust_spec();
         let queries = compile_queries_rust(&spec).expect("compile rust queries");
         let runner = QueryRunner::new_rust();
-        Self { spec, queries, runner }
+        Self { queries, runner }
     }
+}
+
+impl Default for SpecRustAnalyzer {
+    fn default() -> Self { Self::new() }
 }
 
 

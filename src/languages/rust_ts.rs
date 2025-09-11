@@ -7,6 +7,10 @@ pub struct RustTsAnalyzer {
     parser: RefCell<tree_sitter::Parser>,
 }
 
+impl Default for RustTsAnalyzer {
+    fn default() -> Self { Self::new() }
+}
+
 impl RustTsAnalyzer {
     pub fn new() -> Self {
         let mut parser = tree_sitter::Parser::new();
@@ -63,8 +67,8 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                 }
                 None
             } else { None };
-            if let Some((name, kind)) = s {
-                if !name.is_empty() {
+            if let Some((name, kind)) = s
+                && !name.is_empty() {
                     let sl = byte_to_line(&offs, node.start_byte());
                     let el = byte_to_line(&offs, node.end_byte().saturating_sub(1));
                     out.push(Symbol {
@@ -76,7 +80,7 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                         language: "rust".to_string(),
                     });
                 }
-            }
+            
             for i in 0..node.child_count() { stack.push(node.child(i).unwrap()); }
         }
         out
@@ -195,8 +199,8 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
         let current_mod = crate::impact::module_path_for_file(path);
         for l in source.lines() {
             let t = l.trim();
-            if t.starts_with("mod ") {
-                let name = t[4..].trim().trim_end_matches(';').trim();
+            if let Some(rest) = t.strip_prefix("mod ") {
+                let name = rest.trim().trim_end_matches(';').trim();
                 if !name.is_empty() {
                     let mp = if current_mod.is_empty() { name.to_string() } else { format!("{}::{}", current_mod, name) };
                     map.insert(name.to_string(), mp);

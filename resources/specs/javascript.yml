@@ -7,13 +7,17 @@ queries:
     (class_declaration name: (identifier) @name) @decl
     ; class methods
     (method_definition name: (property_identifier) @name) @decl
+    ; variable-declared functions (arrow only; function expr omitted for grammar compat)
+    (variable_declarator name: (identifier) @name value: (arrow_function)) @decl
+    ; exported variable-declared functions (arrow)
+    (export_statement (variable_declaration (variable_declarator name: (identifier) @name value: (arrow_function)))) @decl
+    ; assignment to exports.* with arrow (supports nested like module.exports.foo)
+    (assignment_expression left: (member_expression object: (_) property: (property_identifier) @name) right: (arrow_function)) @decl
   calls: |
     ; simple calls: foo()
     (call_expression function: (identifier) @name) @call
-    ; member calls: obj.foo() capturing qualifier when simple identifier
-    (call_expression function: (member_expression object: (identifier) @qual property: (property_identifier) @name)) @call
-    ; member calls without simple object capture
-    (call_expression function: (member_expression property: (property_identifier) @name)) @call
+    ; member calls: capture full object as qual for nested chains
+    (call_expression function: (member_expression object: (_) @qual property: (property_identifier) @name)) @call
   imports: |
     ; import from 'mod'
     (import_statement (string) @mod)

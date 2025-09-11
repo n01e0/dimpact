@@ -169,7 +169,7 @@ impl crate::languages::LanguageAnalyzer for RustAnalyzer {
         for mut line in source.lines().map(|l| l.trim()) {
             if !(line.starts_with("use ") || line.starts_with("pub use ")) { continue; }
             if !line.ends_with(';') { continue; }
-            if line.starts_with("pub use ") { line = &line[8..]; } else { line = &line[4..]; }
+            if let Some(stripped) = line.strip_prefix("pub use ") { line = stripped; } else if let Some(stripped) = line.strip_prefix("use ") { line = stripped; }
             line = &line[..line.len()-1];
             if let Some(brace_pos) = line.find('{') {
                 let prefix = line[..brace_pos].trim_end_matches("::").trim();
@@ -189,8 +189,8 @@ impl crate::languages::LanguageAnalyzer for RustAnalyzer {
         let current_mod = super::super::impact::module_path_for_file(path);
         for l in source.lines() {
             let t = l.trim();
-            if t.starts_with("mod ") {
-                let name = t[4..].trim().trim_end_matches(';').trim();
+            if let Some(rest) = t.strip_prefix("mod ") {
+                let name = rest.trim().trim_end_matches(';').trim();
                 if !name.is_empty() {
                     let mp = if current_mod.is_empty() { name.to_string() } else { format!("{}::{}", current_mod, name) };
                     map.insert(name.to_string(), mp);

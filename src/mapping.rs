@@ -1,6 +1,6 @@
 use crate::diff::{ChangeKind, FileChanges};
 use crate::ir::{Symbol, TextRange};
-use crate::languages::{LanguageAnalyzer, analyzer_for_path, LanguageKind};
+use crate::languages::{analyzer_for_path, LanguageKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;

@@ -1,11 +1,14 @@
 use anyhow::Context;
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ir::reference::{Reference, SymbolIndex, UnresolvedRef};
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::languages::{analyzer_for_path, LanguageKind};
+type SymbolsByPath = std::collections::HashMap<String, Vec<Symbol>>;
+type UrefsByPath = std::collections::HashMap<String, Vec<UnresolvedRef>>;
+type ImportMapByPath = std::collections::HashMap<String, std::collections::HashMap<String, String>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheScope { Local, Global }
@@ -52,7 +55,7 @@ pub fn resolve_paths(scope: CacheScope, override_dir: Option<&Path>, repo_root: 
                 .unwrap_or_else(|| PathBuf::from(".config"));
             let root = find_repo_root().unwrap_or_else(|| PathBuf::from("."));
             let key = repo_key(&root);
-            let dir = PathBuf::from(xdg).join("dimpact").join("cache").join(SCHEMA_VERSION).join(key);
+            let dir = xdg.join("dimpact").join("cache").join(SCHEMA_VERSION).join(key);
             Ok(CachePaths { db: dir.join("index.db"), lock: dir.join(".lock"), dir })
         }
     }
@@ -77,9 +80,9 @@ pub fn scope_from_env() -> (CacheScope, Option<PathBuf>) {
 
 fn init_db(conn: &mut Connection) -> anyhow::Result<()> {
     // Pragmas for WAL and reasonable defaults
-    conn.pragma_update(None, "journal_mode", &"WAL")?;
-    conn.pragma_update(None, "synchronous", &"NORMAL")?;
-    conn.pragma_update(None, "temp_store", &"MEMORY")?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
 
     conn.execute_batch(
         r#"
@@ -135,11 +138,11 @@ fn init_db(conn: &mut Connection) -> anyhow::Result<()> {
 }
 
 pub fn stats(conn: &Connection) -> anyhow::Result<CacheStats> {
-    let mut s = CacheStats::default();
-    s.files = conn.query_row("SELECT COUNT(*) FROM files WHERE present=1", [], |r| r.get(0)).unwrap_or(0);
-    s.symbols = conn.query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0)).unwrap_or(0);
-    s.edges = conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0)).unwrap_or(0);
-    Ok(s)
+    Ok(CacheStats {
+        files: conn.query_row("SELECT COUNT(*) FROM files WHERE present=1", [], |r| r.get(0)).unwrap_or(0),
+        symbols: conn.query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0)).unwrap_or(0),
+        edges: conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0)).unwrap_or(0),
+    })
 }
 
 pub fn clear(paths: &CachePaths) -> anyhow::Result<()> {
@@ -154,7 +157,7 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
     let (symbols, urefs, file_imports) = analyze_paths_parallel(&files);
     let index = SymbolIndex::build(symbols);
     let refs = crate::impact::resolve_references(&index, &urefs, &file_imports);
-    let mut tx = conn.transaction()?;
+    let tx = conn.transaction()?;
     tx.execute("DELETE FROM symbols", [])?;
     tx.execute("DELETE FROM edges", [])?;
     tx.execute("DELETE FROM files", [])?;
@@ -276,7 +279,8 @@ fn list_workspace_files() -> Vec<String> {
     out
 }
 
-fn analyze_paths_parallel(paths: &[String]) -> (Vec<Symbol>, Vec<UnresolvedRef>, std::collections::HashMap<String, std::collections::HashMap<String, String>>) {
+#[allow(clippy::type_complexity)]
+fn analyze_paths_parallel(paths: &[String]) -> (Vec<Symbol>, Vec<UnresolvedRef>, ImportMapByPath) {
     use rayon::prelude::*;
     let results: Vec<(Vec<Symbol>, Vec<UnresolvedRef>, (String, std::collections::HashMap<String, String>))> = paths.par_iter().map(|p| {
         let kind = LanguageKind::Auto;
@@ -289,7 +293,7 @@ fn analyze_paths_parallel(paths: &[String]) -> (Vec<Symbol>, Vec<UnresolvedRef>,
     }).collect();
     let mut symbols = Vec::new();
     let mut urefs_all = Vec::new();
-    let mut imports_map = std::collections::HashMap::new();
+    let mut imports_map: ImportMapByPath = std::collections::HashMap::new();
     for (syms, urefs, (p, im)) in results {
         symbols.extend(syms);
         urefs_all.extend(urefs);
@@ -298,10 +302,11 @@ fn analyze_paths_parallel(paths: &[String]) -> (Vec<Symbol>, Vec<UnresolvedRef>,
     (symbols, urefs_all, imports_map)
 }
 
+#[allow(clippy::type_complexity)]
 fn analyze_specific_paths_parallel(paths: &[String]) -> (
-    std::collections::HashMap<String, Vec<Symbol>>,
-    std::collections::HashMap<String, Vec<UnresolvedRef>>,
-    std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    SymbolsByPath,
+    UrefsByPath,
+    ImportMapByPath,
 ) {
     use rayon::prelude::*;
     let results: Vec<(String, Vec<Symbol>, Vec<UnresolvedRef>, std::collections::HashMap<String, String>)> = paths.par_iter().map(|p| {
