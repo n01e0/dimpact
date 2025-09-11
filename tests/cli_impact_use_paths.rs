@@ -1,4 +1,3 @@
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -74,4 +73,3 @@ fn resolves_use_super() {
     let names: Vec<&str> = v["impacted_symbols"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"d"));
 }
-

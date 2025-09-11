@@ -1,4 +1,3 @@
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;

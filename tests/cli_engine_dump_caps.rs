@@ -1,4 +1,3 @@
-use assert_cmd::cargo::CommandCargoExt;
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
@@ -51,4 +50,3 @@ fn cli_engine_dump_capabilities_uses_mock() {
     // also ensure normal JSON output to stdout
     let _ = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
 }
-

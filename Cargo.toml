@@ -8,10 +8,10 @@ members = [ "." ]
 resolver = "2"
 
 [workspace.dependencies]
-tree-sitter = "0.23"
-tree-sitter-rust = "0.23"
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
 tree-sitter-ruby = "0.23"
-tree-sitter-javascript = "0.23"
+tree-sitter-javascript = "0.25"
 tree-sitter-typescript = "0.23"
 
 [dependencies]
@@ -21,7 +21,7 @@ is-terminal = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 regex = "1.11"
 walkdir = "2.5"
@@ -32,7 +32,7 @@ tree-sitter-javascript = { workspace = true }
 tree-sitter-typescript = { workspace = true }
 log = "0.4.28"
 env_logger = "0.11.8"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 blake3 = "1.8"
 rayon = "1.11"
 

@@ -134,9 +134,11 @@ enum Command {
         direction: DirectionOpt,
         #[arg(long = "max-depth")] max_depth: Option<usize>,
         #[arg(long = "with-edges", default_value_t = false)] with_edges: bool,
-        /// Use PDG-based dependence analysis (experimental)
+        /// Use PDG-based dependence analysis
         #[arg(long = "with-pdg", default_value_t = false)] with_pdg: bool,
-        /// Analysis engine: auto (TS default), ts, lsp (experimental)
+        /// Enable symbolic propagation across variables and functions (implies PDG)
+        #[arg(long = "with-propagation", default_value_t = false)] with_propagation: bool,
+        /// Analysis engine: auto (TS default), ts, lsp
         #[arg(long = "engine", value_enum, default_value_t = EngineOpt::Auto)] engine: EngineOpt,
         #[arg(long = "engine-lsp-strict", default_value_t = false)] engine_lsp_strict: bool,
         #[arg(long = "engine-dump-capabilities", default_value_t = false)] engine_dump_capabilities: bool,
@@ -218,8 +220,8 @@ fn main() -> anyhow::Result<()> {
             Command::Changed{ lang, engine, engine_lsp_strict, engine_dump_capabilities } => {
                 run_changed(args.format, lang, engine, engine_lsp_strict, engine_dump_capabilities)
             }
-            Command::Impact{ lang, direction, max_depth, with_edges, with_pdg, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json } => {
-                run_impact(args.format, lang, direction, max_depth, with_edges, with_pdg, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json)
+            Command::Impact{ lang, direction, max_depth, with_edges, with_pdg, with_propagation, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json } => {
+                run_impact(args.format, lang, direction, max_depth, with_edges, with_pdg, with_propagation, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json)
             }
             Command::Id{ path, line, name, lang, kind, raw } => run_id(args.format, path.as_deref(), line, name.as_deref(), lang, kind, raw),
             Command::Cache{ cmd } => run_cache(cmd),
@@ -243,6 +245,7 @@ fn main() -> anyhow::Result<()> {
                 args.direction,
                 args.max_depth,
                 args.with_edges,
+                false,
                 false,
                 args.engine,
                 args.engine_lsp_strict,
@@ -484,15 +487,13 @@ fn run_impact(
     max_depth: Option<usize>,
     with_edges: bool,
     with_pdg: bool,
+    with_propagation: bool,
     engine_opt: EngineOpt,
     lsp_strict: bool,
     dump_caps: bool,
     seed_symbols: Vec<String>,
     seed_json: Option<String>,
 ) -> anyhow::Result<()> {
-    if with_pdg {
-        eprintln!("PDG mode enabled (experimental): using stub fallback to call-graph impact");
-    }
     // Gather seeds
     let mut seeds: Vec<dimpact::Symbol> = Vec::new();
     if let Some(sj) = seed_json.as_ref() {
@@ -547,7 +548,7 @@ fn run_impact(
         };
         log::info!("mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} pdg={}",
             ekind, files.len(), lang, direction, opts.max_depth, with_edges, with_pdg);
-        if with_pdg {
+        if with_pdg || with_propagation {
             // Build changed symbols and project graph
             let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
             let (scope, dir_override) = cache::scope_from_env();
@@ -576,7 +577,10 @@ fn run_impact(
                 }
             }
             // Merge call graph into PDG
-            let pdg = PdgBuilder::build(&combined, &refs);
+            let mut pdg = PdgBuilder::build(&combined, &refs);
+            if with_propagation {
+                PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
+            }
             // If Dot output requested, visualize PDG
             if matches!(fmt, OutputFormat::Dot) {
                 println!("{}", dfg_to_dot(&pdg));
@@ -612,6 +616,47 @@ fn run_impact(
     }
 
     log::info!("mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={}", ekind, seeds.len(), lang, direction, opts.max_depth, with_edges);
+    if with_pdg || with_propagation {
+        // PDG path for seeds: build index/refs from cache and DFG for seed files
+        let (scope, dir_override) = cache::scope_from_env();
+        let mut db = cache::open(scope, dir_override.as_deref())?;
+        let st = cache::stats(&db.conn)?;
+        if st.symbols == 0 { cache::build_all(&mut db.conn)?; }
+        let (index, refs) = cache::load_graph(&db.conn)?;
+        let mut combined = DataFlowGraph { nodes: Vec::new(), edges: Vec::new() };
+        // Build DFG for files containing seeds (Rust/Ruby only)
+        let mut fileset: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for s in &seeds { fileset.insert(s.file.clone()); }
+        for path in fileset {
+            if path.ends_with(".rs") {
+                if let Ok(src) = fs::read_to_string(&path) {
+                    let dfg = RustDfgBuilder::build(&path, &src);
+                    combined.nodes.extend(dfg.nodes);
+                    combined.edges.extend(dfg.edges);
+                }
+            } else if path.ends_with(".rb") && let Ok(src) = fs::read_to_string(&path) {
+                let dfg = RubyDfgBuilder::build(&path, &src);
+                combined.nodes.extend(dfg.nodes);
+                combined.edges.extend(dfg.edges);
+            }
+        }
+        let mut pdg = PdgBuilder::build(&combined, &refs);
+        if with_propagation {
+            PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
+        }
+        let pdg_refs: Vec<Reference> = pdg.edges.into_iter().map(|e| Reference {
+            from: SymbolId(e.from), to: SymbolId(e.to), kind: RefKind::Call, file: String::new(), line: 0,
+        }).collect();
+        let out: ImpactOutput = compute_impact(&seeds, &index, &pdg_refs, &opts);
+        match fmt {
+            OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
+            OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
+            OutputFormat::Dot => println!("{}", dimpact::to_dot(&out)),
+            OutputFormat::Html => println!("{}", dimpact::to_html(&out)),
+        }
+        return Ok(());
+    }
+
     let out: ImpactOutput = engine.impact_from_symbols(&seeds, lang, &opts)?;
     match fmt {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),

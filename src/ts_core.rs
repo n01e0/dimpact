@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use tree_sitter::StreamingIterator;
 
 #[derive(Debug, Deserialize)]
 pub struct Spec {
@@ -124,7 +125,10 @@ impl QueryRunner {
         let mut qc = tree_sitter::QueryCursor::new();
         let names = q.capture_names();
         let mut out = Vec::new();
-        for m in qc.matches(q, root, src.as_bytes()) {
+        // tree-sitter 0.25+: QueryMatches does not implement Iterator by value;
+        // iterate over &mut QueryMatches instead.
+        let mut matches = qc.matches(q, root, src.as_bytes());
+        while let Some(m) = matches.next() {
             let mut caps = Vec::with_capacity(m.captures.len());
             for c in m.captures {
                 let name = names[c.index as usize].to_string();

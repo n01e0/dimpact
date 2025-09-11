@@ -45,7 +45,8 @@ CLI Overview
   - `--direction callers|callees|both` : traversal direction (default: callers)
   - `--max-depth N`             : max traversal depth (default: 100)
   - `--with-edges`              : include reference edges in output
-  - `--with-pdg`                : use PDG-based dependence analysis (experimental, Rust only)
+  - `--with-pdg`                : use PDG-based dependence analysis (Rust/Ruby for DFG)
+  - `--with-propagation`        : enable symbolic propagation across variables and functions (implies PDG)
   - `--engine auto|ts|lsp`      : analysis engine (default: auto)
   - `--engine-lsp-strict`       : strict mode for LSP engine
   - `--engine-dump-capabilities`: dump engine capabilities to stderr

@@ -1,4 +1,3 @@
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -42,4 +41,3 @@ fn tsx_changed_impact_callers() {
     let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     assert!(out.contains("\"Foo\""), "impact should include Foo, got: {}", out);
 }
-

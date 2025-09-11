@@ -1,4 +1,3 @@
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -46,4 +45,3 @@ fn ts_reexport_chain_callers() {
     let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     assert!(out.contains("\"f\""), "impact should include f, got: {}", out);
 }
-

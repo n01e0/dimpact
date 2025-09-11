@@ -1,4 +1,3 @@
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -47,4 +46,3 @@ fn edges_are_included_when_flag_set() {
     assert!(v["edges"].is_array());
     assert!(v["edges"].as_array().unwrap().len() > 0);
 }
-

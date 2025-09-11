@@ -375,6 +375,46 @@ impl PdgBuilder {
         }
         pdg
     }
+
+    /// Augment PDG with symbolic propagation bridges.
+    /// Heuristics:
+    /// - Connect variable uses at call sites to callee symbols.
+    /// - Connect callee symbols to variable definitions at call sites (returned value captured).
+    /// - Connect function/method symbols to all variable def/use nodes within their range.
+    pub fn augment_symbolic_propagation(pdg: &mut DataFlowGraph, refs: &[Reference], index: &crate::ir::reference::SymbolIndex) {
+        use crate::ir::SymbolKind;
+        // Index DFG nodes by (file,line)
+        let mut uses_by_loc: std::collections::HashMap<(String,u32), Vec<String>> = std::collections::HashMap::new();
+        let mut defs_by_loc: std::collections::HashMap<(String,u32), Vec<String>> = std::collections::HashMap::new();
+        for n in &pdg.nodes {
+            let key = (n.file.clone(), n.line);
+            if n.id.contains(":use:") { uses_by_loc.entry(key.clone()).or_default().push(n.id.clone()); }
+            if n.id.contains(":def:") { defs_by_loc.entry(key).or_default().push(n.id.clone()); }
+        }
+        // 1) Call-site bridges
+        for r in refs {
+            let key = (r.file.clone(), r.line);
+            if let Some(uses) = uses_by_loc.get(&key) {
+                for u in uses {
+                    pdg.edges.push(DfgEdge { from: u.clone(), to: r.to.0.clone(), kind: DependencyKind::Data });
+                }
+            }
+            if let Some(defs) = defs_by_loc.get(&key) {
+                for d in defs {
+                    pdg.edges.push(DfgEdge { from: r.to.0.clone(), to: d.clone(), kind: DependencyKind::Data });
+                }
+            }
+        }
+        // 2) Intra-function bridges: symbol -> all DFG nodes within its span
+        for s in &index.symbols {
+            if !matches!(s.kind, SymbolKind::Function | SymbolKind::Method) { continue; }
+            for n in &pdg.nodes {
+                if n.file == s.file && n.line >= s.range.start_line && n.line <= s.range.end_line {
+                    pdg.edges.push(DfgEdge { from: s.id.0.clone(), to: n.id.clone(), kind: DependencyKind::Data });
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,4 @@
-#![cfg(feature = "ts")]
-use assert_cmd::cargo::CommandCargoExt;
+#![allow(unused)]
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -57,4 +56,3 @@ fn ruby_changed_and_impact() {
     let out2 = String::from_utf8_lossy(assert2.get_output().stdout.as_ref());
     assert!(out2.contains("\"foo\""));
 }
-

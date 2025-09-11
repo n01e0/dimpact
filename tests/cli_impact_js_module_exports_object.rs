@@ -1,4 +1,3 @@
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -43,4 +42,3 @@ fn js_module_exports_object_callers() {
     let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     assert!(out.contains("\"c1\""), "impact should include c1, got: {}", out);
 }
-
