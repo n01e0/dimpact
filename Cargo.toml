@@ -23,25 +23,25 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 thiserror = "1.0"
 anyhow = "1.0"
-regex = "1.10"
+regex = "1.11"
 walkdir = "2.5"
 tree-sitter = { workspace = true }
 tree-sitter-rust = { workspace = true }
 tree-sitter-ruby = { workspace = true }
 tree-sitter-javascript = { workspace = true }
 tree-sitter-typescript = { workspace = true }
-log = "0.4.27"
+log = "0.4.28"
 env_logger = "0.11.8"
 rusqlite = { version = "0.31", features = ["bundled"] }
-blake3 = "1.5"
-rayon = "1.10"
+blake3 = "1.8"
+rayon = "1.11"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
 assert_cmd = "2.0"
 predicates = "3.1"
-tempfile = "3.10"
-serial_test = "3.0"
+tempfile = "3.22"
+serial_test = "3.2"
 
 [profile.release]
 lto = true
