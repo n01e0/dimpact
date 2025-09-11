@@ -27,6 +27,7 @@ pub struct ImpactOutput {
     pub impacted_symbols: Vec<Symbol>,
     pub impacted_files: Vec<String>,
     pub edges: Vec<Reference>,
+    pub impacted_by_file: std::collections::HashMap<String, Vec<Symbol>>, // file -> impacted symbols in that file
 }
 
 /// Build symbol index and resolved reference edges for the current workspace (cwd).
@@ -324,7 +325,10 @@ pub fn compute_impact(
             .cloned()
             .collect()
     } else { Vec::new() };
-    ImpactOutput { changed_symbols: changed.to_vec(), impacted_symbols, impacted_files, edges }
+    let mut impacted_by_file: std::collections::HashMap<String, Vec<Symbol>> = std::collections::HashMap::new();
+    for s in &impacted_symbols { impacted_by_file.entry(s.file.clone()).or_default().push(s.clone()); }
+    for v in impacted_by_file.values_mut() { v.sort_by(|a,b| a.id.0.cmp(&b.id.0)); v.dedup_by(|a,b| a.id.0 == b.id.0); }
+    ImpactOutput { changed_symbols: changed.to_vec(), impacted_symbols, impacted_files, edges, impacted_by_file }
 }
 
 #[cfg(test)]

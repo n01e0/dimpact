@@ -205,6 +205,53 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
     Ok(st)
 }
 
+/// Verify cache consistency against current workspace without requiring a diff.
+/// - Recompute digests for current files and update entries whose digest/present/lang changed
+/// - Mark missing files as present=0 and drop their symbols/edges
+pub fn verify(conn: &mut Connection) -> anyhow::Result<CacheStats> {
+    // Load DB snapshot
+    let mut db_files: std::collections::HashMap<String, (String, i64, String)> = std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT path, digest, present, lang FROM files")?;
+        let rows = stmt.query_map([], |r| {
+            let p: String = r.get(0)?;
+            let dig: String = r.get(1)?;
+            let present: i64 = r.get(2)?;
+            let lang: String = r.get(3)?;
+            Ok((p, dig, present, lang))
+        })?;
+        for r in rows { let (p, dig, pr, lang) = r?; db_files.insert(p, (dig, pr, lang)); }
+    }
+
+    // Scan current workspace files
+    let fs_files = list_workspace_files();
+    let fs_set: std::collections::HashSet<String> = fs_files.iter().cloned().collect();
+
+    // Determine updates for existing files
+    let mut to_update: Vec<String> = Vec::new();
+    for p in &fs_files {
+        let dig = file_digest(p);
+        let present_expected: i64 = 1;
+        let lang = guess_lang_from_ext(p).to_string();
+        match db_files.get(p) {
+            None => to_update.push(p.clone()),
+            Some((db_dig, db_present, db_lang)) => {
+                if db_dig != &dig || *db_present != present_expected || db_lang != &lang { to_update.push(p.clone()); }
+            }
+        }
+    }
+    // Determine updates for files that were present but are now missing
+    for (p, (_dig, pr, _lang)) in db_files.iter() {
+        if *pr == 1 && !fs_set.contains(p) {
+            to_update.push(p.clone());
+        }
+    }
+
+    // Dedup in case of overlap
+    to_update.sort(); to_update.dedup();
+    update_paths(conn, &to_update)
+}
+
 pub fn update_paths(conn: &mut Connection, paths: &[String]) -> anyhow::Result<CacheStats> {
     if paths.is_empty() { return stats(conn); }
     // Analyze changed files in parallel

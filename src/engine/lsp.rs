@@ -461,7 +461,10 @@ impl super::AnalysisEngine for LspEngine {
                                     let mut files: Vec<String> = callees.iter().map(|s| s.file.clone()).collect();
                                     files.sort(); files.dedup();
                                     let edges = if opts.with_edges.unwrap_or(false) { extra_edges } else { Vec::new() };
-                                    return Ok(crate::impact::ImpactOutput { changed_symbols: changed.changed_symbols.clone(), impacted_symbols: callees, impacted_files: files, edges });
+                                    let mut impacted_by_file: std::collections::HashMap<String, Vec<crate::ir::Symbol>> = std::collections::HashMap::new();
+                                    for s in &callees { impacted_by_file.entry(s.file.clone()).or_default().push(s.clone()); }
+                                    for v in impacted_by_file.values_mut() { v.sort_by(|a,b| a.id.0.cmp(&b.id.0)); v.dedup_by(|a,b| a.id.0 == b.id.0); }
+                                    return Ok(crate::impact::ImpactOutput { changed_symbols: changed.changed_symbols.clone(), impacted_symbols: callees, impacted_files: files, edges, impacted_by_file });
                                 }
                             }
                             // LSPでの全体グラフ構築にトライ
@@ -619,7 +622,7 @@ fn lsp_impact_bfs(sess: &mut LspSession, changed: Vec<crate::ir::Symbol>, opts: 
     if seeded_roots == 0 {
         let impacted_symbols: Vec<crate::ir::Symbol> = Vec::new();
         let impacted_files: Vec<String> = Vec::new();
-        return Ok(crate::impact::ImpactOutput { changed_symbols: changed, impacted_symbols, impacted_files, edges: Vec::new() });
+        return Ok(crate::impact::ImpactOutput { changed_symbols: changed, impacted_symbols, impacted_files, edges: Vec::new(), impacted_by_file: std::collections::HashMap::new() });
     }
 
     while let Some((item, d)) = q.pop_front() {
@@ -667,7 +670,10 @@ fn lsp_impact_bfs(sess: &mut LspSession, changed: Vec<crate::ir::Symbol>, opts: 
     let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
     impacted_files.sort(); impacted_files.dedup();
     let edges = if opts.with_edges.unwrap_or(false) { edges } else { Vec::new() };
-    Ok(crate::impact::ImpactOutput { changed_symbols: changed, impacted_symbols, impacted_files, edges })
+    let mut impacted_by_file: std::collections::HashMap<String, Vec<crate::ir::Symbol>> = std::collections::HashMap::new();
+    for s in &impacted_symbols { impacted_by_file.entry(s.file.clone()).or_default().push(s.clone()); }
+    for v in impacted_by_file.values_mut() { v.sort_by(|a,b| a.id.0.cmp(&b.id.0)); v.dedup_by(|a,b| a.id.0 == b.id.0); }
+    Ok(crate::impact::ImpactOutput { changed_symbols: changed, impacted_symbols, impacted_files, edges, impacted_by_file })
 }
 
 // Heuristic: scan the function source for simple callsites like `name(` or `path::name(`,
@@ -966,7 +972,10 @@ fn lsp_impact_references(sess: &mut LspSession, changed: Vec<crate::ir::Symbol>,
     let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
     impacted_files.sort(); impacted_files.dedup();
     let edges = if opts.with_edges.unwrap_or(false) { edges } else { Vec::new() };
-    Ok(crate::impact::ImpactOutput { changed_symbols: changed, impacted_symbols, impacted_files, edges })
+    let mut impacted_by_file: std::collections::HashMap<String, Vec<crate::ir::Symbol>> = std::collections::HashMap::new();
+    for s in &impacted_symbols { impacted_by_file.entry(s.file.clone()).or_default().push(s.clone()); }
+    for v in impacted_by_file.values_mut() { v.sort_by(|a,b| a.id.0.cmp(&b.id.0)); v.dedup_by(|a,b| a.id.0 == b.id.0); }
+    Ok(crate::impact::ImpactOutput { changed_symbols: changed, impacted_symbols, impacted_files, edges, impacted_by_file })
 }
 
 fn enclosing_symbol_in_doc(items: &[serde_json::Value], file: &str, line0: u32) -> Option<crate::ir::Symbol> {

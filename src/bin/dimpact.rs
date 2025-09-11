@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum, CommandFactory};
 use dimpact::{parse_unified_diff, DiffParseError};
 use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{ImpactDirection, ImpactOptions, ImpactOutput};
@@ -162,6 +162,11 @@ enum Command {
     Cache{
         #[command(subcommand)] cmd: CacheCmd,
     },
+    /// Generate shell completion script for this CLI
+    Completions{
+        /// Target shell (bash, zsh, fish, powershell, elvish)
+        #[arg(value_enum)] shell: CompletionShell,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -172,6 +177,13 @@ enum CacheCmd {
         #[arg(long = "scope", value_enum, default_value_t = CacheScopeOpt::Local)]
         scope: CacheScopeOpt,
         /// Override cache directory (takes precedence over scope)
+        #[arg(long = "dir")] dir: Option<String>,
+    },
+    /// Update cache consistency against current workspace (no diff required)
+    #[command(alias = "verify")]
+    Update{
+        #[arg(long = "scope", value_enum, default_value_t = CacheScopeOpt::Local)]
+        scope: CacheScopeOpt,
         #[arg(long = "dir")] dir: Option<String>,
     },
     /// Show cache stats (files/symbols/edges)
@@ -211,6 +223,7 @@ fn main() -> anyhow::Result<()> {
             }
             Command::Id{ path, line, name, lang, kind, raw } => run_id(args.format, path.as_deref(), line, name.as_deref(), lang, kind, raw),
             Command::Cache{ cmd } => run_cache(cmd),
+            Command::Completions{ shell } => run_completions(shell),
         }?;
         return Ok(());
     }
@@ -252,6 +265,17 @@ fn run_cache(cmd: CacheCmd) -> anyhow::Result<()> {
             let st = dimpact::cache::build_all(&mut db.conn)?;
             eprintln!("cache build: files={} symbols={} edges={}", st.files, st.symbols, st.edges);
         }
+        CacheCmd::Update{ scope, dir } => {
+            let scope = match scope { CacheScopeOpt::Local => dimpact::cache::CacheScope::Local, CacheScopeOpt::Global => dimpact::cache::CacheScope::Global };
+            let path_override = dir.as_deref().map(std::path::Path::new);
+            let mut db = dimpact::cache::open(scope, path_override)?;
+            let st_before = dimpact::cache::stats(&db.conn)?;
+            let st_after = dimpact::cache::verify(&mut db.conn)?;
+            eprintln!(
+                "cache update: files={} symbols={} edges={} (was files={} symbols={} edges={})",
+                st_after.files, st_after.symbols, st_after.edges, st_before.files, st_before.symbols, st_before.edges
+            );
+        }
         CacheCmd::Stats{ scope, dir } => {
             let scope = match scope { CacheScopeOpt::Local => dimpact::cache::CacheScope::Local, CacheScopeOpt::Global => dimpact::cache::CacheScope::Global };
             let path_override = dir.as_deref().map(std::path::Path::new);
@@ -266,6 +290,20 @@ fn run_cache(cmd: CacheCmd) -> anyhow::Result<()> {
             dimpact::cache::clear(&paths)?;
             eprintln!("cache cleared: {}", paths.db.display());
         }
+    }
+    Ok(())
+}
+
+fn run_completions(shell: CompletionShell) -> anyhow::Result<()> {
+    use clap_complete::{generate, shells};
+    let mut cmd = Args::command();
+    let name = cmd.get_name().to_string();
+    match shell {
+        CompletionShell::Bash => generate(shells::Bash, &mut cmd, name, &mut std::io::stdout()),
+        CompletionShell::Zsh => generate(shells::Zsh, &mut cmd, name, &mut std::io::stdout()),
+        CompletionShell::Fish => generate(shells::Fish, &mut cmd, name, &mut std::io::stdout()),
+        CompletionShell::PowerShell => generate(shells::PowerShell, &mut cmd, name, &mut std::io::stdout()),
+        CompletionShell::Elvish => generate(shells::Elvish, &mut cmd, name, &mut std::io::stdout()),
     }
     Ok(())
 }
@@ -780,3 +818,5 @@ fn impact_from_diff(args: Args, files: Vec<dimpact::FileChanges>) -> anyhow::Res
     }
     Ok(())
 }
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CompletionShell { Bash, Zsh, Fish, PowerShell, Elvish }

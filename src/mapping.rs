@@ -25,10 +25,13 @@ pub fn compute_changed_symbols(
     diffs: &[FileChanges],
     lang: LanguageMode,
 ) -> anyhow::Result<ChangedOutput> {
-    let changed_files: Vec<String> = diffs
-        .iter()
-        .filter_map(|fc| fc.new_path.clone())
-        .collect();
+    // Include both new_path (added/modified) and old_path for deletions/renames,
+    // so cache can mark removed files as present=0 when they no longer exist.
+    let mut changed_files: Vec<String> = Vec::new();
+    for fc in diffs {
+        if let Some(p) = fc.new_path.clone() { changed_files.push(p); }
+        else if let Some(op) = fc.old_path.clone() { changed_files.push(op); }
+    }
 
     let mut changed_lines_by_file: HashMap<String, HashSet<u32>> = HashMap::new();
     for fc in diffs {
