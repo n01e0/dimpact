@@ -59,6 +59,11 @@ CLI Overview
   git diff --no-ext-diff | dimpact impact --with-pdg -f dot
   ```
 
+Path highlighting in DOT/HTML
+- When running impact with `--with-edges`, the DOT and HTML outputs highlight edges that are on a shortest path from any changed symbol to any impacted symbol.
+- This helps visually trace “how” the impact propagates from changes to affected code.
+- HTML view provides filters and automatic layout; highlighted path edges are shown in red.
+
 Engine Selection
 - Auto: Tree‑Sitter by default (recommended)
 - LSP (experimental): `--engine lsp`

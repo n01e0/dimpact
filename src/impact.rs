@@ -319,12 +319,25 @@ pub fn compute_impact(
     impacted_files.sort(); impacted_files.dedup();
 
     let edges = if opts.with_edges.unwrap_or(false) {
-        let node_set: std::collections::HashSet<&str> = changed.iter().map(|s| s.id.0.as_str()).chain(by_id.keys().cloned().filter(|id| impacted_symbols.iter().any(|s| s.id.0.as_str()==*id))).collect();
+        // Include edges with at least one endpoint in the node set.
+        // Renderers will add missing endpoints as context nodes to avoid dangling errors.
+        let node_set: std::collections::HashSet<&str> = changed
+            .iter()
+            .map(|s| s.id.0.as_str())
+            .chain(
+                by_id
+                    .keys()
+                    .cloned()
+                    .filter(|id| impacted_symbols.iter().any(|s| s.id.0.as_str() == *id)),
+            )
+            .collect();
         refs.iter()
             .filter(|e| node_set.contains(e.from.0.as_str()) || node_set.contains(e.to.0.as_str()))
             .cloned()
             .collect()
-    } else { Vec::new() };
+    } else {
+        Vec::new()
+    };
     let mut impacted_by_file: std::collections::HashMap<String, Vec<Symbol>> = std::collections::HashMap::new();
     for s in &impacted_symbols { impacted_by_file.entry(s.file.clone()).or_default().push(s.clone()); }
     for v in impacted_by_file.values_mut() { v.sort_by(|a,b| a.id.0.cmp(&b.id.0)); v.dedup_by(|a,b| a.id.0 == b.id.0); }
