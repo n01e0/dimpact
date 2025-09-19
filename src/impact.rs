@@ -15,10 +15,15 @@ pub struct ImpactOptions {
     pub direction: ImpactDirection,
     pub max_depth: Option<usize>,
     pub with_edges: Option<bool>,
+    /// Directories to ignore (relative path prefixes). If a symbol's file
+    /// path starts with any of these prefixes (or equals to it), the symbol
+    /// is excluded from seeds and results.
+    #[serde(default)]
+    pub ignore_dirs: Vec<String>,
 }
 
 impl Default for ImpactOptions {
-    fn default() -> Self { Self { direction: ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false) } }
+    fn default() -> Self { Self { direction: ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false), ignore_dirs: Vec::new() } }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,6 +33,25 @@ pub struct ImpactOutput {
     pub impacted_files: Vec<String>,
     pub edges: Vec<Reference>,
     pub impacted_by_file: std::collections::HashMap<String, Vec<Symbol>>, // file -> impacted symbols in that file
+}
+
+/// Return true if `path` is under any of the given `ignore_dirs` prefixes.
+/// Matching is done on normalized, relative paths without leading "./".
+pub fn path_is_ignored(path: &str, ignore_dirs: &[String]) -> bool {
+    if ignore_dirs.is_empty() { return false; }
+    // Normalize path
+    let mut p = path.replace('\\', "/");
+    if let Some(stripped) = p.strip_prefix("./") { p = stripped.to_string(); }
+    for dir in ignore_dirs {
+        if dir.is_empty() { continue; }
+        let mut d = dir.replace('\\', "/");
+        if let Some(stripped) = d.strip_prefix("./") { d = stripped.to_string(); }
+        if d.ends_with('/') { d.pop(); }
+        if p == d || p.starts_with(&(d.clone() + "/")) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Build symbol index and resolved reference edges for the current workspace (cwd).
@@ -288,7 +312,10 @@ pub fn compute_impact(
 
     let mut seen: HashSet<&str> = HashSet::new();
     let mut q: VecDeque<(&str, usize)> = VecDeque::new();
-    for s in changed { q.push_back((s.id.0.as_str(), 0)); }
+    // Seed queue with non-ignored changed symbols
+    for s in changed {
+        if !path_is_ignored(&s.file, &opts.ignore_dirs) { q.push_back((s.id.0.as_str(), 0)); }
+    }
     while let Some((cur, d)) = q.pop_front() {
         if !seen.insert(cur) { continue; }
         if let Some(maxd) = opts.max_depth && d >= maxd { continue; }
@@ -312,6 +339,10 @@ pub fn compute_impact(
         .filter(|id| !changed_ids.contains(*id))
         .filter_map(|id| by_id.get(id).cloned().cloned())
         .collect();
+    // Filter out symbols located in ignored directories
+    if !opts.ignore_dirs.is_empty() {
+        impacted_symbols.retain(|s| !path_is_ignored(&s.file, &opts.ignore_dirs));
+    }
     impacted_symbols.sort_by(|a,b| a.id.0.cmp(&b.id.0));
     impacted_symbols.dedup_by(|a,b| a.id.0 == b.id.0);
 

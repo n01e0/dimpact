@@ -63,7 +63,7 @@ fn lsp_engine_falls_back_impact_callers() {
 
     let cfg = dimpact::EngineConfig { lsp_strict: false, dump_capabilities: false, mock_lsp: false, mock_caps: None };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Auto, cfg);
-    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false) };
+    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false), ignore_dirs: Vec::new() };
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
@@ -109,7 +109,7 @@ fn lsp_engine_strict_mock_succeeds() {
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
     let changed = engine.changed_symbols(&files, dimpact::LanguageMode::Rust).unwrap();
-    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false) };
+    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false), ignore_dirs: Vec::new() };
     let out = engine.impact(&files, dimpact::LanguageMode::Rust, &opts).unwrap();
     std::env::set_current_dir(cwd).unwrap();
     // no global env var modifications
@@ -150,7 +150,7 @@ fn lsp_engine_strict_impact_errors_when_caps_missing() {
     let caps = CapsHint { document_symbol: true, workspace_symbol: true, call_hierarchy: false, references: false, definition: false };
     let cfg = dimpact::EngineConfig { lsp_strict: true, dump_capabilities: false, mock_lsp: true, mock_caps: Some(caps) };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
-    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(1), with_edges: Some(false) };
+    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(1), with_edges: Some(false), ignore_dirs: Vec::new() };
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();

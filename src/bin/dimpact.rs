@@ -81,6 +81,9 @@ struct Args {
     /// Include reference edges in impact output
     #[arg(long = "with-edges", default_value_t = false)]
     with_edges: bool,
+    /// Ignore directories (relative prefixes). Repeatable.
+    #[arg(long = "ignore-dir")]
+    ignore_dir: Vec<String>,
 
     /// Analysis engine: auto (default), ts, lsp
     #[arg(long = "engine", value_enum, default_value_t = EngineOpt::Auto)]
@@ -144,6 +147,8 @@ enum Command {
         #[arg(long = "engine-dump-capabilities", default_value_t = false)] engine_dump_capabilities: bool,
         #[arg(long = "seed-symbol")] seed_symbols: Vec<String>,
         #[arg(long = "seed-json")] seed_json: Option<String>,
+        /// Ignore directories (relative prefixes). Repeatable.
+        #[arg(long = "ignore-dir")] ignore_dir: Vec<String>,
     },
     /// Generate a Symbol ID from file, line and name
     Id{
@@ -220,8 +225,8 @@ fn main() -> anyhow::Result<()> {
             Command::Changed{ lang, engine, engine_lsp_strict, engine_dump_capabilities } => {
                 run_changed(args.format, lang, engine, engine_lsp_strict, engine_dump_capabilities)
             }
-            Command::Impact{ lang, direction, max_depth, with_edges, with_pdg, with_propagation, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json } => {
-                run_impact(args.format, lang, direction, max_depth, with_edges, with_pdg, with_propagation, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json)
+            Command::Impact{ lang, direction, max_depth, with_edges, with_pdg, with_propagation, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json, ignore_dir } => {
+                run_impact(args.format, lang, direction, max_depth, with_edges, with_pdg, with_propagation, engine, engine_lsp_strict, engine_dump_capabilities, seed_symbols, seed_json, ignore_dir)
             }
             Command::Id{ path, line, name, lang, kind, raw } => run_id(args.format, path.as_deref(), line, name.as_deref(), lang, kind, raw),
             Command::Cache{ cmd } => run_cache(cmd),
@@ -252,6 +257,7 @@ fn main() -> anyhow::Result<()> {
                 args.engine_dump_capabilities,
                 args.seed_symbols,
                 args.seed_json,
+                args.ignore_dir,
             )?;
         }
     }
@@ -493,6 +499,7 @@ fn run_impact(
     dump_caps: bool,
     seed_symbols: Vec<String>,
     seed_json: Option<String>,
+    ignore_dir: Vec<String>,
 ) -> anyhow::Result<()> {
     // Gather seeds
     let mut seeds: Vec<dimpact::Symbol> = Vec::new();
@@ -524,7 +531,7 @@ fn run_impact(
         }
     };
     let direction = match dir_opt { DirectionOpt::Callers => ImpactDirection::Callers, DirectionOpt::Callees => ImpactDirection::Callees, DirectionOpt::Both => ImpactDirection::Both };
-    let opts = ImpactOptions { direction, max_depth: max_depth.or(Some(100)), with_edges: Some(with_edges) };
+    let opts = ImpactOptions { direction, max_depth: max_depth.or(Some(100)), with_edges: Some(with_edges), ignore_dirs: ignore_dir.clone() };
     let ekind = match engine_opt { EngineOpt::Auto => EngineKind::Auto, EngineOpt::Ts => EngineKind::Ts, EngineOpt::Lsp => EngineKind::Lsp };
     let ecfg = EngineConfig { lsp_strict, dump_capabilities: dump_caps, mock_lsp: std::env::var("DIMPACT_TEST_LSP_MOCK").ok().as_deref() == Some("1"), mock_caps: None };
     let engine = make_engine(ekind, ecfg);
@@ -546,8 +553,8 @@ fn run_impact(
             Err(DiffParseError::MissingHeader) => Vec::new(),
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
-        log::info!("mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} pdg={}",
-            ekind, files.len(), lang, direction, opts.max_depth, with_edges, with_pdg);
+        log::info!("mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} pdg={} ignore_dirs={:?}",
+            ekind, files.len(), lang, direction, opts.max_depth, with_edges, with_pdg, opts.ignore_dirs);
         if with_pdg || with_propagation {
             // Build changed symbols and project graph
             let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
@@ -615,7 +622,7 @@ fn run_impact(
         return Ok(());
     }
 
-    log::info!("mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={}", ekind, seeds.len(), lang, direction, opts.max_depth, with_edges);
+    log::info!("mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={} ignore_dirs={:?}", ekind, seeds.len(), lang, direction, opts.max_depth, with_edges, opts.ignore_dirs);
     if with_pdg || with_propagation {
         // PDG path for seeds: build index/refs from cache and DFG for seed files
         let (scope, dir_override) = cache::scope_from_env();
@@ -841,7 +848,7 @@ fn impact_from_diff(args: Args, files: Vec<dimpact::FileChanges>) -> anyhow::Res
         DirectionOpt::Callees => ImpactDirection::Callees,
         DirectionOpt::Both => ImpactDirection::Both,
     };
-    let opts = ImpactOptions { direction, max_depth: args.max_depth.or(Some(100)), with_edges: Some(args.with_edges) };
+    let opts = ImpactOptions { direction, max_depth: args.max_depth.or(Some(100)), with_edges: Some(args.with_edges), ignore_dirs: args.ignore_dir.clone() };
     let ekind = match args.engine { EngineOpt::Auto => EngineKind::Auto, EngineOpt::Ts => EngineKind::Ts, EngineOpt::Lsp => EngineKind::Lsp };
     let ecfg = EngineConfig { lsp_strict: args.engine_lsp_strict, dump_capabilities: args.engine_dump_capabilities, mock_lsp: false, mock_caps: None };
     let engine = make_engine(ekind, ecfg);

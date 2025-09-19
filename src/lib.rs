@@ -13,7 +13,7 @@ pub use diff::{parse_unified_diff, Change, ChangeKind, DiffParseError, FileChang
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
 pub use mapping::{ChangedOutput, LanguageMode, compute_changed_symbols};
 pub use dfg::{DependencyKind, DfgNode, DfgEdge, DataFlowGraph, DfgBuilder};
-pub use impact::{build_project_graph, compute_impact, ImpactDirection, ImpactOptions, ImpactOutput};
+pub use impact::{build_project_graph, compute_impact, ImpactDirection, ImpactOptions, ImpactOutput, path_is_ignored};
 pub use languages::LanguageKind;
 pub use engine::{AnalysisEngine, EngineKind};
 pub use engine::EngineConfig;
