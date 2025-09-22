@@ -50,9 +50,12 @@ fn cli_mode_impact_basic_callers() {
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let assert = cmd
         .current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--lang").arg("rust")
-        .arg("--format").arg("json")
+        .arg("--mode")
+        .arg("impact")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
         .write_stdin(diff)
         .assert()
         .success()

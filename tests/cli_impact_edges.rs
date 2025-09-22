@@ -28,17 +28,25 @@ fn edges_are_included_when_flag_set() {
     fs::write(repo.join("main.rs"), "fn bar() {}\nfn foo() { bar(); }\n").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "init", "-q"]);
-    fs::write(repo.join("main.rs"), "fn bar() { let _x=1; }\nfn foo() { bar(); }\n").unwrap();
+    fs::write(
+        repo.join("main.rs"),
+        "fn bar() { let _x=1; }\nfn foo() { bar(); }\n",
+    )
+    .unwrap();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
     let diff = String::from_utf8(diff_out.stdout).unwrap();
 
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callers")
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
         .arg("--with-edges")
-        .arg("--lang").arg("rust")
-        .arg("--format").arg("json")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
         .write_stdin(diff);
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());

@@ -1,17 +1,20 @@
 use anyhow::Context;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ir::reference::{Reference, SymbolIndex, UnresolvedRef};
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
-use crate::languages::{analyzer_for_path, LanguageKind};
+use crate::languages::{LanguageKind, analyzer_for_path};
 type SymbolsByPath = std::collections::HashMap<String, Vec<Symbol>>;
 type UrefsByPath = std::collections::HashMap<String, Vec<UnresolvedRef>>;
 type ImportMapByPath = std::collections::HashMap<String, std::collections::HashMap<String, String>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheScope { Local, Global }
+pub enum CacheScope {
+    Local,
+    Global,
+}
 
 #[derive(Debug, Clone)]
 pub struct CachePaths {
@@ -35,10 +38,18 @@ pub struct CacheStats {
 
 const SCHEMA_VERSION: &str = "v1";
 
-pub fn resolve_paths(scope: CacheScope, override_dir: Option<&Path>, repo_root: Option<&Path>) -> anyhow::Result<CachePaths> {
+pub fn resolve_paths(
+    scope: CacheScope,
+    override_dir: Option<&Path>,
+    repo_root: Option<&Path>,
+) -> anyhow::Result<CachePaths> {
     if let Some(dir) = override_dir {
         let dir = dir.to_path_buf();
-        return Ok(CachePaths { db: dir.join("index.db"), lock: dir.join(".lock"), dir });
+        return Ok(CachePaths {
+            db: dir.join("index.db"),
+            lock: dir.join(".lock"),
+            dir,
+        });
     }
     match scope {
         CacheScope::Local => {
@@ -46,7 +57,11 @@ pub fn resolve_paths(scope: CacheScope, override_dir: Option<&Path>, repo_root: 
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| find_repo_root().unwrap_or_else(|| PathBuf::from(".")));
             let dir = root.join(".dimpact").join("cache").join(SCHEMA_VERSION);
-            Ok(CachePaths { db: dir.join("index.db"), lock: dir.join(".lock"), dir })
+            Ok(CachePaths {
+                db: dir.join("index.db"),
+                lock: dir.join(".lock"),
+                dir,
+            })
         }
         CacheScope::Global => {
             let xdg = std::env::var_os("XDG_CONFIG_HOME")
@@ -55,16 +70,26 @@ pub fn resolve_paths(scope: CacheScope, override_dir: Option<&Path>, repo_root: 
                 .unwrap_or_else(|| PathBuf::from(".config"));
             let root = find_repo_root().unwrap_or_else(|| PathBuf::from("."));
             let key = repo_key(&root);
-            let dir = xdg.join("dimpact").join("cache").join(SCHEMA_VERSION).join(key);
-            Ok(CachePaths { db: dir.join("index.db"), lock: dir.join(".lock"), dir })
+            let dir = xdg
+                .join("dimpact")
+                .join("cache")
+                .join(SCHEMA_VERSION)
+                .join(key);
+            Ok(CachePaths {
+                db: dir.join("index.db"),
+                lock: dir.join(".lock"),
+                dir,
+            })
         }
     }
 }
 
 pub fn open(scope: CacheScope, override_dir: Option<&Path>) -> anyhow::Result<CacheDb> {
     let paths = resolve_paths(scope, override_dir, None)?;
-    fs::create_dir_all(&paths.dir).with_context(|| format!("create cache dir: {}", paths.dir.display()))?;
-    let mut conn = Connection::open(&paths.db).with_context(|| format!("open cache db: {}", paths.db.display()))?;
+    fs::create_dir_all(&paths.dir)
+        .with_context(|| format!("create cache dir: {}", paths.dir.display()))?;
+    let mut conn = Connection::open(&paths.db)
+        .with_context(|| format!("open cache db: {}", paths.db.display()))?;
     init_db(&mut conn)?;
     Ok(CacheDb { conn, paths })
 }
@@ -139,14 +164,24 @@ fn init_db(conn: &mut Connection) -> anyhow::Result<()> {
 
 pub fn stats(conn: &Connection) -> anyhow::Result<CacheStats> {
     Ok(CacheStats {
-        files: conn.query_row("SELECT COUNT(*) FROM files WHERE present=1", [], |r| r.get(0)).unwrap_or(0),
-        symbols: conn.query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0)).unwrap_or(0),
-        edges: conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0)).unwrap_or(0),
+        files: conn
+            .query_row("SELECT COUNT(*) FROM files WHERE present=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0),
+        symbols: conn
+            .query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))
+            .unwrap_or(0),
+        edges: conn
+            .query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))
+            .unwrap_or(0),
     })
 }
 
 pub fn clear(paths: &CachePaths) -> anyhow::Result<()> {
-    if paths.db.exists() { fs::remove_file(&paths.db).ok(); }
+    if paths.db.exists() {
+        fs::remove_file(&paths.db).ok();
+    }
     // Keep dir and lock; it's fine
     Ok(())
 }
@@ -171,7 +206,8 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
             tx.execute(
                 "INSERT INTO files(path, lang, digest, mtime, present) VALUES(?1, ?2, ?3, ?4, 1)",
                 params![&s.file, &lang, dig, file_mtime(&s.file)],
-            ).unwrap();
+            )
+            .unwrap();
             tx.last_insert_rowid()
         });
     }
@@ -179,15 +215,27 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
     // Insert symbols
     {
         let mut sym_stmt = tx.prepare("INSERT INTO symbols(sid, file_id, name, kind, start_line, end_line, language, sig_hash, parent_sid) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
-    for s in &index.symbols {
-        let file_id = *file_ids.get(&s.file).unwrap();
-        sym_stmt.execute(params![&s.id.0, file_id, &s.name, kind_to_str(&s.kind), s.range.start_line as i64, s.range.end_line as i64, &s.language, sig_hash_for(s), Option::<String>::None])?;
-    }
+        for s in &index.symbols {
+            let file_id = *file_ids.get(&s.file).unwrap();
+            sym_stmt.execute(params![
+                &s.id.0,
+                file_id,
+                &s.name,
+                kind_to_str(&s.kind),
+                s.range.start_line as i64,
+                s.range.end_line as i64,
+                &s.language,
+                sig_hash_for(s),
+                Option::<String>::None
+            ])?;
+        }
     }
 
     // Insert edges
     {
-        let mut edge_stmt = tx.prepare("INSERT INTO edges(from_sid, to_sid, kind, file_id, line) VALUES(?1, ?2, ?3, ?4, ?5)")?;
+        let mut edge_stmt = tx.prepare(
+            "INSERT INTO edges(from_sid, to_sid, kind, file_id, line) VALUES(?1, ?2, ?3, ?4, ?5)",
+        )?;
         for e in &refs {
             // file_id derived from e.file
             let file_id = *file_ids.entry(e.file.clone()).or_insert_with(|| {
@@ -210,7 +258,8 @@ pub fn build_all(conn: &mut Connection) -> anyhow::Result<CacheStats> {
 /// - Mark missing files as present=0 and drop their symbols/edges
 pub fn verify(conn: &mut Connection) -> anyhow::Result<CacheStats> {
     // Load DB snapshot
-    let mut db_files: std::collections::HashMap<String, (String, i64, String)> = std::collections::HashMap::new();
+    let mut db_files: std::collections::HashMap<String, (String, i64, String)> =
+        std::collections::HashMap::new();
     {
         let mut stmt = conn.prepare("SELECT path, digest, present, lang FROM files")?;
         let rows = stmt.query_map([], |r| {
@@ -220,7 +269,10 @@ pub fn verify(conn: &mut Connection) -> anyhow::Result<CacheStats> {
             let lang: String = r.get(3)?;
             Ok((p, dig, present, lang))
         })?;
-        for r in rows { let (p, dig, pr, lang) = r?; db_files.insert(p, (dig, pr, lang)); }
+        for r in rows {
+            let (p, dig, pr, lang) = r?;
+            db_files.insert(p, (dig, pr, lang));
+        }
     }
 
     // Scan current workspace files
@@ -236,7 +288,9 @@ pub fn verify(conn: &mut Connection) -> anyhow::Result<CacheStats> {
         match db_files.get(p) {
             None => to_update.push(p.clone()),
             Some((db_dig, db_present, db_lang)) => {
-                if db_dig != &dig || *db_present != present_expected || db_lang != &lang { to_update.push(p.clone()); }
+                if db_dig != &dig || *db_present != present_expected || db_lang != &lang {
+                    to_update.push(p.clone());
+                }
             }
         }
     }
@@ -248,12 +302,15 @@ pub fn verify(conn: &mut Connection) -> anyhow::Result<CacheStats> {
     }
 
     // Dedup in case of overlap
-    to_update.sort(); to_update.dedup();
+    to_update.sort();
+    to_update.dedup();
     update_paths(conn, &to_update)
 }
 
 pub fn update_paths(conn: &mut Connection, paths: &[String]) -> anyhow::Result<CacheStats> {
-    if paths.is_empty() { return stats(conn); }
+    if paths.is_empty() {
+        return stats(conn);
+    }
     // Analyze changed files in parallel
     let (symbols_by_file, urefs_by_file, imports_by_file) = analyze_specific_paths_parallel(paths);
 
@@ -267,13 +324,26 @@ pub fn update_paths(conn: &mut Connection, paths: &[String]) -> anyhow::Result<C
                 "INSERT INTO files(path, lang, digest, mtime, present) VALUES(?1, ?2, ?3, ?4, ?5)\n                 ON CONFLICT(path) DO UPDATE SET lang=excluded.lang, digest=excluded.digest, mtime=excluded.mtime, present=excluded.present",
                 params![p, &lang, file_digest(p), file_mtime(p), if exists {1} else {0}],
             )?;
-            let file_id: i64 = tx.query_row("SELECT id FROM files WHERE path=?1", params![p], |r| r.get(0))?;
+            let file_id: i64 =
+                tx.query_row("SELECT id FROM files WHERE path=?1", params![p], |r| {
+                    r.get(0)
+                })?;
             tx.execute("DELETE FROM symbols WHERE file_id=?1", params![file_id])?;
             tx.execute("DELETE FROM edges WHERE file_id=?1", params![file_id])?;
             if let Some(syms) = symbols_by_file.get(p) {
                 let mut stmt = tx.prepare("INSERT INTO symbols(sid, file_id, name, kind, start_line, end_line, language, sig_hash, parent_sid) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
                 for s in syms {
-                    stmt.execute(params![&s.id.0, file_id, &s.name, kind_to_str(&s.kind), s.range.start_line as i64, s.range.end_line as i64, &s.language, sig_hash_for(s), Option::<String>::None])?;
+                    stmt.execute(params![
+                        &s.id.0,
+                        file_id,
+                        &s.name,
+                        kind_to_str(&s.kind),
+                        s.range.start_line as i64,
+                        s.range.end_line as i64,
+                        &s.language,
+                        sig_hash_for(s),
+                        Option::<String>::None
+                    ])?;
                 }
             }
         }
@@ -289,12 +359,25 @@ pub fn update_paths(conn: &mut Connection, paths: &[String]) -> anyhow::Result<C
         {
             let mut edge_stmt = tx.prepare("INSERT INTO edges(from_sid, to_sid, kind, file_id, line) VALUES(?1, ?2, ?3, ?4, ?5)")?;
             for p in paths {
-                let file_id: i64 = tx.query_row("SELECT id FROM files WHERE path=?1", params![p], |r| r.get(0))?;
+                let file_id: i64 =
+                    tx.query_row("SELECT id FROM files WHERE path=?1", params![p], |r| {
+                        r.get(0)
+                    })?;
                 let urefs = urefs_by_file.get(p).cloned().unwrap_or_default();
                 let imports = imports_by_file.get(p).cloned().unwrap_or_default();
-                let refs = crate::impact::resolve_references(&index, &urefs, &std::collections::HashMap::from([(p.clone(), imports)]));
+                let refs = crate::impact::resolve_references(
+                    &index,
+                    &urefs,
+                    &std::collections::HashMap::from([(p.clone(), imports)]),
+                );
                 for e in refs {
-                    edge_stmt.execute(params![&e.from.0, &e.to.0, "call", file_id, e.line as i64])?;
+                    edge_stmt.execute(params![
+                        &e.from.0,
+                        &e.to.0,
+                        "call",
+                        file_id,
+                        e.line as i64
+                    ])?;
                 }
             }
         }
@@ -313,12 +396,17 @@ fn list_workspace_files() -> Vec<String> {
             let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
             !(name == ".git" || name == "target" || name == "node_modules" || name.starts_with('.'))
         })
-        .filter_map(Result::ok) {
+        .filter_map(Result::ok)
+    {
         let path = entry.path();
         if path.is_file() {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if ["rs","rb","js","ts","tsx"].contains(&ext) {
-                let path_str = path.strip_prefix("./").unwrap_or(path).to_string_lossy().to_string();
+            if ["rs", "rb", "js", "ts", "tsx"].contains(&ext) {
+                let path_str = path
+                    .strip_prefix("./")
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string();
                 out.push(path_str);
             }
         }
@@ -329,15 +417,26 @@ fn list_workspace_files() -> Vec<String> {
 #[allow(clippy::type_complexity)]
 fn analyze_paths_parallel(paths: &[String]) -> (Vec<Symbol>, Vec<UnresolvedRef>, ImportMapByPath) {
     use rayon::prelude::*;
-    let results: Vec<(Vec<Symbol>, Vec<UnresolvedRef>, (String, std::collections::HashMap<String, String>))> = paths.par_iter().map(|p| {
-        let kind = LanguageKind::Auto;
-        let Some(analyzer) = analyzer_for_path(p, kind) else { return (Vec::new(), Vec::new(), (p.clone(), Default::default())) };
-        let Ok(src) = fs::read_to_string(p) else { return (Vec::new(), Vec::new(), (p.clone(), Default::default())) };
-        let syms = analyzer.symbols_in_file(p, &src);
-        let urefs = analyzer.unresolved_refs(p, &src);
-        let im = analyzer.imports_in_file(p, &src);
-        (syms, urefs, (p.clone(), im))
-    }).collect();
+    let results: Vec<(
+        Vec<Symbol>,
+        Vec<UnresolvedRef>,
+        (String, std::collections::HashMap<String, String>),
+    )> = paths
+        .par_iter()
+        .map(|p| {
+            let kind = LanguageKind::Auto;
+            let Some(analyzer) = analyzer_for_path(p, kind) else {
+                return (Vec::new(), Vec::new(), (p.clone(), Default::default()));
+            };
+            let Ok(src) = fs::read_to_string(p) else {
+                return (Vec::new(), Vec::new(), (p.clone(), Default::default()));
+            };
+            let syms = analyzer.symbols_in_file(p, &src);
+            let urefs = analyzer.unresolved_refs(p, &src);
+            let im = analyzer.imports_in_file(p, &src);
+            (syms, urefs, (p.clone(), im))
+        })
+        .collect();
     let mut symbols = Vec::new();
     let mut urefs_all = Vec::new();
     let mut imports_map: ImportMapByPath = std::collections::HashMap::new();
@@ -350,25 +449,35 @@ fn analyze_paths_parallel(paths: &[String]) -> (Vec<Symbol>, Vec<UnresolvedRef>,
 }
 
 #[allow(clippy::type_complexity)]
-fn analyze_specific_paths_parallel(paths: &[String]) -> (
-    SymbolsByPath,
-    UrefsByPath,
-    ImportMapByPath,
-) {
+fn analyze_specific_paths_parallel(
+    paths: &[String],
+) -> (SymbolsByPath, UrefsByPath, ImportMapByPath) {
     use rayon::prelude::*;
-    let results: Vec<(String, Vec<Symbol>, Vec<UnresolvedRef>, std::collections::HashMap<String, String>)> = paths.par_iter().map(|p| {
-        let p = p.clone();
-        if !std::path::Path::new(&p).is_file() {
-            return (p, Vec::new(), Vec::new(), Default::default());
-        }
-        let kind = LanguageKind::Auto;
-        let Some(analyzer) = analyzer_for_path(&p, kind) else { return (p, Vec::new(), Vec::new(), Default::default()) };
-        let Ok(src) = fs::read_to_string(&p) else { return (p, Vec::new(), Vec::new(), Default::default()) };
-        let syms = analyzer.symbols_in_file(&p, &src);
-        let urefs = analyzer.unresolved_refs(&p, &src);
-        let im = analyzer.imports_in_file(&p, &src);
-        (p, syms, urefs, im)
-    }).collect();
+    let results: Vec<(
+        String,
+        Vec<Symbol>,
+        Vec<UnresolvedRef>,
+        std::collections::HashMap<String, String>,
+    )> = paths
+        .par_iter()
+        .map(|p| {
+            let p = p.clone();
+            if !std::path::Path::new(&p).is_file() {
+                return (p, Vec::new(), Vec::new(), Default::default());
+            }
+            let kind = LanguageKind::Auto;
+            let Some(analyzer) = analyzer_for_path(&p, kind) else {
+                return (p, Vec::new(), Vec::new(), Default::default());
+            };
+            let Ok(src) = fs::read_to_string(&p) else {
+                return (p, Vec::new(), Vec::new(), Default::default());
+            };
+            let syms = analyzer.symbols_in_file(&p, &src);
+            let urefs = analyzer.unresolved_refs(&p, &src);
+            let im = analyzer.imports_in_file(&p, &src);
+            (p, syms, urefs, im)
+        })
+        .collect();
     let mut syms_map = std::collections::HashMap::new();
     let mut urefs_map = std::collections::HashMap::new();
     let mut imports_map = std::collections::HashMap::new();
@@ -390,10 +499,18 @@ pub fn load_graph(conn: &Connection) -> anyhow::Result<(SymbolIndex, Vec<Referen
         let _kind: String = row.get(2)?; // currently only call
         let file: String = row.get(3)?;
         let line: i64 = row.get(4)?;
-        Ok(Reference { from: SymbolId(from_sid), to: SymbolId(to_sid), kind: crate::ir::reference::RefKind::Call, file, line: line as u32 })
+        Ok(Reference {
+            from: SymbolId(from_sid),
+            to: SymbolId(to_sid),
+            kind: crate::ir::reference::RefKind::Call,
+            file,
+            line: line as u32,
+        })
     })?;
     let mut edges = Vec::new();
-    for e in edge_iter { edges.push(e?); }
+    for e in edge_iter {
+        edges.push(e?);
+    }
     Ok((index, edges))
 }
 
@@ -421,20 +538,29 @@ fn load_index(conn: &Connection) -> anyhow::Result<SymbolIndex> {
             name,
             kind,
             file,
-            range: TextRange { start_line: start_line as u32, end_line: end_line as u32 },
+            range: TextRange {
+                start_line: start_line as u32,
+                end_line: end_line as u32,
+            },
             language: lang,
         })
     })?;
     let mut symbols = Vec::new();
-    for r in rows { symbols.push(r?); }
+    for r in rows {
+        symbols.push(r?);
+    }
     Ok(SymbolIndex::build(symbols))
 }
 
 fn find_repo_root() -> Option<PathBuf> {
     let mut cur = std::env::current_dir().ok()?;
     loop {
-        if cur.join(".git").exists() || cur.join(".hg").exists() || cur.join(".svn").exists() { return Some(cur) }
-        if !cur.pop() { break; }
+        if cur.join(".git").exists() || cur.join(".hg").exists() || cur.join(".svn").exists() {
+            return Some(cur);
+        }
+        if !cur.pop() {
+            break;
+        }
     }
     None
 }
@@ -471,7 +597,10 @@ fn file_mtime(path: &str) -> i64 {
 }
 
 fn guess_lang_from_ext(path: &str) -> &'static str {
-    let ext = std::path::Path::new(path).extension().and_then(|s| s.to_str()).unwrap_or("");
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
     match ext {
         "rs" => "rust",
         "rb" => "ruby",

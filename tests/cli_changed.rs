@@ -59,9 +59,12 @@ fn cli_mode_changed_reports_rust_symbol() {
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let assert = cmd
         .current_dir(&repo)
-        .arg("--mode").arg("changed")
-        .arg("--lang").arg("rust")
-        .arg("--format").arg("json")
+        .arg("--mode")
+        .arg("changed")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
         .write_stdin(diff)
         .assert()
         .success()

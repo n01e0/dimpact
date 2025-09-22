@@ -1,12 +1,30 @@
-use crate::{ChangedOutput, FileChanges, LanguageMode, ImpactOptions, ImpactOutput};
+use crate::{ChangedOutput, FileChanges, ImpactOptions, ImpactOutput, LanguageMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineKind { Auto, Ts, Lsp }
+pub enum EngineKind {
+    Auto,
+    Ts,
+    Lsp,
+}
 
 pub trait AnalysisEngine {
-    fn changed_symbols(&self, diffs: &[FileChanges], lang: LanguageMode) -> anyhow::Result<ChangedOutput>;
-    fn impact(&self, diffs: &[FileChanges], lang: LanguageMode, opts: &ImpactOptions) -> anyhow::Result<ImpactOutput>;
-    fn impact_from_symbols(&self, changed: &[crate::ir::Symbol], lang: LanguageMode, opts: &ImpactOptions) -> anyhow::Result<ImpactOutput>;
+    fn changed_symbols(
+        &self,
+        diffs: &[FileChanges],
+        lang: LanguageMode,
+    ) -> anyhow::Result<ChangedOutput>;
+    fn impact(
+        &self,
+        diffs: &[FileChanges],
+        lang: LanguageMode,
+        opts: &ImpactOptions,
+    ) -> anyhow::Result<ImpactOutput>;
+    fn impact_from_symbols(
+        &self,
+        changed: &[crate::ir::Symbol],
+        lang: LanguageMode,
+        opts: &ImpactOptions,
+    ) -> anyhow::Result<ImpactOutput>;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -41,5 +59,5 @@ pub fn make_engine(kind: EngineKind, cfg: EngineConfig) -> Box<dyn AnalysisEngin
 }
 
 // Submodules
-pub mod ts;
 pub mod lsp;
+pub mod ts;

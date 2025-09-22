@@ -30,7 +30,11 @@ fn ruby_require_relative_nested_dirs_callers_impact() {
     // lib/a.rb defines m
     fs::write(repo.join("lib/a.rb"), "def m; end\n").unwrap();
     // app/b.rb requires ../lib/a and calls m
-    fs::write(repo.join("app/b.rb"), "require_relative '../lib/a'\n\ndef foo\n  m\nend\n").unwrap();
+    fs::write(
+        repo.join("app/b.rb"),
+        "require_relative '../lib/a'\n\ndef foo\n  m\nend\n",
+    )
+    .unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "init", "-q"]);
     // change m in lib/a.rb
@@ -38,13 +42,23 @@ fn ruby_require_relative_nested_dirs_callers_impact() {
     let diff = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
     // impact callers should include foo in app/b.rb
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert = cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callers")
-        .arg("--lang").arg("auto")
-        .arg("--format").arg("json")
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--lang")
+        .arg("auto")
+        .arg("--format")
+        .arg("json")
         .write_stdin(String::from_utf8(diff.stdout).unwrap())
-        .assert().success();
+        .assert()
+        .success();
     let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    assert!(out.contains("\"foo\""), "impact should include foo, got: {}", out);
+    assert!(
+        out.contains("\"foo\""),
+        "impact should include foo, got: {}",
+        out
+    );
 }

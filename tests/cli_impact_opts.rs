@@ -50,16 +50,23 @@ fn cli_impact_direction_callees() {
 
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callees")
-        .arg("--lang").arg("rust")
-        .arg("--format").arg("json")
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callees")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
         .write_stdin(diff.clone());
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let impacted = v["impacted_symbols"].as_array().unwrap();
-    let names: Vec<&str> = impacted.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    let names: Vec<&str> = impacted
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
     assert!(names.contains(&"c"));
 }
 
@@ -72,16 +79,24 @@ fn cli_impact_max_depth_limits() {
 
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callees")
-        .arg("--max-depth").arg("0")
-        .arg("--lang").arg("rust")
-        .arg("--format").arg("json")
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callees")
+        .arg("--max-depth")
+        .arg("0")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
         .write_stdin(diff);
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let impacted = v["impacted_symbols"].as_array().unwrap();
-    let names: Vec<&str> = impacted.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    let names: Vec<&str> = impacted
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
     assert!(!names.contains(&"c"));
 }

@@ -35,35 +35,60 @@ fn ignore_dir_drops_seeds_in_ignored_path() {
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "init", "-q"]);
     // change dist/generated.js
-    fs::write(repo.join("dist/generated.js"), "function g() { let k = 1; }\n").unwrap();
+    fs::write(
+        repo.join("dist/generated.js"),
+        "function g() { let k = 1; }\n",
+    )
+    .unwrap();
     let diff = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
 
     // Without ignore: expect main to be impacted (callers of g)
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert = cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callers")
-        .arg("--lang").arg("auto")
-        .arg("--format").arg("json")
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--lang")
+        .arg("auto")
+        .arg("--format")
+        .arg("json")
         .write_stdin(String::from_utf8(diff.stdout.clone()).unwrap())
-        .assert().success();
+        .assert()
+        .success();
     let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    assert!(out.contains("\"main\""), "impact should include main without ignore, got: {}", out);
+    assert!(
+        out.contains("\"main\""),
+        "impact should include main without ignore, got: {}",
+        out
+    );
 
     // With ignore: dist should be ignored as seed → no impact
     let mut cmd2 = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert2 = cmd2.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callers")
-        .arg("--lang").arg("auto")
-        .arg("--format").arg("json")
-        .arg("--ignore-dir").arg("dist")
+    let assert2 = cmd2
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--lang")
+        .arg("auto")
+        .arg("--format")
+        .arg("json")
+        .arg("--ignore-dir")
+        .arg("dist")
         .write_stdin(String::from_utf8(diff.stdout).unwrap())
-        .assert().success();
+        .assert()
+        .success();
     let out2 = String::from_utf8_lossy(assert2.get_output().stdout.as_ref());
     let v: serde_json::Value = serde_json::from_str(&out2).unwrap();
     let impacted = v["impacted_symbols"].as_array().unwrap();
-    assert!(impacted.is_empty(), "impacted should be empty when seed is ignored, got: {}", out2);
+    assert!(
+        impacted.is_empty(),
+        "impacted should be empty when seed is ignored, got: {}",
+        out2
+    );
 }
 
 #[test]
@@ -83,32 +108,56 @@ fn ignore_dir_filters_impacted_in_ignored_path() {
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "init", "-q"]);
     // change src/main.js
-    fs::write(repo.join("src/main.js"), "function main() { let x = 1; g(); }\n").unwrap();
+    fs::write(
+        repo.join("src/main.js"),
+        "function main() { let x = 1; g(); }\n",
+    )
+    .unwrap();
     let diff = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
 
     // Without ignore: expect g to be impacted (callees of main)
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert = cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callees")
-        .arg("--lang").arg("auto")
-        .arg("--format").arg("json")
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callees")
+        .arg("--lang")
+        .arg("auto")
+        .arg("--format")
+        .arg("json")
         .write_stdin(String::from_utf8(diff.stdout.clone()).unwrap())
-        .assert().success();
+        .assert()
+        .success();
     let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    assert!(out.contains("\"g\""), "impact should include g without ignore, got: {}", out);
+    assert!(
+        out.contains("\"g\""),
+        "impact should include g without ignore, got: {}",
+        out
+    );
 
     // With ignore: dist should be filtered from impacted
     let mut cmd2 = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert2 = cmd2.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callees")
-        .arg("--lang").arg("auto")
-        .arg("--format").arg("json")
-        .arg("--ignore-dir").arg("dist")
+    let assert2 = cmd2
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callees")
+        .arg("--lang")
+        .arg("auto")
+        .arg("--format")
+        .arg("json")
+        .arg("--ignore-dir")
+        .arg("dist")
         .write_stdin(String::from_utf8(diff.stdout).unwrap())
-        .assert().success();
+        .assert()
+        .success();
     let out2 = String::from_utf8_lossy(assert2.get_output().stdout.as_ref());
-    assert!(!out2.contains("\"g\""), "impact should NOT include g when dist is ignored, got: {}", out2);
+    assert!(
+        !out2.contains("\"g\""),
+        "impact should NOT include g when dist is ignored, got: {}",
+        out2
+    );
 }
-

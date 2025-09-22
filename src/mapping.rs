@@ -1,6 +1,6 @@
 use crate::diff::{ChangeKind, FileChanges};
 use crate::ir::{Symbol, TextRange};
-use crate::languages::{analyzer_for_path, LanguageKind};
+use crate::languages::{LanguageKind, analyzer_for_path};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -29,8 +29,11 @@ pub fn compute_changed_symbols(
     // so cache can mark removed files as present=0 when they no longer exist.
     let mut changed_files: Vec<String> = Vec::new();
     for fc in diffs {
-        if let Some(p) = fc.new_path.clone() { changed_files.push(p); }
-        else if let Some(op) = fc.old_path.clone() { changed_files.push(op); }
+        if let Some(p) = fc.new_path.clone() {
+            changed_files.push(p);
+        } else if let Some(op) = fc.old_path.clone() {
+            changed_files.push(op);
+        }
     }
 
     let mut changed_lines_by_file: HashMap<String, HashSet<u32>> = HashMap::new();
@@ -40,8 +43,9 @@ pub fn compute_changed_symbols(
             for ch in &fc.changes {
                 // count Added, Removed, and Context lines as changes
                 if matches!(ch.kind, ChangeKind::Added)
-                   || matches!(ch.kind, ChangeKind::Removed)
-                   || matches!(ch.kind, ChangeKind::Context) {
+                    || matches!(ch.kind, ChangeKind::Removed)
+                    || matches!(ch.kind, ChangeKind::Context)
+                {
                     // use new_line when available, else old_line for removals
                     if let Some(nl) = ch.new_line {
                         set.insert(nl);
@@ -63,8 +67,12 @@ pub fn compute_changed_symbols(
             LanguageMode::Typescript => LanguageKind::Typescript,
             LanguageMode::Tsx => LanguageKind::Tsx,
         };
-        let Some(analyzer) = analyzer_for_path(path, kind) else { continue };
-        let Ok(source) = fs::read_to_string(path) else { continue };
+        let Some(analyzer) = analyzer_for_path(path, kind) else {
+            continue;
+        };
+        let Ok(source) = fs::read_to_string(path) else {
+            continue;
+        };
         let symbols = analyzer.symbols_in_file(path, &source);
         for s in symbols {
             if intersects(&s.range, lines) {
@@ -73,12 +81,17 @@ pub fn compute_changed_symbols(
         }
     }
 
-    Ok(ChangedOutput { changed_files, changed_symbols })
+    Ok(ChangedOutput {
+        changed_files,
+        changed_symbols,
+    })
 }
 
 fn intersects(range: &TextRange, lines: &HashSet<u32>) -> bool {
     for ln in range.start_line..=range.end_line {
-        if lines.contains(&ln) { return true; }
+        if lines.contains(&ln) {
+            return true;
+        }
     }
     false
 }
@@ -86,10 +99,9 @@ fn intersects(range: &TextRange, lines: &HashSet<u32>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::{parse_unified_diff};
-    use tempfile::tempdir;
+    use crate::diff::parse_unified_diff;
     use serial_test::serial;
-    
+    use tempfile::tempdir;
 
     #[test]
     #[serial]

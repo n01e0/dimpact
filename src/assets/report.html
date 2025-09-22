@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>dimpact report</title>
+<style>
+{{STYLE}}
+</style>
+<h1>dimpact report</h1>
+<p class="muted">changed: {{COUNT_CHANGED}} symbols • impacted: {{COUNT_IMPACTED}} symbols • files: {{COUNT_FILES}} <span class="badge">edges: {{COUNT_EDGES}}</span></p>
+<div class="card">
+  <div class="toolbar">
+    <strong>Graph</strong>
+    <span class="chip changed">changed</span>
+    <span class="chip imp">impacted</span>
+    <button id="layout-bf">layout: breadthfirst</button>
+    <button id="layout-grid">layout: grid</button>
+    <button id="layout-cose">layout: cose</button>
+    <button id="toggle-canvas">fallback canvas</button>
+  </div>
+  <div class="filters">
+    <label class="small"><input type="checkbox" id="f_changed" checked> changed</label>
+    <label class="small"><input type="checkbox" id="f_impacted" checked> impacted</label>
+    <label class="small">kind:
+      <label class="small"><input type="checkbox" class="kind" value="fn" checked> fn</label>
+      <label class="small"><input type="checkbox" class="kind" value="method" checked> method</label>
+      <label class="small"><input type="checkbox" class="kind" value="struct" checked> struct</label>
+      <label class="small"><input type="checkbox" class="kind" value="enum" checked> enum</label>
+      <label class="small"><input type="checkbox" class="kind" value="trait" checked> trait</label>
+      <label class="small"><input type="checkbox" class="kind" value="mod" checked> mod</label>
+    </label>
+    <label class="small">max depth: <input type="number" id="f_depth" min="0" style="width:4em"></label>
+    <label class="small">file contains: <input type="text" id="f_file" placeholder="path or module" style="width:14em"></label>
+    <button id="apply-filters">apply</button>
+    <button id="reset-filters">reset</button>
+  </div>
+  <div id="viz"></div>
+  <canvas id="canvas"></canvas>
+</div>
+<div class="symbol-controls">
+  <strong>Symbols</strong>
+  <button type="button" id="symbols-select-all">select all</button>
+  <button type="button" id="symbols-select-none">select none</button>
+</div>
+<div class="grid">
+  <div class="card">
+    <h2>Changed Symbols</h2>
+    <ul class="symbol-list" id="symbol-changed">
+      {{CHANGED_LIST}}
+    </ul>
+  </div>
+  <div class="card">
+    <h2>Impacted Symbols</h2>
+    <ul class="symbol-list" id="symbol-impacted">
+      {{IMPACTED_LIST}}
+    </ul>
+  </div>
+</div>
+{{EDGES_SECTION}}
+<script>const IMPACT_DATA = {{IMPACT_DATA}};</script>
+<script>const WORKER_SRC = {{WORKER_SRC}};</script>
+<script>
+{{MAIN_SCRIPT}}
+</script>
+<div id="popup" class="popup">
+  <h3 id="p-title"></h3>
+  <div class="row"><strong>ID:</strong> <code id="p-id"></code></div>
+  <div class="row"><strong>File:</strong> <code id="p-file"></code></div>
+  <div class="row"><strong>Kind:</strong> <code id="p-kind"></code></div>
+  <div class="row"><strong>Depth:</strong> <code id="p-depth"></code></div>
+  <div class="actions">
+    <button id="p-copy">copy id</button>
+    <button id="p-close">close</button>
+  </div>
+</div>
+</html>

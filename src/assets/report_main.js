@@ -7,6 +7,27 @@
   const N_EDGES = (IMPACT_DATA && IMPACT_DATA.edges ? IMPACT_DATA.edges.length : 0);
   const HEAVY = (N_NODES > 800) || (N_EDGES > 1500);
   const DEGREE = (function(){ const m=new Map(); IMPACT_DATA.nodes.forEach(n=>m.set(n.data.id,0)); IMPACT_DATA.edges.forEach(e=>{ m.set(e.data.source,(m.get(e.data.source)||0)+1); m.set(e.data.target,(m.get(e.data.target)||0)+1); }); return m; })();
+  const UNDIRECTED_ADJ = (function(){
+    const adj = new Map();
+    IMPACT_DATA.nodes.forEach(n=>{ adj.set(n.data.id, new Set()); });
+    IMPACT_DATA.edges.forEach(e=>{
+      const s = e.data.source, t = e.data.target;
+      if(!adj.has(s)){ adj.set(s, new Set()); }
+      if(!adj.has(t)){ adj.set(t, new Set()); }
+      adj.get(s).add(t);
+      adj.get(t).add(s);
+    });
+    return adj;
+  })();
+  let CURRENT_APPLY = null;
+  function setApply(fn){ CURRENT_APPLY = fn; }
+  function triggerApply(){
+    if(typeof CURRENT_APPLY !== 'function') return;
+    try {
+      const res = CURRENT_APPLY();
+      if(res && typeof res.then === 'function'){ res.catch(()=>{}); }
+    } catch(_e) {}
+  }
 
   function getFilterState(){
     const kinds = Array.from(document.querySelectorAll('input.kind:checked')).map(x=>x.value);
@@ -18,9 +39,66 @@
       kinds,
       depth: (function(){ const v = document.getElementById('f_depth').value; return v===''?null:Math.max(0, parseInt(v,10)||0); })(),
       reach: document.getElementById('f_reach') ? document.getElementById('f_reach').checked : true,
-      file: document.getElementById('f_file').value.trim().toLowerCase()
+      file: document.getElementById('f_file').value.trim().toLowerCase(),
+      symbols: Array.from(document.querySelectorAll('input.symbol-select:checked')).map(x=>x.value)
     };
   }
+
+  function computeSymbolVisibility(selectedIds){
+    const selected = new Set(selectedIds || []);
+    const related = new Set(selected);
+    if(selected.size === 0){ return { selected, related }; }
+    const queue = Array.from(selected);
+    while(queue.length){
+      const u = queue.shift();
+      const neigh = UNDIRECTED_ADJ.get(u);
+      if(!neigh) continue;
+      neigh.forEach(v=>{
+        if(!related.has(v)){
+          related.add(v);
+          queue.push(v);
+        }
+      });
+    }
+    return { selected, related };
+  }
+
+  function symbolInputs(){ return Array.from(document.querySelectorAll('input.symbol-select')); }
+
+  function bindSymbolControls(){
+    const onChange = ()=>{ triggerApply(); };
+    symbolInputs().forEach(inp=>{ inp.addEventListener('change', onChange); });
+    const btnAll = document.getElementById('symbols-select-all');
+    if(btnAll){ btnAll.onclick = ()=>{ symbolInputs().forEach(inp=>{ inp.checked = true; }); triggerApply(); }; }
+    const btnNone = document.getElementById('symbols-select-none');
+    if(btnNone){ btnNone.onclick = ()=>{ symbolInputs().forEach(inp=>{ inp.checked = false; }); triggerApply(); }; }
+  }
+
+  function resetFilterControls(){
+    const fChanged = document.getElementById('f_changed'); if(fChanged) fChanged.checked = true;
+    const fImp = document.getElementById('f_impacted'); if(fImp) fImp.checked = true;
+    document.querySelectorAll('input.kind').forEach(x=>x.checked=true);
+    const depth = document.getElementById('f_depth'); if(depth) depth.value = '';
+    const file = document.getElementById('f_file'); if(file) file.value = '';
+    const dirUndir = document.querySelector('input[name=dir][value=undirected]'); if(dirUndir) dirUndir.checked = true;
+    const reach = document.getElementById('f_reach'); if(reach) reach.checked = true;
+    const box = document.getElementById('root-list');
+    if(box){
+      const inputs = box.querySelectorAll('input[type=checkbox]');
+      inputs.forEach((el, idx)=>{ el.checked = idx < Math.min(10, inputs.length); });
+    }
+    symbolInputs().forEach(inp=>{ inp.checked = true; });
+  }
+
+  function bindGlobalControls(){
+    const applyBtn = document.getElementById('apply-filters');
+    if(applyBtn){ applyBtn.onclick = ()=>{ triggerApply(); }; }
+    const resetBtn = document.getElementById('reset-filters');
+    if(resetBtn){ resetBtn.onclick = ()=>{ resetFilterControls(); triggerApply(); }; }
+  }
+
+  bindSymbolControls();
+  bindGlobalControls();
 
   function buildAdj(dir){
     const adj = new Map();
@@ -70,10 +148,11 @@
       if(!WORKER){ const dist = computeDistances(dir); const PP = computePathPairs(dir); resolve({ dist, pairs: PP }); return; }
       const roots = Array.from(document.querySelectorAll('#root-list input[type=checkbox]:checked')).map(x=>x.value);
       const nodes = IMPACT_DATA.nodes.map(n=>n.data.id);
+      const changed = IMPACT_DATA.nodes.filter(n=>!!n.data.changed).map(n=>n.data.id);
       const edges = IMPACT_DATA.edges.map(e=>({s:e.data.source, t:e.data.target}));
       const impacted = IMPACT_DATA.nodes.filter(n=>!n.data.changed).map(n=>n.data.id);
       WORKER.onmessage = function(ev){ const d = ev.data||{}; const dist = new Map(d.dist||[]); const pairs = new Set(d.pairs||[]); resolve({ dist, pairs }); };
-      WORKER.postMessage({ cmd: 'compute', dir, roots, nodes, edges, impacted });
+      WORKER.postMessage({ cmd: 'compute', dir, roots, nodes, edges, impacted, changed });
     });
   }
 
@@ -108,36 +187,42 @@
     async function applyFilters(){
       const f = getFilterState(); try{ showBusy(); }catch(_e){}
       const R = await computeAsync(f.dir); const DIST = R.dist; const EXP = expandedVisible(f.dir);
+      const symbolInfo = computeSymbolVisibility(f.symbols);
+      const hasSymbolFilter = symbolInfo.selected.size > 0;
+      const allowed = symbolInfo.related;
       const visibleNode = new Set();
       cy.nodes().forEach(n=>{
-        const d=n.data(); const passChanged = (d.changed && f.changed) || (!d.changed && f.impacted);
-        const passKind = f.kinds.includes(String(d.kind||'')); const passFile = f.file==='' || String(d.file||'').toLowerCase().includes(f.file);
-        const distVal = DIST.has(d.id)? DIST.get(d.id) : Infinity; const passDepth = (f.depth==null) || (distVal <= f.depth); const passReach = !f.reach || Number.isFinite(distVal);
-        const show = passChanged && passKind && passFile && passDepth && passReach || EXP.has(d.id);
+        const d=n.data();
+        const passChanged = (d.changed && f.changed) || (!d.changed && f.impacted);
+        const passKind = f.kinds.includes(String(d.kind||''));
+        const passFile = f.file==='' || String(d.file||'').toLowerCase().includes(f.file);
+        const distVal = DIST.has(d.id)? DIST.get(d.id) : Infinity;
+        const passDepth = (f.depth==null) || (distVal <= f.depth);
+        const passReach = !f.reach || Number.isFinite(distVal);
+        const passSymbol = !hasSymbolFilter || allowed.has(d.id);
+        const base = passChanged && passKind && passFile && passDepth && passReach;
+        const show = (base || EXP.has(d.id)) && passSymbol;
         if(show){ n.show(); visibleNode.add(d.id);} else { n.hide(); }
       });
       cy.edges().forEach(e=>{ const s=e.data('source'), t=e.data('target'); if(visibleNode.has(s) && visibleNode.has(t)) e.show(); else e.hide(); });
       const PP2 = R.pairs; cy.edges().forEach(e=>{ const id=e.data('source')+"\t"+e.data('target'); if(PP2.has(id) && e.visible()){ e.addClass('path'); } else { e.removeClass('path'); } });
       try{ hideBusy(); }catch(_e){}
     }
-    document.getElementById('apply-filters').onclick = applyFilters;
-    document.getElementById('reset-filters').onclick = ()=>{
-      document.getElementById('f_changed').checked = true; document.getElementById('f_impacted').checked = true; document.querySelectorAll('input.kind').forEach(x=>x.checked=true);
-      document.getElementById('f_depth').value = ''; document.getElementById('f_file').value = '';
-      const rUndir = document.querySelector('input[name=dir][value=undirected]'); if(rUndir) rUndir.checked = true; const reach = document.getElementById('f_reach'); if(reach) reach.checked = true;
-      const box = document.getElementById('root-list'); if(box){ const inputs = box.querySelectorAll('input[type=checkbox]'); inputs.forEach((el,idx)=>{ el.checked = idx < Math.min(10, inputs.length); }); }
-      applyFilters();
-    };
+    setApply(applyFilters);
     applyFilters();
   }
 
   async function renderWithCanvas(){
+    setApply(()=>renderWithCanvas());
     const cv = document.getElementById('canvas'); const viz = document.getElementById('viz'); viz.style.display = 'none'; cv.style.display = 'block';
     const w = cv.clientWidth || 800, h = cv.clientHeight || 520; cv.width = w; cv.height = h; const ctx = cv.getContext('2d');
     try{ showBusy(); }catch(_e){}; ctx.clearRect(0,0,w,h);
     const F = getFilterState(); const R = await computeAsync(F.dir); const DIST = R.dist; const PP = R.pairs;
+    const symbolInfo = computeSymbolVisibility(F.symbols);
+    const hasSymbolFilter = symbolInfo.selected.size > 0;
+    const allowed = symbolInfo.related;
     const nodes = IMPACT_DATA.nodes
-      .filter(n=>{ const d=n.data; const passChanged = (d.changed && F.changed) || (!d.changed && F.impacted); const passKind = F.kinds.includes(String(d.kind||'')); const passFile = F.file==='' || String(d.file||'').toLowerCase().includes(F.file); const distVal = DIST.has(d.id)? DIST.get(d.id) : Infinity; const passDepth = (F.depth==null) || (distVal <= F.depth); const passReach = !F.reach || Number.isFinite(distVal); return passChanged && passKind && passFile && passDepth && passReach; })
+      .filter(n=>{ const d=n.data; const passChanged = (d.changed && F.changed) || (!d.changed && F.impacted); const passKind = F.kinds.includes(String(d.kind||'')); const passFile = F.file==='' || String(d.file||'').toLowerCase().includes(F.file); const distVal = DIST.has(d.id)? DIST.get(d.id) : Infinity; const passDepth = (F.depth==null) || (distVal <= F.depth); const passReach = !F.reach || Number.isFinite(distVal); const passSymbol = !hasSymbolFilter || allowed.has(d.id); return passChanged && passKind && passFile && passDepth && passReach && passSymbol; })
       .map((n,i)=>({ id: n.data.id, label: n.data.label, changed: !!n.data.changed, x:0, y:0 }));
     const N = nodes.length, RAD = Math.max(80, Math.min(w,h)/2 - 40), cx = w/2, cy = h/2;
     for(let i=0;i<N;i++){ const a = (2*Math.PI*i)/N; nodes[i].x = cx + RAD*Math.cos(a); nodes[i].y = cy + RAD*Math.sin(a); }
@@ -158,4 +243,3 @@
   (function(){ if(HEAVY){ const depth=document.getElementById('f_depth'); if(depth) depth.value='2'; const reach=document.getElementById('f_reach'); if(reach) reach.checked=true; } buildRootList(); attachRootControls(); })();
   (async function(){ await renderWithCanvas(); if(!HEAVY && hasCytoscape()) { await renderWithCytoscape(); } else if(!HEAVY) { const s=document.createElement('script'); s.src='https://unpkg.com/cytoscape@3/dist/cytoscape.min.js'; s.onload = ()=>{ renderWithCytoscape(); }; document.head.appendChild(s); } })();
 })();
-

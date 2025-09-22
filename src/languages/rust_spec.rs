@@ -1,9 +1,9 @@
 use crate::ir::Symbol;
 use crate::ir::reference::{RefKind, UnresolvedRef};
-use crate::languages::{LanguageAnalyzer, rust::RustAnalyzer};
-use crate::languages::util::{line_offsets, byte_to_line};
 use crate::languages::rust_ts::RustTsAnalyzer;
-use crate::ts_core::{load_rust_spec, compile_queries_rust, QueryRunner};
+use crate::languages::util::{byte_to_line, line_offsets};
+use crate::languages::{LanguageAnalyzer, rust::RustAnalyzer};
+use crate::ts_core::{QueryRunner, compile_queries_rust, load_rust_spec};
 
 pub struct SpecRustAnalyzer {
     queries: crate::ts_core::CompiledQueries,
@@ -20,12 +20,15 @@ impl SpecRustAnalyzer {
 }
 
 impl Default for SpecRustAnalyzer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-
 impl LanguageAnalyzer for SpecRustAnalyzer {
-    fn language(&self) -> &'static str { "rust" }
+    fn language(&self) -> &'static str {
+        "rust"
+    }
 
     fn symbols_in_file(&self, path: &str, source: &str) -> Vec<Symbol> {
         // For reliability (methods inside impl), reuse the existing TS analyzer's symbol extraction
@@ -43,8 +46,17 @@ impl LanguageAnalyzer for SpecRustAnalyzer {
             if let Some(n) = method_cap.or(name_cap) {
                 let name = &source.as_bytes()[n.start..n.end];
                 let name = std::str::from_utf8(name).unwrap_or("");
-                if name.is_empty() || name.ends_with('!') { continue; }
-                out.push(UnresolvedRef { name: name.to_string(), kind: RefKind::Call, file: path.to_string(), line: ln, qualifier: None, is_method: method_cap.is_some() });
+                if name.is_empty() || name.ends_with('!') {
+                    continue;
+                }
+                out.push(UnresolvedRef {
+                    name: name.to_string(),
+                    kind: RefKind::Call,
+                    file: path.to_string(),
+                    line: ln,
+                    qualifier: None,
+                    is_method: method_cap.is_some(),
+                });
                 continue;
             }
             if let Some(q) = qname_cap {
@@ -52,15 +64,30 @@ impl LanguageAnalyzer for SpecRustAnalyzer {
                 let txt = std::str::from_utf8(txt).unwrap_or("");
                 let parts: Vec<&str> = txt.split("::").collect();
                 if let Some((last, rest)) = parts.split_last() {
-                    let qualifier = if rest.is_empty() { None } else { Some(rest.join("::")) };
-                    out.push(UnresolvedRef { name: (*last).to_string(), kind: RefKind::Call, file: path.to_string(), line: ln, qualifier, is_method: false });
+                    let qualifier = if rest.is_empty() {
+                        None
+                    } else {
+                        Some(rest.join("::"))
+                    };
+                    out.push(UnresolvedRef {
+                        name: (*last).to_string(),
+                        kind: RefKind::Call,
+                        file: path.to_string(),
+                        line: ln,
+                        qualifier,
+                        is_method: false,
+                    });
                 }
             }
         }
         out
     }
 
-    fn imports_in_file(&self, path: &str, source: &str) -> std::collections::HashMap<String, String> {
+    fn imports_in_file(
+        &self,
+        path: &str,
+        source: &str,
+    ) -> std::collections::HashMap<String, String> {
         // reuse robust regex-based import parser for now
         RustAnalyzer::new().imports_in_file(path, source)
     }

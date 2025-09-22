@@ -62,7 +62,8 @@ fn pdg_propagation_adds_var_to_callee_edge() {
         .arg("impact")
         .arg("--with-pdg")
         .arg("--with-propagation")
-        .arg("--format").arg("dot")
+        .arg("--format")
+        .arg("dot")
         .write_stdin(diff)
         .assert()
         .success()
@@ -72,4 +73,3 @@ fn pdg_propagation_adds_var_to_callee_edge() {
     // Roughly ensure there's an edge into the callee symbol ID
     assert!(stdout.contains("\"rust:f.rs:fn:callee:1\""));
 }
-

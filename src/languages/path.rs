@@ -8,7 +8,9 @@ pub fn normalize_path_like(p: &Path) -> String {
     for comp in p.components() {
         match comp {
             Component::CurDir => {}
-            Component::ParentDir => { out.pop(); }
+            Component::ParentDir => {
+                out.pop();
+            }
             other => out.push(other.as_os_str()),
         }
     }
@@ -26,7 +28,9 @@ pub fn resolve_module_path(cur_file: &str, raw: &str, exts: &[&str]) -> Option<S
     }
     let s = s.replace('\\', "/");
     if s.starts_with("./") || s.starts_with("../") {
-        let base = Path::new(cur_file).parent().unwrap_or_else(|| Path::new("."));
+        let base = Path::new(cur_file)
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
         let joined = base.join(&s);
         Some(normalize_path_like(&joined))
     } else {

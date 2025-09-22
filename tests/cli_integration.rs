@@ -64,19 +64,22 @@ fn e2e_git_diff_into_dimpact_json() {
 
     // additionally, parse JSON to ensure schema is valid
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref()).to_string();
-    let files: Vec<dimpact::FileChanges> = serde_json::from_str(&stdout).expect("valid json schema");
+    let files: Vec<dimpact::FileChanges> =
+        serde_json::from_str(&stdout).expect("valid json schema");
     assert_eq!(files.len(), 1);
     let f = &files[0];
     assert_eq!(f.old_path.as_deref(), Some("a.txt"));
     assert_eq!(f.new_path.as_deref(), Some("a.txt"));
-    assert!(f
-        .changes
-        .iter()
-        .any(|c| matches!(c.kind, dimpact::ChangeKind::Removed)));
-    assert!(f
-        .changes
-        .iter()
-        .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)));
+    assert!(
+        f.changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Removed))
+    );
+    assert!(
+        f.changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added))
+    );
 }
 
 #[test]

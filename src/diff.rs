@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DiffParseError {
-    #[error("missing diff header")] 
+    #[error("missing diff header")]
     MissingHeader,
     #[error("invalid hunk header: {0}")]
     InvalidHunkHeader(String),
@@ -67,7 +67,10 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
     let mut cur_changes: Vec<Change> = Vec::new();
 
     // helper to flush current file
-    let flush_file = |files: &mut Vec<FileChanges>, cur_old_path: &mut Option<String>, cur_new_path: &mut Option<String>, cur_changes: &mut Vec<Change>| {
+    let flush_file = |files: &mut Vec<FileChanges>,
+                      cur_old_path: &mut Option<String>,
+                      cur_new_path: &mut Option<String>,
+                      cur_changes: &mut Vec<Change>| {
         if !cur_changes.is_empty() || cur_old_path.is_some() || cur_new_path.is_some() {
             files.push(FileChanges {
                 old_path: cur_old_path.take(),
@@ -81,7 +84,12 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
     while let Some(line) = lines.next() {
         if line.starts_with("diff --git ") {
             // New file diff section starts. Flush previous.
-            flush_file(&mut files, &mut cur_old_path, &mut cur_new_path, &mut cur_changes);
+            flush_file(
+                &mut files,
+                &mut cur_old_path,
+                &mut cur_new_path,
+                &mut cur_changes,
+            );
             // Not strictly needed to parse paths here; use ---/+++ for reliable values.
             continue;
         }
@@ -119,7 +127,10 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
             let mut new_ln = range.new_start;
 
             while let Some(&peek) = lines.peek() {
-                if peek.starts_with("@@ ") || peek.starts_with("diff --git ") || peek.starts_with("--- ") {
+                if peek.starts_with("@@ ")
+                    || peek.starts_with("diff --git ")
+                    || peek.starts_with("--- ")
+                {
                     break; // end of hunk/file
                 }
                 let body = lines.next().unwrap();
@@ -169,7 +180,12 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChanges>, DiffParseErro
     }
 
     // Flush last file if pending
-    flush_file(&mut files, &mut cur_old_path, &mut cur_new_path, &mut cur_changes);
+    flush_file(
+        &mut files,
+        &mut cur_old_path,
+        &mut cur_new_path,
+        &mut cur_changes,
+    );
 
     if files.is_empty() {
         // Not strictly an error; but signal to caller if absolutely nothing parsed
@@ -191,10 +207,16 @@ fn strip_a_b_prefix(path: &str) -> &str {
 fn parse_hunk_header(h: &str) -> Result<(HunkRange, &str), DiffParseError> {
     // h like: -12,3 +34,2 @@ optional
     let after_minus = h;
-    let (old_part, rest1) = split_at_space(after_minus).ok_or_else(|| DiffParseError::InvalidHunkHeader(h.to_string()))?;
-    if !old_part.starts_with('-') { return Err(DiffParseError::InvalidHunkHeader(h.to_string())); }
-    let (new_part, rest2) = split_at_space(rest1).ok_or_else(|| DiffParseError::InvalidHunkHeader(h.to_string()))?;
-    if !new_part.starts_with('+') { return Err(DiffParseError::InvalidHunkHeader(h.to_string())); }
+    let (old_part, rest1) = split_at_space(after_minus)
+        .ok_or_else(|| DiffParseError::InvalidHunkHeader(h.to_string()))?;
+    if !old_part.starts_with('-') {
+        return Err(DiffParseError::InvalidHunkHeader(h.to_string()));
+    }
+    let (new_part, rest2) =
+        split_at_space(rest1).ok_or_else(|| DiffParseError::InvalidHunkHeader(h.to_string()))?;
+    if !new_part.starts_with('+') {
+        return Err(DiffParseError::InvalidHunkHeader(h.to_string()));
+    }
 
     let old_nums = &old_part[1..];
     let new_nums = &new_part[1..];
@@ -204,16 +226,30 @@ fn parse_hunk_header(h: &str) -> Result<(HunkRange, &str), DiffParseError> {
 
     // Skip trailing @@ ...
     let rest = rest2.trim_start();
-    let rest = if let Some(idx) = rest.find("@@") { &rest[idx + 2..] } else { rest };
+    let rest = if let Some(idx) = rest.find("@@") {
+        &rest[idx + 2..]
+    } else {
+        rest
+    };
 
-    Ok((HunkRange { old_start, old_len, new_start, new_len }, rest))
+    Ok((
+        HunkRange {
+            old_start,
+            old_len,
+            new_start,
+            new_len,
+        },
+        rest,
+    ))
 }
 
 fn split_at_space(s: &str) -> Option<(&str, &str)> {
     let s = s.trim_start();
-    if s.is_empty() { return None; }
+    if s.is_empty() {
+        return None;
+    }
     if let Some(pos) = s.find(' ') {
-        Some((&s[..pos], &s[pos+1..]))
+        Some((&s[..pos], &s[pos + 1..]))
     } else {
         None
     }
@@ -249,7 +285,11 @@ index e69de29..4b825dc 100644
         let f = &files[0];
         assert_eq!(f.old_path, Some("foo.txt".to_string()));
         assert_eq!(f.new_path, Some("foo.txt".to_string()));
-        let added: Vec<_> = f.changes.iter().filter(|c| c.kind == ChangeKind::Added).collect();
+        let added: Vec<_> = f
+            .changes
+            .iter()
+            .filter(|c| c.kind == ChangeKind::Added)
+            .collect();
         assert_eq!(added.len(), 3);
         assert_eq!(added[0].new_line, Some(1));
         assert_eq!(added[2].new_line, Some(3));
@@ -272,8 +312,16 @@ index 1111111..2222222 100644
         assert_eq!(files.len(), 1);
         let f = &files[0];
         assert_eq!(f.changes.len(), 4); // context, removed, added, context
-        assert!(f.changes.iter().any(|c| matches!(c.kind, ChangeKind::Removed)));
-        assert!(f.changes.iter().any(|c| matches!(c.kind, ChangeKind::Added)));
+        assert!(
+            f.changes
+                .iter()
+                .any(|c| matches!(c.kind, ChangeKind::Removed))
+        );
+        assert!(
+            f.changes
+                .iter()
+                .any(|c| matches!(c.kind, ChangeKind::Added))
+        );
     }
 
     const MULTI_HUNK_DIFF: &str = r#"diff --git a/a.txt b/a.txt
@@ -292,7 +340,11 @@ index 1111111..2222222 100644
     fn parse_multi_hunk() {
         let files = parse_unified_diff(MULTI_HUNK_DIFF).expect("parsed");
         let f = &files[0];
-        let added: Vec<_> = f.changes.iter().filter(|c| c.kind == ChangeKind::Added).collect();
+        let added: Vec<_> = f
+            .changes
+            .iter()
+            .filter(|c| c.kind == ChangeKind::Added)
+            .collect();
         assert_eq!(added.len(), 3);
         assert_eq!(added[0].new_line, Some(2));
         assert_eq!(added[1].new_line, Some(11));

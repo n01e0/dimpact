@@ -52,14 +52,23 @@ fn foo() {
     let diff = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callers")
-        .arg("--lang").arg("rust")
-        .arg("--format").arg("json")
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
         .write_stdin(String::from_utf8(diff.stdout).unwrap());
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    let names: Vec<&str> = v["impacted_symbols"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+    let names: Vec<&str> = v["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
     assert!(names.contains(&"foo"));
 }

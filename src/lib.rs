@@ -1,20 +1,23 @@
+pub mod cache;
+pub mod dfg;
 pub mod diff;
+pub mod engine;
+pub mod impact;
 pub mod ir;
 pub mod languages;
 pub mod mapping;
-pub mod ts_core;
-pub mod impact;
-pub mod engine;
 pub mod render;
-pub mod cache;
-pub mod dfg;
+pub mod ts_core;
 
-pub use diff::{parse_unified_diff, Change, ChangeKind, DiffParseError, FileChanges};
-pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
-pub use mapping::{ChangedOutput, LanguageMode, compute_changed_symbols};
-pub use dfg::{DependencyKind, DfgNode, DfgEdge, DataFlowGraph, DfgBuilder};
-pub use impact::{build_project_graph, compute_impact, ImpactDirection, ImpactOptions, ImpactOutput, path_is_ignored};
-pub use languages::LanguageKind;
-pub use engine::{AnalysisEngine, EngineKind};
+pub use dfg::{DataFlowGraph, DependencyKind, DfgBuilder, DfgEdge, DfgNode};
+pub use diff::{Change, ChangeKind, DiffParseError, FileChanges, parse_unified_diff};
 pub use engine::EngineConfig;
-pub use render::{to_dot, to_html, dfg_to_dot};
+pub use engine::{AnalysisEngine, EngineKind};
+pub use impact::{
+    ImpactDirection, ImpactOptions, ImpactOutput, build_project_graph, compute_impact,
+    path_is_ignored,
+};
+pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
+pub use languages::LanguageKind;
+pub use mapping::{ChangedOutput, LanguageMode, compute_changed_symbols};
+pub use render::{dfg_to_dot, to_dot, to_html};

@@ -1,8 +1,8 @@
+use dimpact::engine::CapsHint;
+use serial_test::serial;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
-use serial_test::serial;
-use dimpact::engine::CapsHint;
 
 fn git(cwd: &std::path::Path, args: &[&str]) -> std::process::Output {
     let mut cmd = Command::new("git");
@@ -30,7 +30,11 @@ fn setup_repo_basic() -> (TempDir, std::path::PathBuf) {
     fs::write(path.join("main.rs"), "fn bar() {}\nfn foo() { bar(); }\n").unwrap();
     git(&path, &["add", "."]);
     git(&path, &["commit", "-m", "init", "-q"]);
-    fs::write(path.join("main.rs"), "fn bar() { let _x=1; }\nfn foo() { bar(); }\n").unwrap();
+    fs::write(
+        path.join("main.rs"),
+        "fn bar() { let _x=1; }\nfn foo() { bar(); }\n",
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -42,12 +46,19 @@ fn lsp_engine_falls_back_changed() {
     let diff = String::from_utf8(diff_out.stdout).unwrap();
 
     let files = dimpact::parse_unified_diff(&diff).unwrap();
-    let cfg = dimpact::EngineConfig { lsp_strict: false, dump_capabilities: false, mock_lsp: false, mock_caps: None };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: false,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = engine.changed_symbols(&files, dimpact::LanguageMode::Rust).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Rust)
+        .unwrap();
     std::env::set_current_dir(cwd).unwrap();
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
@@ -61,13 +72,25 @@ fn lsp_engine_falls_back_impact_callers() {
     let diff = String::from_utf8(diff_out.stdout).unwrap();
     let files = dimpact::parse_unified_diff(&diff).unwrap();
 
-    let cfg = dimpact::EngineConfig { lsp_strict: false, dump_capabilities: false, mock_lsp: false, mock_caps: None };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: false,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Auto, cfg);
-    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false), ignore_dirs: Vec::new() };
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(100),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let out = engine.impact(&files, dimpact::LanguageMode::Rust, &opts).unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Rust, &opts)
+        .unwrap();
     std::env::set_current_dir(cwd).unwrap();
 
     assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
@@ -77,21 +100,33 @@ fn lsp_engine_falls_back_impact_callers() {
 #[serial]
 fn lsp_engine_strict_errors() {
     // Ensure tests do not accidentally use a real server on dev machines
-    unsafe { std::env::set_var("DIMPACT_DISABLE_REAL_LSP", "1"); }
+    unsafe {
+        std::env::set_var("DIMPACT_DISABLE_REAL_LSP", "1");
+    }
     let (_tmp, repo) = setup_repo_basic();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
     let diff = String::from_utf8(diff_out.stdout).unwrap();
     let files = dimpact::parse_unified_diff(&diff).unwrap();
 
-    let cfg = dimpact::EngineConfig { lsp_strict: true, dump_capabilities: false, mock_lsp: false, mock_caps: None };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let err = engine.changed_symbols(&files, dimpact::LanguageMode::Rust).err();
+    let err = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Rust)
+        .err();
     std::env::set_current_dir(cwd).unwrap();
 
-    assert!(err.is_some(), "strict mode should error when LSP unavailable");
+    assert!(
+        err.is_some(),
+        "strict mode should error when LSP unavailable"
+    );
 }
 
 #[test]
@@ -103,14 +138,28 @@ fn lsp_engine_strict_mock_succeeds() {
     let files = dimpact::parse_unified_diff(&diff).unwrap();
 
     // Enable mock LSP session (pretend server available)
-    let cfg = dimpact::EngineConfig { lsp_strict: true, dump_capabilities: true, mock_lsp: true, mock_caps: None };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: true,
+        mock_lsp: true,
+        mock_caps: None,
+    };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = engine.changed_symbols(&files, dimpact::LanguageMode::Rust).unwrap();
-    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(100), with_edges: Some(false), ignore_dirs: Vec::new() };
-    let out = engine.impact(&files, dimpact::LanguageMode::Rust, &opts).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Rust)
+        .unwrap();
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(100),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Rust, &opts)
+        .unwrap();
     std::env::set_current_dir(cwd).unwrap();
     // no global env var modifications
 
@@ -127,13 +176,26 @@ fn lsp_engine_strict_errors_when_caps_missing() {
     let files = dimpact::parse_unified_diff(&diff).unwrap();
 
     // Mock LSP available but without document/workspace symbol capabilities
-    let caps = CapsHint { document_symbol: false, workspace_symbol: false, call_hierarchy: false, references: false, definition: false };
-    let cfg = dimpact::EngineConfig { lsp_strict: true, dump_capabilities: false, mock_lsp: true, mock_caps: Some(caps) };
+    let caps = CapsHint {
+        document_symbol: false,
+        workspace_symbol: false,
+        call_hierarchy: false,
+        references: false,
+        definition: false,
+    };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: Some(caps),
+    };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let err = engine.changed_symbols(&files, dimpact::LanguageMode::Rust).err();
+    let err = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Rust)
+        .err();
     std::env::set_current_dir(cwd).unwrap();
     assert!(err.is_some(), "strict + no caps should error");
 }
@@ -147,14 +209,32 @@ fn lsp_engine_strict_impact_errors_when_caps_missing() {
     let files = dimpact::parse_unified_diff(&diff).unwrap();
 
     // No callHierarchy/references/definition -> impact should error under strict
-    let caps = CapsHint { document_symbol: true, workspace_symbol: true, call_hierarchy: false, references: false, definition: false };
-    let cfg = dimpact::EngineConfig { lsp_strict: true, dump_capabilities: false, mock_lsp: true, mock_caps: Some(caps) };
+    let caps = CapsHint {
+        document_symbol: true,
+        workspace_symbol: true,
+        call_hierarchy: false,
+        references: false,
+        definition: false,
+    };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: Some(caps),
+    };
     let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
-    let opts = dimpact::ImpactOptions { direction: dimpact::ImpactDirection::Callers, max_depth: Some(1), with_edges: Some(false), ignore_dirs: Vec::new() };
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(1),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let err = engine.impact(&files, dimpact::LanguageMode::Rust, &opts).err();
+    let err = engine
+        .impact(&files, dimpact::LanguageMode::Rust, &opts)
+        .err();
     std::env::set_current_dir(cwd).unwrap();
     assert!(err.is_some(), "strict + no impact caps should error");
 }

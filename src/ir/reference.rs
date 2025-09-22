@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::ir::{Symbol, SymbolId};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -38,13 +38,26 @@ impl SymbolIndex {
         let mut by_name = std::collections::HashMap::new();
         let mut by_file = std::collections::HashMap::new();
         for s in symbols.iter() {
-            by_name.entry(s.name.clone()).or_insert_with(Vec::new).push(s.clone());
-            by_file.entry(s.file.clone()).or_insert_with(Vec::new).push(s.clone());
+            by_name
+                .entry(s.name.clone())
+                .or_insert_with(Vec::new)
+                .push(s.clone());
+            by_file
+                .entry(s.file.clone())
+                .or_insert_with(Vec::new)
+                .push(s.clone());
         }
-        Self { symbols, by_name, by_file }
+        Self {
+            symbols,
+            by_name,
+            by_file,
+        }
     }
 
     pub fn enclosing_symbol(&self, file: &str, line: u32) -> Option<&Symbol> {
-        self.by_file.get(file)?.iter().find(|s| s.range.start_line <= line && line <= s.range.end_line)
+        self.by_file
+            .get(file)?
+            .iter()
+            .find(|s| s.range.start_line <= line && line <= s.range.end_line)
     }
 }

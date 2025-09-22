@@ -1,14 +1,16 @@
-use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::ir::reference::{RefKind, UnresolvedRef};
+use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
+use crate::languages::util::{byte_to_line, line_offsets};
 use std::cell::RefCell;
-use crate::languages::util::{line_offsets, byte_to_line};
 
 pub struct RustTsAnalyzer {
     parser: RefCell<tree_sitter::Parser>,
 }
 
 impl Default for RustTsAnalyzer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RustTsAnalyzer {
@@ -16,13 +18,16 @@ impl RustTsAnalyzer {
         let mut parser = tree_sitter::Parser::new();
         let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
         parser.set_language(&lang).expect("load ts-rust");
-        Self { parser: RefCell::new(parser) }
+        Self {
+            parser: RefCell::new(parser),
+        }
     }
 }
 
-
 impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
-    fn language(&self) -> &'static str { "rust" }
+    fn language(&self) -> &'static str {
+        "rust"
+    }
 
     fn symbols_in_file(&self, path: &str, source: &str) -> Vec<Symbol> {
         let tree = self.parser.borrow_mut().parse(source, None).unwrap();
@@ -33,16 +38,28 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
         while let Some(node) = stack.pop() {
             let kind = node.kind();
             let s = if kind == "function_item" {
-                let name = node.child_by_field_name("name").map(|n| n.utf8_text(source.as_bytes()).unwrap()).unwrap_or("");
+                let name = node
+                    .child_by_field_name("name")
+                    .map(|n| n.utf8_text(source.as_bytes()).unwrap())
+                    .unwrap_or("");
                 Some((name.to_string(), SymbolKind::Function))
             } else if kind == "struct_item" {
-                let name = node.child_by_field_name("name").map(|n| n.utf8_text(source.as_bytes()).unwrap()).unwrap_or("");
+                let name = node
+                    .child_by_field_name("name")
+                    .map(|n| n.utf8_text(source.as_bytes()).unwrap())
+                    .unwrap_or("");
                 Some((name.to_string(), SymbolKind::Struct))
             } else if kind == "enum_item" {
-                let name = node.child_by_field_name("name").map(|n| n.utf8_text(source.as_bytes()).unwrap()).unwrap_or("");
+                let name = node
+                    .child_by_field_name("name")
+                    .map(|n| n.utf8_text(source.as_bytes()).unwrap())
+                    .unwrap_or("");
                 Some((name.to_string(), SymbolKind::Enum))
             } else if kind == "trait_item" {
-                let name = node.child_by_field_name("name").map(|n| n.utf8_text(source.as_bytes()).unwrap()).unwrap_or("");
+                let name = node
+                    .child_by_field_name("name")
+                    .map(|n| n.utf8_text(source.as_bytes()).unwrap())
+                    .unwrap_or("");
                 Some((name.to_string(), SymbolKind::Trait))
             } else if kind == "impl_item" {
                 // methods inside impl
@@ -59,29 +76,40 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                                 name: name.to_string(),
                                 kind: SymbolKind::Method,
                                 file: path.to_string(),
-                                range: TextRange { start_line: sl, end_line: el.max(sl) },
+                                range: TextRange {
+                                    start_line: sl,
+                                    end_line: el.max(sl),
+                                },
                                 language: "rust".to_string(),
                             });
                         }
                     }
                 }
                 None
-            } else { None };
+            } else {
+                None
+            };
             if let Some((name, kind)) = s
-                && !name.is_empty() {
-                    let sl = byte_to_line(&offs, node.start_byte());
-                    let el = byte_to_line(&offs, node.end_byte().saturating_sub(1));
-                    out.push(Symbol {
-                        id: SymbolId::new("rust", path, &kind, &name, sl),
-                        name,
-                        kind,
-                        file: path.to_string(),
-                        range: TextRange { start_line: sl, end_line: el.max(sl) },
-                        language: "rust".to_string(),
-                    });
-                }
-            
-            for i in 0..node.child_count() { stack.push(node.child(i).unwrap()); }
+                && !name.is_empty()
+            {
+                let sl = byte_to_line(&offs, node.start_byte());
+                let el = byte_to_line(&offs, node.end_byte().saturating_sub(1));
+                out.push(Symbol {
+                    id: SymbolId::new("rust", path, &kind, &name, sl),
+                    name,
+                    kind,
+                    file: path.to_string(),
+                    range: TextRange {
+                        start_line: sl,
+                        end_line: el.max(sl),
+                    },
+                    language: "rust".to_string(),
+                });
+            }
+
+            for i in 0..node.child_count() {
+                stack.push(node.child(i).unwrap());
+            }
         }
         out
     }
@@ -100,31 +128,67 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                     let k = f.kind();
                     if k == "identifier" {
                         let name = f.utf8_text(source.as_bytes()).unwrap().to_string();
-                        if name.ends_with('!') { /* macro - ignore */ } else {
-                            out.push(UnresolvedRef { name, kind: RefKind::Call, file: path.to_string(), line: ln, qualifier: None, is_method: false });
+                        if name.ends_with('!') { /* macro - ignore */
+                        } else {
+                            out.push(UnresolvedRef {
+                                name,
+                                kind: RefKind::Call,
+                                file: path.to_string(),
+                                line: ln,
+                                qualifier: None,
+                                is_method: false,
+                            });
                         }
-                    } else if k == "scoped_identifier" || k == "scoped_type_identifier" || k == "qualified_name" || k == "path_expression" {
+                    } else if k == "scoped_identifier"
+                        || k == "scoped_type_identifier"
+                        || k == "qualified_name"
+                        || k == "path_expression"
+                    {
                         let txt = f.utf8_text(source.as_bytes()).unwrap();
                         let parts: Vec<&str> = txt.split("::").collect();
                         if let Some((last, rest)) = parts.split_last() {
-                            let qualifier = if rest.is_empty() { None } else { Some(rest.join("::")) };
-                            out.push(UnresolvedRef { name: (*last).to_string(), kind: RefKind::Call, file: path.to_string(), line: ln, qualifier, is_method: false });
+                            let qualifier = if rest.is_empty() {
+                                None
+                            } else {
+                                Some(rest.join("::"))
+                            };
+                            out.push(UnresolvedRef {
+                                name: (*last).to_string(),
+                                kind: RefKind::Call,
+                                file: path.to_string(),
+                                line: ln,
+                                qualifier,
+                                is_method: false,
+                            });
                         }
                     } else if k == "field_expression" {
                         // x.method()
                         if let Some(name_node) = f.child_by_field_name("field") {
                             let name = name_node.utf8_text(source.as_bytes()).unwrap().to_string();
-                            out.push(UnresolvedRef { name, kind: RefKind::Call, file: path.to_string(), line: ln, qualifier: None, is_method: true });
+                            out.push(UnresolvedRef {
+                                name,
+                                kind: RefKind::Call,
+                                file: path.to_string(),
+                                line: ln,
+                                qualifier: None,
+                                is_method: true,
+                            });
                         }
                     }
                 }
             }
-            for i in 0..node.child_count() { stack.push(node.child(i).unwrap()); }
+            for i in 0..node.child_count() {
+                stack.push(node.child(i).unwrap());
+            }
         }
         out
     }
 
-    fn imports_in_file(&self, path: &str, source: &str) -> std::collections::HashMap<String, String> {
+    fn imports_in_file(
+        &self,
+        path: &str,
+        source: &str,
+    ) -> std::collections::HashMap<String, String> {
         let tree = self.parser.borrow_mut().parse(source, None).unwrap();
         let root = tree.root_node();
         let mut map = std::collections::HashMap::new();
@@ -138,8 +202,13 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                     let text = c.utf8_text(bytes).unwrap();
                     if text.contains('{') {
                         // recursively flatten nested braces
-                        fn flatten(out: &mut std::collections::HashMap<String,String>, prefix: &str, inner: &str) {
-                            let mut depth: i32=0; let mut cur=String::new();
+                        fn flatten(
+                            out: &mut std::collections::HashMap<String, String>,
+                            prefix: &str,
+                            inner: &str,
+                        ) {
+                            let mut depth: i32 = 0;
+                            let mut cur = String::new();
                             let push = |tok: &str, pfx: &str, out: &mut std::collections::HashMap<String,String>| {
                                 let tok = tok.trim(); if tok.is_empty() { return; }
                                 if tok == "self" {
@@ -163,37 +232,54 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                             };
                             for ch in inner.chars() {
                                 match ch {
-                                    '{' => { depth+=1; cur.push(ch); }
-                                    '}' => { depth=depth.saturating_sub(1); cur.push(ch); }
-                                    ',' if depth==0 => { let t=cur.trim().to_string(); if !t.is_empty(){ push(&t, prefix, out);} cur.clear(); }
+                                    '{' => {
+                                        depth += 1;
+                                        cur.push(ch);
+                                    }
+                                    '}' => {
+                                        depth = depth.saturating_sub(1);
+                                        cur.push(ch);
+                                    }
+                                    ',' if depth == 0 => {
+                                        let t = cur.trim().to_string();
+                                        if !t.is_empty() {
+                                            push(&t, prefix, out);
+                                        }
+                                        cur.clear();
+                                    }
                                     _ => cur.push(ch),
                                 }
                             }
-                            let t=cur.trim().to_string(); if !t.is_empty(){ push(&t, prefix, out);}    
+                            let t = cur.trim().to_string();
+                            if !t.is_empty() {
+                                push(&t, prefix, out);
+                            }
                         }
                         if let Some((pref, rest)) = text.split_once('{') {
                             let prefix = pref.trim().trim_end_matches("::");
                             let inner = rest.trim().trim_end_matches('}');
                             flatten(&mut map, prefix, inner);
                         }
+                    } else {
+                        // simple use path [as alias]
+                        if let Some((p, a)) = text.split_once(" as ") {
+                            let alias = a.trim();
+                            map.insert(alias.to_string(), p.trim().to_string());
                         } else {
-                            // simple use path [as alias]
-                            if let Some((p, a)) = text.split_once(" as ") {
-                                let alias = a.trim();
-                                map.insert(alias.to_string(), p.trim().to_string());
+                            let alias = text.split("::").last().unwrap_or(text).trim();
+                            if text.trim_end().ends_with("::*") {
+                                let pfx = text.trim().trim_end_matches("::*");
+                                map.insert(format!("__glob__{}", pfx).to_string(), pfx.to_string());
                             } else {
-                                let alias = text.split("::").last().unwrap_or(text).trim();
-                                if text.trim_end().ends_with("::*") {
-                                    let pfx = text.trim().trim_end_matches("::*");
-                                    map.insert(format!("__glob__{}", pfx).to_string(), pfx.to_string());
-                                } else {
-                                    map.insert(alias.to_string(), text.trim().to_string());
-                                }
+                                map.insert(alias.to_string(), text.trim().to_string());
                             }
                         }
+                    }
                 }
             }
-            for i in 0..node.child_count() { stack.push(node.child(i).unwrap()); }
+            for i in 0..node.child_count() {
+                stack.push(node.child(i).unwrap());
+            }
         }
         // mod declarations mapping
         let current_mod = crate::impact::module_path_for_file(path);
@@ -202,7 +288,11 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
             if let Some(rest) = t.strip_prefix("mod ") {
                 let name = rest.trim().trim_end_matches(';').trim();
                 if !name.is_empty() {
-                    let mp = if current_mod.is_empty() { name.to_string() } else { format!("{}::{}", current_mod, name) };
+                    let mp = if current_mod.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{}::{}", current_mod, name)
+                    };
                     map.insert(name.to_string(), mp);
                 }
             }

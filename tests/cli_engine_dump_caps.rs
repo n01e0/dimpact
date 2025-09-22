@@ -29,18 +29,26 @@ fn cli_engine_dump_capabilities_uses_mock() {
     fs::write(repo.join("main.rs"), "fn bar() {}\nfn foo() { bar(); }\n").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "init", "-q"]);
-    fs::write(repo.join("main.rs"), "fn bar() { let _x=1; }\nfn foo() { bar(); }\n").unwrap();
+    fs::write(
+        repo.join("main.rs"),
+        "fn bar() { let _x=1; }\nfn foo() { bar(); }\n",
+    )
+    .unwrap();
     let diff = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
 
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let assert = cmd
         .current_dir(&repo)
         .env("DIMPACT_TEST_LSP_MOCK", "1")
-        .arg("--mode").arg("impact")
-        .arg("--engine").arg("auto")
+        .arg("--mode")
+        .arg("impact")
+        .arg("--engine")
+        .arg("auto")
         .arg("--engine-dump-capabilities")
-        .arg("--lang").arg("rust")
-        .arg("--format").arg("json")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
         .write_stdin(String::from_utf8(diff.stdout).unwrap())
         .assert()
         .success()

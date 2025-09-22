@@ -25,20 +25,42 @@ fn ts_default_import_callers() {
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "tester@example.com"]);
     git(&repo, &["config", "user.name", "Tester"]);
-    fs::write(repo.join("mod.ts"), "export default function bar(): void {}\n").unwrap();
-    fs::write(repo.join("main.ts"), "import Foo from './mod';\nfunction run(){ Foo(); }\n").unwrap();
+    fs::write(
+        repo.join("mod.ts"),
+        "export default function bar(): void {}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("main.ts"),
+        "import Foo from './mod';\nfunction run(){ Foo(); }\n",
+    )
+    .unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "init", "-q"]);
-    fs::write(repo.join("mod.ts"), "export default function bar(): void { const y = 1; }\n").unwrap();
+    fs::write(
+        repo.join("mod.ts"),
+        "export default function bar(): void { const y = 1; }\n",
+    )
+    .unwrap();
     let diff = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert = cmd.current_dir(&repo)
-        .arg("--mode").arg("impact")
-        .arg("--direction").arg("callers")
-        .arg("--lang").arg("auto")
-        .arg("--format").arg("json")
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--lang")
+        .arg("auto")
+        .arg("--format")
+        .arg("json")
         .write_stdin(String::from_utf8(diff.stdout).unwrap())
-        .assert().success();
+        .assert()
+        .success();
     let out = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    assert!(out.contains("\"run\""), "impact should include run, got: {}", out);
+    assert!(
+        out.contains("\"run\""),
+        "impact should include run, got: {}",
+        out
+    );
 }
