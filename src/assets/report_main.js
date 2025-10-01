@@ -40,18 +40,25 @@
       depth: (function(){ const v = document.getElementById('f_depth').value; return v===''?null:Math.max(0, parseInt(v,10)||0); })(),
       reach: document.getElementById('f_reach') ? document.getElementById('f_reach').checked : true,
       file: document.getElementById('f_file').value.trim().toLowerCase(),
-      symbols: Array.from(document.querySelectorAll('input.symbol-select:checked')).map(x=>x.value)
+      symbols: Array.from(document.querySelectorAll('input.symbol-select:checked')).map(x=>x.value),
+      symbolsStrict: document.getElementById('symbols-restrict')?.checked || false,
+      symbolsAsRoots: document.getElementById('symbols-as-roots')?.checked || false
     };
   }
 
-  function computeSymbolVisibility(selectedIds){
+  function computeSymbolVisibility(selectedIds, strict, adj){
     const selected = new Set(selectedIds || []);
+    if(selected.size === 0){
+      return { selected, related: new Set() };
+    }
+
     const related = new Set(selected);
-    if(selected.size === 0){ return { selected, related }; }
     const queue = Array.from(selected);
+    const graph = strict ? (adj || new Map()) : UNDIRECTED_ADJ;
+
     while(queue.length){
       const u = queue.shift();
-      const neigh = UNDIRECTED_ADJ.get(u);
+      const neigh = graph.get(u);
       if(!neigh) continue;
       neigh.forEach(v=>{
         if(!related.has(v)){
@@ -68,6 +75,10 @@
   function bindSymbolControls(){
     const onChange = ()=>{ triggerApply(); };
     symbolInputs().forEach(inp=>{ inp.addEventListener('change', onChange); });
+    const strict = document.getElementById('symbols-restrict');
+    if(strict){ strict.addEventListener('change', onChange); }
+    const rootsToggle = document.getElementById('symbols-as-roots');
+    if(rootsToggle){ rootsToggle.addEventListener('change', onChange); }
     const btnAll = document.getElementById('symbols-select-all');
     if(btnAll){ btnAll.onclick = ()=>{ symbolInputs().forEach(inp=>{ inp.checked = true; }); triggerApply(); }; }
     const btnNone = document.getElementById('symbols-select-none');
@@ -88,6 +99,8 @@
       inputs.forEach((el, idx)=>{ el.checked = idx < Math.min(10, inputs.length); });
     }
     symbolInputs().forEach(inp=>{ inp.checked = true; });
+    const strict = document.getElementById('symbols-restrict'); if(strict) strict.checked = false;
+    const rootsToggle = document.getElementById('symbols-as-roots'); if(rootsToggle) rootsToggle.checked = false;
   }
 
   function bindGlobalControls(){
@@ -113,8 +126,9 @@
   function computeDistances(dir){
     const adj = buildAdj(dir);
     const q=[]; const dist=new Map();
-    const roots = getFilterState().roots;
-    const src = (roots && roots.length) ? roots : IMPACT_DATA.nodes.filter(n=>n.data.changed).map(n=>n.data.id);
+    const state = getFilterState();
+    const rootIds = state.symbolsAsRoots && state.symbols.length ? state.symbols : state.roots;
+    const src = (rootIds && rootIds.length) ? rootIds : IMPACT_DATA.nodes.filter(n=>n.data.changed).map(n=>n.data.id);
     src.forEach(id=>{ dist.set(id,0); q.push(id); });
     while(q.length){ const u=q.shift(); const d=dist.get(u)||0; const neigh=Array.from(adj.get(u)||[]); for(const v of neigh){ if(!dist.has(v)){ dist.set(v,d+1); q.push(v);} } }
     return dist; // id->distance
@@ -122,8 +136,9 @@
   function computeParents(dir){
     const adj = buildAdj(dir);
     const q=[]; const parent=new Map(); const seen=new Set();
-    const roots = getFilterState().roots;
-    const src = (roots && roots.length) ? roots : IMPACT_DATA.nodes.filter(n=>n.data.changed).map(n=>n.data.id);
+    const state = getFilterState();
+    const rootIds = state.symbolsAsRoots && state.symbols.length ? state.symbols : state.roots;
+    const src = (rootIds && rootIds.length) ? rootIds : IMPACT_DATA.nodes.filter(n=>n.data.changed).map(n=>n.data.id);
     src.forEach(id=>{ seen.add(id); parent.set(id, null); q.push(id); });
     while(q.length){ const u=q.shift(); for(const v of (adj.get(u)||[])){ if(!seen.has(v)){ seen.add(v); parent.set(v,u); q.push(v); } } }
     return parent; // id -> parent id or null for changed
@@ -186,8 +201,9 @@
 
     async function applyFilters(){
       const f = getFilterState(); try{ showBusy(); }catch(_e){}
+      const adj = buildAdj(f.dir);
       const R = await computeAsync(f.dir); const DIST = R.dist; const EXP = expandedVisible(f.dir);
-      const symbolInfo = computeSymbolVisibility(f.symbols);
+      const symbolInfo = computeSymbolVisibility(f.symbols, f.symbolsStrict, adj);
       const hasSymbolFilter = symbolInfo.selected.size > 0;
       const allowed = symbolInfo.related;
       const visibleNode = new Set();
@@ -217,8 +233,8 @@
     const cv = document.getElementById('canvas'); const viz = document.getElementById('viz'); viz.style.display = 'none'; cv.style.display = 'block';
     const w = cv.clientWidth || 800, h = cv.clientHeight || 520; cv.width = w; cv.height = h; const ctx = cv.getContext('2d');
     try{ showBusy(); }catch(_e){}; ctx.clearRect(0,0,w,h);
-    const F = getFilterState(); const R = await computeAsync(F.dir); const DIST = R.dist; const PP = R.pairs;
-    const symbolInfo = computeSymbolVisibility(F.symbols);
+    const F = getFilterState(); const adj = buildAdj(F.dir); const R = await computeAsync(F.dir); const DIST = R.dist; const PP = R.pairs;
+    const symbolInfo = computeSymbolVisibility(F.symbols, F.symbolsStrict, adj);
     const hasSymbolFilter = symbolInfo.selected.size > 0;
     const allowed = symbolInfo.related;
     const nodes = IMPACT_DATA.nodes
