@@ -1,0 +1,38 @@
+name: Impact Analysis
+
+on:
+  pull_request:
+
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - id: impact
+        name: Run impact & format tables
+        run: |
+          git diff --no-ext-diff \
+          | docker run -it --rm ghcr.io/n01e0/dimpact:latest impact --direction callers --with-edges -f json \
+          |jq -r '
+            ["Changed","Kind","Location"],
+            ["-------","----","--------"],
+            (.changed_symbols[] | [ .name, (.kind|ascii_upcase), "\( .file ):\( .range.start_line )" ]) | @tsv,
+            "",
+            ["Impacted","Kind","Location"],
+            ["--------","----","--------"],
+            (.impacted_symbols[] | [ .name, (.kind|ascii_upcase), "\( .file ):\( .range.start_line )" ]) | @tsv'\
+            | column -t -s $'\t' \
+            > impact-tables.md
+
+          # Export the formatted tables as output for commenting
+          echo "comment<<EOF" >> $GITHUB_OUTPUT
+          cat impact-tables.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post tables as PR comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          header: '### Impact Analysis'
+          body: |
+            ${{ steps.impact.outputs.comment }}
