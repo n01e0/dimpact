@@ -1,0 +1,40 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: ghcr.io/n01e0/dimpact-ci:latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache CARGO_HOME
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}
+      - name: Install cargo-make
+        run: cargo install cargo-make
+      - name: Run CI
+        run: cargo check --all-targets && cargo clippy
+  image_build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build Docker image
+        run: docker build -t dimpact:${{ github.sha }} -f docker/Dockerfile .
