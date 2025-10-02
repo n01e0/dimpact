@@ -6,6 +6,7 @@ WORKDIR /build
 RUN cargo build --release
 
 FROM scratch
-COPY --from=builder /build/target/release/dimpact /dimpact
+COPY --from=builder /build/target/release/dimpact /bin/dimpact
+WORKDIR /work
 
-ENTRYPOINT ["/dimpact"]
+ENTRYPOINT ["/bin/dimpact"]
