@@ -1,6 +1,6 @@
 [package]
 name = "dimpact"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["n01e0 <reoshiseki@gmail.com>"]
 edition = "2024"
 description = "impact analysis from diff"

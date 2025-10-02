@@ -2,18 +2,17 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dimpact::DfgBuilder;
 use dimpact::EngineConfig;
 use dimpact::cache;
-use dimpact::compute_changed_symbols;
 use dimpact::compute_impact;
 use dimpact::dfg::{DataFlowGraph, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
 use dimpact::engine::{EngineKind, make_engine};
 use dimpact::ir::SymbolId;
 use dimpact::ir::reference::{RefKind, Reference};
-use dimpact::render::dfg_to_dot;
 use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{DiffParseError, parse_unified_diff};
 use dimpact::{ImpactDirection, ImpactOptions, ImpactOutput};
 use env_logger::Env;
 use is_terminal::IsTerminal;
+use serde::Serialize;
 use std::fs;
 use std::io::{self, Read};
 
@@ -131,6 +130,9 @@ struct Args {
     ///          [{"lang":"rust","path":"src/lib.rs","kind":"fn","name":"foo","line":12}, ...]
     #[arg(long = "seed-json")]
     seed_json: Option<String>,
+    /// Group impact per changed/seed symbol; output per-seed results
+    #[arg(long = "per-seed", default_value_t = false)]
+    per_seed: bool,
     /// Subcommands
     #[command(subcommand)]
     cmd: Option<Command>,
@@ -182,6 +184,9 @@ enum Command {
         /// Ignore directories (relative prefixes). Repeatable.
         #[arg(long = "ignore-dir")]
         ignore_dir: Vec<String>,
+        /// Group impact per changed/seed symbol; output per-seed results
+        #[arg(long = "per-seed", default_value_t = false)]
+        per_seed: bool,
     },
     /// Generate a Symbol ID from file, line and name
     Id {
@@ -265,6 +270,7 @@ fn main() -> anyhow::Result<()> {
             .num_threads(n)
             .build_global();
     }
+
     let args = Args::parse();
 
     // Prefer subcommands if provided; fallback to deprecated --mode
@@ -296,6 +302,7 @@ fn main() -> anyhow::Result<()> {
                 seed_symbols,
                 seed_json,
                 ignore_dir,
+                per_seed,
             } => run_impact(
                 args.format,
                 lang,
@@ -310,6 +317,7 @@ fn main() -> anyhow::Result<()> {
                 seed_symbols,
                 seed_json,
                 ignore_dir,
+                per_seed,
             ),
             Command::Id {
                 path,
@@ -362,6 +370,7 @@ fn main() -> anyhow::Result<()> {
                 args.seed_symbols,
                 args.seed_json,
                 args.ignore_dir,
+                args.per_seed,
             )?;
         }
     }
@@ -661,6 +670,19 @@ fn run_changed(
     Ok(())
 }
 
+/// Grouped impact output per changed or seed symbol, with direction info
+#[derive(Debug, Serialize)]
+struct PerSeedImpact {
+    direction: ImpactDirection,
+    output: ImpactOutput,
+}
+
+#[derive(Debug, Serialize)]
+struct PerSeedOutput {
+    changed_symbol: dimpact::ir::Symbol,
+    impacts: Vec<PerSeedImpact>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_impact(
     fmt: OutputFormat,
@@ -676,6 +698,7 @@ fn run_impact(
     seed_symbols: Vec<String>,
     seed_json: Option<String>,
     ignore_dir: Vec<String>,
+    per_seed: bool,
 ) -> anyhow::Result<()> {
     // Gather seeds
     let mut seeds: Vec<dimpact::Symbol> = Vec::new();
@@ -751,28 +774,20 @@ fn run_impact(
         );
     }
 
-    if seeds.is_empty() {
-        // Diff-based
-        let diff_text = read_diff_from_stdin()?;
-        let files = match parse_unified_diff(&diff_text) {
-            Ok(f) => f,
-            Err(DiffParseError::MissingHeader) => Vec::new(),
-            Err(e) => return Err(anyhow::anyhow!(e)),
-        };
-        log::info!(
-            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} pdg={} ignore_dirs={:?}",
-            ekind,
-            files.len(),
-            lang,
-            direction,
-            opts.max_depth,
-            with_edges,
-            with_pdg,
-            opts.ignore_dirs
-        );
+    // Per-seed grouping for call-graph impact (diff or seed based)
+    if per_seed {
         if with_pdg || with_propagation {
-            // Build changed symbols and project graph
-            let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
+            anyhow::bail!("--per-seed does not support PDG or propagation");
+        }
+        // Diff-based grouping: seeds := changed symbols
+        if seeds.is_empty() {
+            let diff_text = read_diff_from_stdin()?;
+            let files = match parse_unified_diff(&diff_text) {
+                Ok(f) => f,
+                Err(DiffParseError::MissingHeader) => Vec::new(),
+                Err(e) => return Err(anyhow::anyhow!(e)),
+            };
+            let changed: ChangedOutput = engine.changed_symbols(&files, lang)?;
             let (scope, dir_override) = cache::scope_from_env();
             let mut db = cache::open(scope, dir_override.as_deref())?;
             let st = cache::stats(&db.conn)?;
@@ -783,68 +798,75 @@ fn run_impact(
                 cache::update_paths(&mut db.conn, &changed.changed_files)?;
             }
             let (index, refs) = cache::load_graph(&db.conn)?;
-            // Build DFG for changed files (stub for Rust only)
-            let mut combined = DataFlowGraph {
-                nodes: Vec::new(),
-                edges: Vec::new(),
-            };
-            for path in &changed.changed_files {
-                if path.ends_with(".rs") {
-                    if let Ok(src) = fs::read_to_string(path) {
-                        let dfg = RustDfgBuilder::build(path, &src);
-                        combined.nodes.extend(dfg.nodes);
-                        combined.edges.extend(dfg.edges);
-                    }
-                } else if path.ends_with(".rb")
-                    && let Ok(src) = fs::read_to_string(path)
-                {
-                    let dfg = RubyDfgBuilder::build(path, &src);
-                    combined.nodes.extend(dfg.nodes);
-                    combined.edges.extend(dfg.edges);
+            let mut grouped: Vec<PerSeedOutput> = Vec::new();
+            for seed in &changed.changed_symbols {
+                let mut impacts: Vec<PerSeedImpact> = Vec::new();
+                if opts.direction == ImpactDirection::Both {
+                    let mut o = opts.clone();
+                    o.direction = ImpactDirection::Callers;
+                    impacts.push(PerSeedImpact {
+                        direction: ImpactDirection::Callers,
+                        output: compute_impact(&[seed.clone()], &index, &refs, &o),
+                    });
+                    let mut o2 = opts.clone();
+                    o2.direction = ImpactDirection::Callees;
+                    impacts.push(PerSeedImpact {
+                        direction: ImpactDirection::Callees,
+                        output: compute_impact(&[seed.clone()], &index, &refs, &o2),
+                    });
+                } else {
+                    impacts.push(PerSeedImpact {
+                        direction: opts.direction,
+                        output: compute_impact(&[seed.clone()], &index, &refs, &opts),
+                    });
                 }
+                grouped.push(PerSeedOutput {
+                    changed_symbol: seed.clone(),
+                    impacts,
+                });
             }
-            // Merge call graph into PDG
-            let mut pdg = PdgBuilder::build(&combined, &refs);
-            if with_propagation {
-                PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
-            }
-            // If Dot output requested, visualize PDG
-            if matches!(fmt, OutputFormat::Dot) {
-                println!("{}", dfg_to_dot(&pdg));
-                return Ok(());
-            }
-            // Convert PDG edges to Reference list for impact calculation
-            let pdg_refs: Vec<Reference> = pdg
-                .edges
-                .into_iter()
-                .map(|e| Reference {
-                    from: SymbolId(e.from),
-                    to: SymbolId(e.to),
-                    kind: RefKind::Call,
-                    file: String::new(),
-                    line: 0,
-                })
-                .collect();
-            // Compute impact over PDG
-            let out: ImpactOutput =
-                compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts);
-            match fmt {
-                OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
-                OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
-                OutputFormat::Dot => println!("{}", dimpact::to_dot(&out)),
-                OutputFormat::Html => println!("{}", dimpact::to_html(&out)),
-            }
+            println!("{}", serde_json::to_string_pretty(&grouped)?);
             return Ok(());
         }
-        // Default call-graph based impact
-        let out: ImpactOutput = engine.impact(&files, lang, &opts)?;
-        match fmt {
-            OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
-            OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
-            OutputFormat::Dot => println!("{}", dimpact::to_dot(&out)),
-            OutputFormat::Html => println!("{}", dimpact::to_html(&out)),
+        // Seed-based grouping: group per provided seed
+        {
+            let (scope, dir_override) = cache::scope_from_env();
+            let mut db = cache::open(scope, dir_override.as_deref())?;
+            let st = cache::stats(&db.conn)?;
+            if st.symbols == 0 {
+                cache::build_all(&mut db.conn)?;
+            }
+            let (index, refs) = cache::load_graph(&db.conn)?;
+            let mut grouped: Vec<PerSeedOutput> = Vec::new();
+            for seed in &seeds {
+                let mut impacts: Vec<PerSeedImpact> = Vec::new();
+                if opts.direction == ImpactDirection::Both {
+                    let mut o = opts.clone();
+                    o.direction = ImpactDirection::Callers;
+                    impacts.push(PerSeedImpact {
+                        direction: ImpactDirection::Callers,
+                        output: compute_impact(&[seed.clone()], &index, &refs, &o),
+                    });
+                    let mut o2 = opts.clone();
+                    o2.direction = ImpactDirection::Callees;
+                    impacts.push(PerSeedImpact {
+                        direction: ImpactDirection::Callees,
+                        output: compute_impact(&[seed.clone()], &index, &refs, &o2),
+                    });
+                } else {
+                    impacts.push(PerSeedImpact {
+                        direction: opts.direction,
+                        output: compute_impact(&[seed.clone()], &index, &refs, &opts),
+                    });
+                }
+                grouped.push(PerSeedOutput {
+                    changed_symbol: seed.clone(),
+                    impacts,
+                });
+            }
+            println!("{}", serde_json::to_string_pretty(&grouped)?);
+            return Ok(());
         }
-        return Ok(());
     }
 
     log::info!(

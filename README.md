@@ -19,6 +19,8 @@ Quick Start
 - Impact from seeds (no diff needed):
   - `dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json`
   - `dimpact impact --seed-json '["typescript:src/a.ts:fn:run:10"]' -f json`
+- Impact per changed-symbol grouping (direction=both, with edges):
+  - `git diff --no-ext-diff | dimpact impact --per-seed --direction both --with-edges -f json`
 
 Symbol ID generator
 - Generate candidate IDs from file/line/name; filter by kind; print as JSON/YAML or plain IDs.
@@ -53,6 +55,7 @@ CLI Overview
   - `--engine-dump-capabilities`: dump engine capabilities to stderr
   - `--seed-symbol LANG:PATH:KIND:NAME:LINE` : seed symbols by ID (repeatable)
   - `--seed-json PATH|'-'|JSON` : seed symbols via JSON array or file or stdin
+  - `--per-seed`              : group impact per changed/seed symbol; direction=both時はcaller/calley別出力
   
 ### PDG Visualization
 - Generate PDG in `dot` format with `--with-pdg` and `-f dot`:
