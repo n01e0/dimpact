@@ -8,31 +8,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - id: impact
         name: Run impact & format tables
         run: |
-          git diff --no-ext-diff \
-          | docker run -it --rm ghcr.io/n01e0/dimpact:latest impact --direction callers --with-edges -f json \
-          |jq -r '
-            ["Changed","Kind","Location"],
-            ["-------","----","--------"],
-            (.changed_symbols[] | [ .name, (.kind|ascii_upcase), "\( .file ):\( .range.start_line )" ]) | @tsv,
+          git fetch origin ${{ github.base_ref }} && \
+          git diff --no-ext-diff origin/${{ github.base_ref }}...HEAD | \
+          docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --direction caller --with-pdg --with-edges -f json | \
+          jq -r ' 
+            "| Changed | Kind | Location |",
+            "| ------- | ---- | -------- |",
+            (.changed_symbols[]
+              | "| \(.name) | \(.kind|ascii_upcase) | \(.file):\(.range.start_line) |"),
+          
             "",
-            ["Impacted","Kind","Location"],
-            ["--------","----","--------"],
-            (.impacted_symbols[] | [ .name, (.kind|ascii_upcase), "\( .file ):\( .range.start_line )" ]) | @tsv'\
-            | column -t -s $'\t' \
-            > impact-tables.md
+            "| Impacted | Kind | Location |",
+            "| -------- | ---- | -------- |",
+            (.impacted_symbols[]
+              | "| \(.name) | \(.kind|ascii_upcase) | \(.file):\(.range.start_line) |")
+          '  > impact-tables.md
 
-          # Export the formatted tables as output for commenting
-          echo "comment<<EOF" >> $GITHUB_OUTPUT
-          cat impact-tables.md >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Post tables as PR comment
-        uses: peter-evans/create-or-update-comment@v4
+      - name: comment
+        uses: marocchino/sticky-pull-request-comment@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          header: '### Impact Analysis'
-          body: |
-            ${{ steps.impact.outputs.comment }}
+          path: impact-tables.md
