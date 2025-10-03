@@ -36,7 +36,8 @@ CLI Overview
   - `changed`: compute changed symbols from stdin diff
   - `impact`: compute impact from stdin diff or seeds (supports diff- and seed-based analyses)
   - `id`: generate Symbol IDs from file/line/name
-  - `cache`: build/stats/clear the incremental cache
+  - `cache`: build/update/stats/clear the incremental cache
+  - `completions`: generate shell completion script
 - Seeds:
   - `--seed-symbol LANG:PATH:KIND:NAME:LINE` (repeatable)
   - `--seed-json <json|string|path|->` accepts array of strings or objects
@@ -55,7 +56,7 @@ CLI Overview
   - `--engine-dump-capabilities`: dump engine capabilities to stderr
   - `--seed-symbol LANG:PATH:KIND:NAME:LINE` : seed symbols by ID (repeatable)
   - `--seed-json PATH|'-'|JSON` : seed symbols via JSON array or file or stdin
-  - `--per-seed`              : group impact per changed/seed symbol; direction=both時はcaller/calley別出力
+  - `--per-seed`              : group impact per changed/seed symbol; when `--direction both`, outputs separate caller and callee results
   
 ### PDG Visualization
 - Generate PDG in `dot` format with `--with-pdg` and `-f dot`:
@@ -100,15 +101,16 @@ Usage Examples
   - `dimpact id --name initialize --raw`
 
 License
-- See repository license if present; otherwise contact maintainers.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 Cache
 - Purpose: persist symbols and reference edges to speed up impact analysis.
 - Storage: single SQLite DB `index.db` stored in either location:
   - Local (default): `<repo_root>/.dimpact/cache/v1/index.db`
   - Global: `$XDG_CONFIG_HOME/dimpact/cache/v1/<repo_key>/index.db`
-- Control via subcommands:
-  - Build: `dimpact cache build --scope local|global [--dir PATH]`
-  - Stats: `dimpact cache stats --scope local|global [--dir PATH]`
-  - Clear: `dimpact cache clear --scope local|global [--dir PATH]`
+Control via subcommands:
+  - Build or rebuild the cache: `dimpact cache build --scope local|global [--dir PATH]`
+  - Update existing cache (alias `verify`): `dimpact cache update --scope local|global [--dir PATH]`
+  - Show cache stats: `dimpact cache stats --scope local|global [--dir PATH]`
+  - Clear the cache: `dimpact cache clear --scope local|global [--dir PATH]`
 - Impact integration: the TS engine uses the cache by default. On first use it builds the cache; on subsequent runs it updates only changed files.
 - Env overrides: `DIMPACT_CACHE_SCOPE=local|global`, `DIMPACT_CACHE_DIR=/custom/dir`.
