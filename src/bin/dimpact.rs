@@ -808,18 +808,18 @@ fn run_impact(
                     o.direction = ImpactDirection::Callers;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callers,
-                        output: compute_impact(&[seed.clone()], &index, &refs, &o),
+                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
                     });
                     let mut o2 = opts.clone();
                     o2.direction = ImpactDirection::Callees;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callees,
-                        output: compute_impact(&[seed.clone()], &index, &refs, &o2),
+                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
                     });
                 } else {
                     impacts.push(PerSeedImpact {
                         direction: opts.direction,
-                        output: compute_impact(&[seed.clone()], &index, &refs, &opts),
+                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
                     });
                 }
                 grouped.push(PerSeedOutput {
@@ -847,18 +847,18 @@ fn run_impact(
                     o.direction = ImpactDirection::Callers;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callers,
-                        output: compute_impact(&[seed.clone()], &index, &refs, &o),
+                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
                     });
                     let mut o2 = opts.clone();
                     o2.direction = ImpactDirection::Callees;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callees,
-                        output: compute_impact(&[seed.clone()], &index, &refs, &o2),
+                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
                     });
                 } else {
                     impacts.push(PerSeedImpact {
                         direction: opts.direction,
-                        output: compute_impact(&[seed.clone()], &index, &refs, &opts),
+                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
                     });
                 }
                 grouped.push(PerSeedOutput {
@@ -869,6 +869,96 @@ fn run_impact(
             println!("{}", serde_json::to_string_pretty(&grouped)?);
             return Ok(());
         }
+    }
+
+    // diff-based impact (default when --per-seed not set and no seeds)
+    if seeds.is_empty() {
+        let diff_text = read_diff_from_stdin()?;
+        let files = match parse_unified_diff(&diff_text) {
+            Ok(f) => f,
+            Err(DiffParseError::MissingHeader) => Vec::new(),
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        };
+        log::info!(
+            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} pdg={} ignore_dirs={:?}",
+            ekind,
+            files.len(),
+            lang,
+            direction,
+            opts.max_depth,
+            with_edges,
+            with_pdg,
+            opts.ignore_dirs
+        );
+        if with_pdg || with_propagation {
+            // Build changed symbols and project graph
+            let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
+            let (scope, dir_override) = cache::scope_from_env();
+            let mut db = cache::open(scope, dir_override.as_deref())?;
+            let st = cache::stats(&db.conn)?;
+            if st.symbols == 0 {
+                cache::build_all(&mut db.conn)?;
+            }
+            if !changed.changed_files.is_empty() {
+                cache::update_paths(&mut db.conn, &changed.changed_files)?;
+            }
+            let (index, refs) = cache::load_graph(&db.conn)?;
+            let mut combined = DataFlowGraph {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            };
+            for path in &changed.changed_files {
+                if path.ends_with(".rs") {
+                    if let Ok(src) = fs::read_to_string(path) {
+                        let dfg = RustDfgBuilder::build(path, &src);
+                        combined.nodes.extend(dfg.nodes);
+                        combined.edges.extend(dfg.edges);
+                    }
+                } else if path.ends_with(".rb")
+                    && let Ok(src) = fs::read_to_string(path)
+                {
+                    let dfg = RubyDfgBuilder::build(path, &src);
+                    combined.nodes.extend(dfg.nodes);
+                    combined.edges.extend(dfg.edges);
+                }
+            }
+            let mut pdg = PdgBuilder::build(&combined, &refs);
+            if with_propagation {
+                PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
+            }
+            if matches!(fmt, OutputFormat::Dot) {
+                println!("{}", dfg_to_dot(&pdg));
+                return Ok(());
+            }
+            let pdg_refs: Vec<Reference> = pdg
+                .edges
+                .into_iter()
+                .map(|e| Reference {
+                    from: SymbolId(e.from),
+                    to: SymbolId(e.to),
+                    kind: RefKind::Call,
+                    file: String::new(),
+                    line: 0,
+                })
+                .collect();
+            let out: ImpactOutput =
+                compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts);
+            match fmt {
+                OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
+                OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
+                OutputFormat::Dot => println!("{}", dimpact::to_dot(&out)),
+                OutputFormat::Html => println!("{}", dimpact::to_html(&out)),
+            }
+            return Ok(());
+        }
+        let out: ImpactOutput = engine.impact(&files, lang, &opts)?;
+        match fmt {
+            OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
+            OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
+            OutputFormat::Dot => println!("{}", dimpact::to_dot(&out)),
+            OutputFormat::Html => println!("{}", dimpact::to_html(&out)),
+        }
+        return Ok(());
     }
 
     // diff-based impact (default when --per-seed not set and no seeds)

@@ -52,5 +52,5 @@ fn edges_are_included_when_flag_set() {
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
     let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert!(v["edges"].is_array());
-    assert!(v["edges"].as_array().unwrap().len() > 0);
+    assert!(!v["edges"].as_array().unwrap().is_empty());
 }

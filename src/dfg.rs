@@ -645,7 +645,7 @@ mod pdg_tests {
             file: "f.rs".to_string(),
             line: 10,
         };
-        let pdg = PdgBuilder::build(&dfg, &[ref_sym.clone()]);
+        let pdg = PdgBuilder::build(&dfg, std::slice::from_ref(&ref_sym));
         // Check call edge added
         assert!(pdg.edges.iter().any(|e| e.from == ref_sym.from.0
             && e.to == ref_sym.to.0
