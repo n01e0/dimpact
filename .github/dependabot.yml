@@ -4,6 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      tree-sitter:
+        patterns:
+          - "tree-sitter*"
   - package-ecosystem: "docker"
     directory: "Dockerfile"
     schedule:
