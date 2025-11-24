@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -35,6 +35,6 @@ jobs:
   image_build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Build Docker image
         run: docker build -t dimpact:${{ github.sha }} -f docker/Dockerfile .
