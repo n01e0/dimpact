@@ -1114,9 +1114,19 @@ fn lsp_impact_bfs(
             crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method
         ) {
             // Directly seed from the changed callable itself
-            let (mut line0, mut ch0) = guess_callable_position(&s.file, s)
+            let (line0, ch0) = guess_callable_position(&s.file, s)
                 .unwrap_or((s.range.start_line.saturating_sub(1), 0));
-            if let Ok(defs) = sess.req_definition(&uri, line0, ch0)
+            let mut roots = sess
+                .req_prepare_call_hierarchy(&uri, line0, ch0)
+                .unwrap_or_default();
+            if roots.is_empty() && ch0 != 0 {
+                roots = sess
+                    .req_prepare_call_hierarchy(&uri, line0, 0)
+                    .unwrap_or_default();
+            }
+            // If direct prepare failed, resolve definition once and retry on its position.
+            if roots.is_empty()
+                && let Ok(defs) = sess.req_definition(&uri, line0, ch0)
                 && let Some(loc) = defs.first()
                 && let Some(r) = loc.get("targetSelectionRange").or_else(|| loc.get("range"))
                 && let (Some(sl), Some(sc)) = (
@@ -1128,16 +1138,16 @@ fn lsp_impact_bfs(
                         .and_then(|n| n.as_u64()),
                 )
             {
-                line0 = sl as u32;
-                ch0 = sc as u32;
-            }
-            let mut roots = sess
-                .req_prepare_call_hierarchy(&uri, line0, ch0)
-                .unwrap_or_default();
-            if roots.is_empty() && ch0 != 0 {
+                let dl0 = sl as u32;
+                let dc0 = sc as u32;
                 roots = sess
-                    .req_prepare_call_hierarchy(&uri, line0, 0)
+                    .req_prepare_call_hierarchy(&uri, dl0, dc0)
                     .unwrap_or_default();
+                if roots.is_empty() && dc0 != 0 {
+                    roots = sess
+                        .req_prepare_call_hierarchy(&uri, dl0, 0)
+                        .unwrap_or_default();
+                }
             }
             for it in roots {
                 let key = format!(
@@ -1559,34 +1569,42 @@ fn enqueue_callers_via_references(
     next_depth: usize,
 ) {
     let uri = path_to_uri(std::path::Path::new(&cur_sym.file));
-    let defs = sess
-        .req_definition(&uri, cur_sym.range.start_line.saturating_sub(1), 0)
-        .unwrap_or_default();
-    let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
-        let u = loc
-            .get("uri")
-            .or_else(|| loc.get("targetUri"))
-            .and_then(|v| v.as_str())
-            .unwrap_or(&uri)
-            .to_string();
-        let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
-        let l0 = r
-            .and_then(|rr| rr.get("start"))
-            .and_then(|st| st.get("line"))
-            .and_then(|n| n.as_u64())
-            .unwrap_or(0) as u32;
-        let c0 = r
-            .and_then(|rr| rr.get("start"))
-            .and_then(|st| st.get("character"))
-            .and_then(|n| n.as_u64())
-            .unwrap_or(0) as u32;
-        (u, l0, c0)
-    } else {
-        (uri.clone(), cur_sym.range.start_line.saturating_sub(1), 0)
-    };
-    let refs = sess
-        .req_references(&def_uri, def_line0, def_ch0)
-        .unwrap_or_default();
+    let (line0, ch0) = guess_callable_position(&cur_sym.file, cur_sym)
+        .unwrap_or((cur_sym.range.start_line.saturating_sub(1), 0));
+    let mut refs = sess.req_references(&uri, line0, ch0).unwrap_or_default();
+
+    // If direct references are sparse, resolve definition and retry at def position.
+    if refs.len() <= 1 {
+        let defs = sess.req_definition(&uri, line0, ch0).unwrap_or_default();
+        let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
+            let u = loc
+                .get("uri")
+                .or_else(|| loc.get("targetUri"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(&uri)
+                .to_string();
+            let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
+            let l0 = r
+                .and_then(|rr| rr.get("start"))
+                .and_then(|st| st.get("line"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0) as u32;
+            let c0 = r
+                .and_then(|rr| rr.get("start"))
+                .and_then(|st| st.get("character"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0) as u32;
+            (u, l0, c0)
+        } else {
+            (uri.clone(), line0, ch0)
+        };
+        let refs2 = sess
+            .req_references(&def_uri, def_line0, def_ch0)
+            .unwrap_or_default();
+        if refs2.len() > refs.len() || refs.is_empty() {
+            refs = refs2;
+        }
+    }
     for loc in refs {
         let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
         let file = uri_to_path(loc_uri);
