@@ -15,7 +15,7 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }} && \
           git diff --no-ext-diff origin/${{ github.base_ref }}...HEAD | \
-          docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --direction caller --with-pdg --with-edges -f json | \
+          docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --direction callers --with-pdg --with-edges -f json | \
           jq -r ' 
             "| Changed | Kind | Location |",
             "| ------- | ---- | -------- |",
