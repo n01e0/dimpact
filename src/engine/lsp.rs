@@ -390,8 +390,23 @@ impl LspSession {
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}});
-        let v = self.request("textDocument/prepareCallHierarchy", params, 700)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        for attempt in 0..3 {
+            let v = self.request("textDocument/prepareCallHierarchy", params.clone(), 900)?;
+            let out = v.as_array().cloned().unwrap_or_default();
+            trace!(
+                "lsp: prepareCallHierarchy uri={} line={} ch={} attempt={} -> {}",
+                uri,
+                line0,
+                character0,
+                attempt + 1,
+                out.len()
+            );
+            if !out.is_empty() || attempt == 2 {
+                return Ok(out);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+        Ok(Vec::new())
     }
 
     fn req_incoming_calls(
@@ -400,7 +415,9 @@ impl LspSession {
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let params = json!({"item": item});
         let v = self.request("callHierarchy/incomingCalls", params, 1200)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let out = v.as_array().cloned().unwrap_or_default();
+        trace!("lsp: incomingCalls -> {}", out.len());
+        Ok(out)
     }
 
     fn req_outgoing_calls(
@@ -409,13 +426,17 @@ impl LspSession {
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let params = json!({"item": item});
         let v = self.request("callHierarchy/outgoingCalls", params, 1200)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let out = v.as_array().cloned().unwrap_or_default();
+        trace!("lsp: outgoingCalls -> {}", out.len());
+        Ok(out)
     }
 
     fn req_document_symbol(&mut self, uri: &str) -> anyhow::Result<Vec<serde_json::Value>> {
         let params = json!({"textDocument": {"uri": uri}});
         let v = self.request("textDocument/documentSymbol", params, 800)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let out = v.as_array().cloned().unwrap_or_default();
+        trace!("lsp: documentSymbol uri={} -> {}", uri, out.len());
+        Ok(out)
     }
 
     fn req_definition(
@@ -441,9 +462,24 @@ impl LspSession {
         line0: u32,
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
-        let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}, "context": {"includeDeclaration": false}});
-        let v = self.request("textDocument/references", params, 1200)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}, "context": {"includeDeclaration": true}});
+        for attempt in 0..3 {
+            let v = self.request("textDocument/references", params.clone(), 1500)?;
+            let out = v.as_array().cloned().unwrap_or_default();
+            trace!(
+                "lsp: references uri={} line={} ch={} attempt={} -> {}",
+                uri,
+                line0,
+                character0,
+                attempt + 1,
+                out.len()
+            );
+            if out.len() > 1 || attempt == 2 {
+                return Ok(out);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+        Ok(Vec::new())
     }
 }
 
@@ -929,15 +965,23 @@ impl super::AnalysisEngine for LspEngine {
 }
 
 fn item_to_symbol(item: &serde_json::Value) -> Option<crate::ir::Symbol> {
-    let name = item.get("name")?.as_str()?.to_string();
-    let kind = map_lsp_symbol_kind(item.get("kind")?.as_u64().unwrap_or(12));
-    let uri = item.get("uri").and_then(|v| v.as_str()).or_else(|| {
-        item.get("from")
-            .and_then(|f| f.get("uri").and_then(|u| u.as_str()))
-    })?;
+    // callHierarchy responses can wrap items in {from: CallHierarchyItem} / {to: CallHierarchyItem}
+    let obj = if item.get("name").is_some() {
+        item
+    } else if let Some(from) = item.get("from") {
+        from
+    } else if let Some(to) = item.get("to") {
+        to
+    } else {
+        item
+    };
+
+    let name = obj.get("name")?.as_str()?.to_string();
+    let kind = map_lsp_symbol_kind(obj.get("kind")?.as_u64().unwrap_or(12));
+    let uri = obj.get("uri").and_then(|v| v.as_str())?;
     let file = uri_to_path(uri);
     let profile = profile_for_path(&file)?;
-    let range_v = item.get("selectionRange").or_else(|| item.get("range"))?;
+    let range_v = obj.get("selectionRange").or_else(|| obj.get("range"))?;
     let sl = range_v
         .get("start")
         .and_then(|s| s.get("line"))
@@ -1042,7 +1086,7 @@ fn lsp_impact_bfs(
             let defs = sess
                 .req_definition(&uri, s.range.start_line.saturating_sub(1), 0)
                 .unwrap_or_default();
-            let (def_uri, def_line0) = if let Some(loc) = defs.first() {
+            let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
                 let u = loc
                     .get("uri")
                     .or_else(|| loc.get("targetUri"))
@@ -1055,12 +1099,17 @@ fn lsp_impact_bfs(
                     .and_then(|st| st.get("line"))
                     .and_then(|n| n.as_u64())
                     .unwrap_or(0) as u32;
-                (u, l0)
+                let c0 = r
+                    .and_then(|rr| rr.get("start"))
+                    .and_then(|st| st.get("character"))
+                    .and_then(|n| n.as_u64())
+                    .unwrap_or(0) as u32;
+                (u, l0, c0)
             } else {
-                (uri.clone(), s.range.start_line.saturating_sub(1))
+                (uri.clone(), s.range.start_line.saturating_sub(1), 0)
             };
             let refs = sess
-                .req_references(&def_uri, def_line0, 0)
+                .req_references(&def_uri, def_line0, def_ch0)
                 .unwrap_or_default();
             for loc in refs {
                 let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
@@ -1436,7 +1485,7 @@ fn enqueue_callers_via_references(
     let defs = sess
         .req_definition(&uri, cur_sym.range.start_line.saturating_sub(1), 0)
         .unwrap_or_default();
-    let (def_uri, def_line0) = if let Some(loc) = defs.first() {
+    let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
         let u = loc
             .get("uri")
             .or_else(|| loc.get("targetUri"))
@@ -1449,12 +1498,17 @@ fn enqueue_callers_via_references(
             .and_then(|st| st.get("line"))
             .and_then(|n| n.as_u64())
             .unwrap_or(0) as u32;
-        (u, l0)
+        let c0 = r
+            .and_then(|rr| rr.get("start"))
+            .and_then(|st| st.get("character"))
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0) as u32;
+        (u, l0, c0)
     } else {
-        (uri.clone(), cur_sym.range.start_line.saturating_sub(1))
+        (uri.clone(), cur_sym.range.start_line.saturating_sub(1), 0)
     };
     let refs = sess
-        .req_references(&def_uri, def_line0, 0)
+        .req_references(&def_uri, def_line0, def_ch0)
         .unwrap_or_default();
     for loc in refs {
         let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
@@ -1736,7 +1790,7 @@ fn lsp_impact_references(
         let (line0, ch0) = guess_callable_position(&sym.file, &sym)
             .unwrap_or((sym.range.start_line.saturating_sub(1), 0));
         let defs = sess.req_definition(&uri, line0, ch0).unwrap_or_default();
-        let (def_uri, def_line0) = if let Some(loc) = defs.first() {
+        let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
             let u = loc
                 .get("uri")
                 .or_else(|| loc.get("targetUri"))
@@ -1749,12 +1803,17 @@ fn lsp_impact_references(
                 .and_then(|s| s.get("line"))
                 .and_then(|n| n.as_u64())
                 .unwrap_or(0) as u32;
-            (u, l0)
+            let c0 = r
+                .and_then(|rr| rr.get("start"))
+                .and_then(|s| s.get("character"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0) as u32;
+            (u, l0, c0)
         } else {
-            (uri.clone(), sym.range.start_line.saturating_sub(1))
+            (uri.clone(), sym.range.start_line.saturating_sub(1), 0)
         };
         let refs = sess
-            .req_references(&def_uri, def_line0, 0)
+            .req_references(&def_uri, def_line0, def_ch0)
             .unwrap_or_default();
         for loc in refs {
             let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
@@ -2368,5 +2427,40 @@ mod tests {
         assert!(path_matches_mode("src/app.mts", LanguageMode::Typescript));
         assert!(path_matches_mode("src/app.rb", LanguageMode::Auto));
         assert!(!path_matches_mode("src/app.md", LanguageMode::Auto));
+    }
+
+    #[test]
+    fn item_to_symbol_handles_call_hierarchy_wrappers() {
+        let incoming = json!({
+            "from": {
+                "name": "foo",
+                "kind": 12,
+                "uri": "file:///tmp/src/main.rs",
+                "selectionRange": {
+                    "start": {"line": 9, "character": 3},
+                    "end": {"line": 9, "character": 6}
+                }
+            }
+        });
+        let sym = item_to_symbol(&incoming).expect("incoming wrapper should parse");
+        assert_eq!(sym.name, "foo");
+        assert_eq!(sym.file, "/tmp/src/main.rs");
+        assert_eq!(sym.range.start_line, 10);
+
+        let outgoing = json!({
+            "to": {
+                "name": "bar",
+                "kind": 12,
+                "uri": "file:///tmp/src/lib.rs",
+                "selectionRange": {
+                    "start": {"line": 4, "character": 1},
+                    "end": {"line": 4, "character": 4}
+                }
+            }
+        });
+        let sym2 = item_to_symbol(&outgoing).expect("outgoing wrapper should parse");
+        assert_eq!(sym2.name, "bar");
+        assert_eq!(sym2.file, "/tmp/src/lib.rs");
+        assert_eq!(sym2.range.start_line, 5);
     }
 }
