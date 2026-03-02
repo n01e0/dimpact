@@ -99,6 +99,7 @@ pub struct LspSession {
     stdin: Option<std::process::ChildStdin>,
     stdout: Option<std::process::ChildStdout>,
     next_id: std::sync::atomic::AtomicU64,
+    doc_symbol_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
 }
 
 impl LspSession {
@@ -137,6 +138,7 @@ impl LspSession {
                 stdin: None,
                 stdout: None,
                 next_id: std::sync::atomic::AtomicU64::new(1),
+                doc_symbol_cache: std::collections::HashMap::new(),
             });
         }
         // Try to spawn a server for the given language
@@ -229,6 +231,7 @@ impl LspSession {
                             stdin: Some(stdin),
                             stdout: Some(stdout),
                             next_id: std::sync::atomic::AtomicU64::new(2),
+                            doc_symbol_cache: std::collections::HashMap::new(),
                         });
                     }
                 }
@@ -390,23 +393,21 @@ impl LspSession {
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}});
-        for attempt in 0..3 {
-            let v = self.request("textDocument/prepareCallHierarchy", params.clone(), 900)?;
-            let out = v.as_array().cloned().unwrap_or_default();
-            trace!(
-                "lsp: prepareCallHierarchy uri={} line={} ch={} attempt={} -> {}",
-                uri,
-                line0,
-                character0,
-                attempt + 1,
-                out.len()
-            );
-            if !out.is_empty() || attempt == 2 {
-                return Ok(out);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(120));
+        let v = self.request("textDocument/prepareCallHierarchy", params.clone(), 700)?;
+        let mut out = v.as_array().cloned().unwrap_or_default();
+        if out.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            let v2 = self.request("textDocument/prepareCallHierarchy", params, 900)?;
+            out = v2.as_array().cloned().unwrap_or_default();
         }
-        Ok(Vec::new())
+        trace!(
+            "lsp: prepareCallHierarchy uri={} line={} ch={} -> {}",
+            uri,
+            line0,
+            character0,
+            out.len()
+        );
+        Ok(out)
     }
 
     fn req_incoming_calls(
@@ -435,7 +436,20 @@ impl LspSession {
         let params = json!({"textDocument": {"uri": uri}});
         let v = self.request("textDocument/documentSymbol", params, 800)?;
         let out = v.as_array().cloned().unwrap_or_default();
-        trace!("lsp: documentSymbol uri={} -> {}", uri, out.len());
+        if !out.is_empty() {
+            self.doc_symbol_cache.insert(uri.to_string(), out.clone());
+            trace!("lsp: documentSymbol uri={} -> {}", uri, out.len());
+            return Ok(out);
+        }
+        if let Some(cached) = self.doc_symbol_cache.get(uri) {
+            trace!(
+                "lsp: documentSymbol uri={} -> 0 (use cache={})",
+                uri,
+                cached.len()
+            );
+            return Ok(cached.clone());
+        }
+        trace!("lsp: documentSymbol uri={} -> 0", uri);
         Ok(out)
     }
 
@@ -463,23 +477,21 @@ impl LspSession {
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}, "context": {"includeDeclaration": true}});
-        for attempt in 0..3 {
-            let v = self.request("textDocument/references", params.clone(), 1500)?;
-            let out = v.as_array().cloned().unwrap_or_default();
-            trace!(
-                "lsp: references uri={} line={} ch={} attempt={} -> {}",
-                uri,
-                line0,
-                character0,
-                attempt + 1,
-                out.len()
-            );
-            if out.len() > 1 || attempt == 2 {
-                return Ok(out);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(120));
+        let v = self.request("textDocument/references", params.clone(), 1200)?;
+        let mut out = v.as_array().cloned().unwrap_or_default();
+        if out.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            let v2 = self.request("textDocument/references", params, 1400)?;
+            out = v2.as_array().cloned().unwrap_or_default();
         }
-        Ok(Vec::new())
+        trace!(
+            "lsp: references uri={} line={} ch={} -> {}",
+            uri,
+            line0,
+            character0,
+            out.len()
+        );
+        Ok(out)
     }
 }
 
@@ -1093,7 +1105,7 @@ fn lsp_impact_bfs(
                     .and_then(|v| v.as_str())
                     .unwrap_or(&uri)
                     .to_string();
-                let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
+                let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
                 let l0 = r
                     .and_then(|rr| rr.get("start"))
                     .and_then(|st| st.get("line"))
@@ -1191,21 +1203,24 @@ fn lsp_impact_bfs(
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
                 };
-                for inc in sess.req_incoming_calls(&item).unwrap_or_default() {
+                let incoming = sess.req_incoming_calls(&item).unwrap_or_default();
+                for inc in &incoming {
                     if let Some(from) = inc.get("from") {
                         enqueue_edge(&mut env, from, &cur_sym, d + 1, true);
                     }
                 }
-                // Supplement callers via references to catch cases callHierarchy misses
-                enqueue_callers_via_references(
-                    sess,
-                    &cur_sym,
-                    &mut q,
-                    &mut edges,
-                    &mut seen_keys,
-                    &mut node_map,
-                    d + 1,
-                );
+                // Supplement callers via references only when callHierarchy yielded nothing.
+                if incoming.is_empty() {
+                    enqueue_callers_via_references(
+                        sess,
+                        &cur_sym,
+                        &mut q,
+                        &mut edges,
+                        &mut seen_keys,
+                        &mut node_map,
+                        d + 1,
+                    );
+                }
             }
             crate::impact::ImpactDirection::Callees => {
                 let mut env = EnqueueEnv {
@@ -1237,20 +1252,23 @@ fn lsp_impact_bfs(
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
                 };
-                for inc in sess.req_incoming_calls(&item).unwrap_or_default() {
+                let incoming = sess.req_incoming_calls(&item).unwrap_or_default();
+                for inc in &incoming {
                     if let Some(from) = inc.get("from") {
                         enqueue_edge(&mut env, from, &cur_sym, d + 1, true);
                     }
                 }
-                enqueue_callers_via_references(
-                    sess,
-                    &cur_sym,
-                    &mut q,
-                    &mut edges,
-                    &mut seen_keys,
-                    &mut node_map,
-                    d + 1,
-                );
+                if incoming.is_empty() {
+                    enqueue_callers_via_references(
+                        sess,
+                        &cur_sym,
+                        &mut q,
+                        &mut edges,
+                        &mut seen_keys,
+                        &mut node_map,
+                        d + 1,
+                    );
+                }
                 let mut env2 = EnqueueEnv {
                     q: &mut q,
                     edges: &mut edges,
@@ -1492,7 +1510,7 @@ fn enqueue_callers_via_references(
             .and_then(|v| v.as_str())
             .unwrap_or(&uri)
             .to_string();
-        let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
+        let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
         let l0 = r
             .and_then(|rr| rr.get("start"))
             .and_then(|st| st.get("line"))
@@ -1672,7 +1690,7 @@ fn scan_callees_symbols(
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
                             let def_file = uri_to_path(def_uri);
-                            let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
+                            let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
                             let def_l0 = r
                                 .and_then(|rr| rr.get("start"))
                                 .and_then(|st| st.get("line"))
@@ -1797,7 +1815,7 @@ fn lsp_impact_references(
                 .and_then(|v| v.as_str())
                 .unwrap_or(&uri)
                 .to_string();
-            let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
+            let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
             let l0 = r
                 .and_then(|rr| rr.get("start"))
                 .and_then(|s| s.get("line"))
@@ -1826,7 +1844,12 @@ fn lsp_impact_references(
                 .unwrap_or(0) as u32;
             // find enclosing symbol via documentSymbol
             let items = sess.req_document_symbol(loc_uri).unwrap_or_default();
-            if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0) {
+            if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0)
+                && matches!(
+                    caller.kind,
+                    crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method
+                )
+            {
                 let key = caller.id.0.clone();
                 node_map.entry(key.clone()).or_insert(caller.clone());
                 if seen.insert(format!("edge:{}->{}", caller.id.0, sym.id.0)) {
@@ -1882,14 +1905,18 @@ fn lsp_impact_references(
     })
 }
 
-fn enclosing_symbol_in_doc(
+fn collect_enclosing_candidates(
     items: &[serde_json::Value],
     file: &str,
+    symbol_lang: &str,
     line0: u32,
-) -> Option<crate::ir::Symbol> {
-    let profile = profile_for_path(file)?;
-    // Walk both DocumentSymbol (with children) and SymbolInformation
+    out: &mut Vec<crate::ir::Symbol>,
+) {
     for it in items {
+        if let Some(children) = it.get("children").and_then(|v| v.as_array()) {
+            collect_enclosing_candidates(children, file, symbol_lang, line0, out);
+        }
+
         // DocumentSymbol path
         if let Some(r) = it.get("range")
             && let (Some(s), Some(e)) = (r.get("start"), r.get("end"))
@@ -1900,8 +1927,8 @@ fn enclosing_symbol_in_doc(
                 let name = it.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let kind =
                     map_lsp_symbol_kind(it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12));
-                return Some(crate::ir::Symbol {
-                    id: crate::ir::SymbolId::new(profile.symbol_lang, file, &kind, name, sl + 1),
+                out.push(crate::ir::Symbol {
+                    id: crate::ir::SymbolId::new(symbol_lang, file, &kind, name, sl + 1),
                     name: name.to_string(),
                     kind,
                     file: file.to_string(),
@@ -1909,16 +1936,11 @@ fn enclosing_symbol_in_doc(
                         start_line: sl + 1,
                         end_line: el.max(sl) + 1,
                     },
-                    language: profile.symbol_lang.to_string(),
+                    language: symbol_lang.to_string(),
                 });
             }
         }
-        // children
-        if let Some(children) = it.get("children").and_then(|v| v.as_array())
-            && let Some(sym) = enclosing_symbol_in_doc(children, file, line0)
-        {
-            return Some(sym);
-        }
+
         // SymbolInformation path
         if let Some(loc) = it.get("location")
             && let Some(r) = loc.get("range")
@@ -1937,8 +1959,8 @@ fn enclosing_symbol_in_doc(
                 let name = it.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let kind =
                     map_lsp_symbol_kind(it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12));
-                return Some(crate::ir::Symbol {
-                    id: crate::ir::SymbolId::new(profile.symbol_lang, file, &kind, name, sl + 1),
+                out.push(crate::ir::Symbol {
+                    id: crate::ir::SymbolId::new(symbol_lang, file, &kind, name, sl + 1),
                     name: name.to_string(),
                     kind,
                     file: file.to_string(),
@@ -1946,12 +1968,28 @@ fn enclosing_symbol_in_doc(
                         start_line: sl + 1,
                         end_line: el.max(sl) + 1,
                     },
-                    language: profile.symbol_lang.to_string(),
+                    language: symbol_lang.to_string(),
                 });
             }
         }
     }
-    None
+}
+
+fn enclosing_symbol_in_doc(
+    items: &[serde_json::Value],
+    file: &str,
+    line0: u32,
+) -> Option<crate::ir::Symbol> {
+    let profile = profile_for_path(file)?;
+    let mut candidates = Vec::new();
+    collect_enclosing_candidates(items, file, profile.symbol_lang, line0, &mut candidates);
+    candidates.into_iter().min_by(|a, b| {
+        let a_span = a.range.end_line.saturating_sub(a.range.start_line);
+        let b_span = b.range.end_line.saturating_sub(b.range.start_line);
+        a_span
+            .cmp(&b_span)
+            .then_with(|| b.range.start_line.cmp(&a.range.start_line))
+    })
 }
 
 fn lsp_changed_symbols(
@@ -2321,6 +2359,10 @@ fn lsp_build_project_graph(
             let items = sess.req_document_symbol(loc_uri).unwrap_or_default();
             if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0)
                 && caller.id.0 != to_sym.id.0
+                && matches!(
+                    caller.kind,
+                    crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method
+                )
             {
                 edges.push(crate::ir::reference::Reference {
                     from: caller.id.clone(),
@@ -2332,6 +2374,26 @@ fn lsp_build_project_graph(
             }
         }
     }
+
+    // Fallback: if references route yields nothing, synthesize edges by scanning callsites.
+    if edges.is_empty() {
+        trace!("lsp: graph references empty, fallback to callsite scan");
+        let id_set: std::collections::HashSet<String> =
+            all_symbols.iter().map(|s| s.id.0.clone()).collect();
+        for from_sym in &all_symbols {
+            let (_callees, extra_edges) = scan_callees_symbols(sess, from_sym);
+            for e in extra_edges {
+                if id_set.contains(&e.from.0) && id_set.contains(&e.to.0) {
+                    edges.push(e);
+                }
+            }
+        }
+    }
+
+    // Deduplicate edges.
+    let mut seen = std::collections::HashSet::new();
+    edges.retain(|e| seen.insert(format!("{}->{}", e.from.0, e.to.0)));
+
     let index = crate::ir::reference::SymbolIndex::build(all_symbols);
     Ok((index, edges))
 }
@@ -2462,5 +2524,38 @@ mod tests {
         assert_eq!(sym2.name, "bar");
         assert_eq!(sym2.file, "/tmp/src/lib.rs");
         assert_eq!(sym2.range.start_line, 5);
+    }
+
+    #[test]
+    fn enclosing_symbol_prefers_most_specific_candidate() {
+        let items = vec![
+            json!({
+                "name": "bar",
+                "kind": 12,
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 3, "character": 0}
+                }
+            }),
+            json!({
+                "name": "foo",
+                "kind": 12,
+                "range": {
+                    "start": {"line": 1, "character": 0},
+                    "end": {"line": 3, "character": 0}
+                }
+            }),
+            json!({
+                "name": "main",
+                "kind": 12,
+                "range": {
+                    "start": {"line": 2, "character": 0},
+                    "end": {"line": 3, "character": 0}
+                }
+            }),
+        ];
+        let sym = enclosing_symbol_in_doc(&items, "/tmp/src/main.rs", 2)
+            .expect("should pick enclosing symbol");
+        assert_eq!(sym.name, "main");
     }
 }
