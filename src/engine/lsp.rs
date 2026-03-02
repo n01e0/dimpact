@@ -103,6 +103,7 @@ pub struct LspSession {
     prepare_call_hierarchy_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
     definition_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
     references_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    opened_docs: std::collections::HashSet<String>,
 }
 
 impl LspSession {
@@ -145,6 +146,7 @@ impl LspSession {
                 prepare_call_hierarchy_cache: std::collections::HashMap::new(),
                 definition_cache: std::collections::HashMap::new(),
                 references_cache: std::collections::HashMap::new(),
+                opened_docs: std::collections::HashSet::new(),
             });
         }
         // Try to spawn a server for the given language
@@ -241,6 +243,7 @@ impl LspSession {
                             prepare_call_hierarchy_cache: std::collections::HashMap::new(),
                             definition_cache: std::collections::HashMap::new(),
                             references_cache: std::collections::HashMap::new(),
+                            opened_docs: std::collections::HashSet::new(),
                         });
                     }
                 }
@@ -324,6 +327,25 @@ impl LspSession {
         let buf = encode_jsonrpc_message(&notif);
         use std::io::Write;
         self.stdin.as_mut().unwrap().write_all(&buf)?;
+        Ok(())
+    }
+
+    fn ensure_did_open(&mut self, uri: &str, language_id: &str, text: &str) -> anyhow::Result<()> {
+        if self.opened_docs.contains(uri) {
+            return Ok(());
+        }
+        self.notify(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language_id,
+                    "version": 1,
+                    "text": text,
+                }
+            }),
+        )?;
+        self.opened_docs.insert(uri.to_string());
         Ok(())
     }
 
@@ -1085,12 +1107,7 @@ fn lsp_impact_bfs(
         if !sess._cfg.mock
             && let Ok(text) = std::fs::read_to_string(&abspath)
         {
-            let _ = sess.notify(
-                "textDocument/didOpen",
-                json!({
-                    "textDocument": { "uri": uri, "languageId": profile.lsp_language_id, "version": 1, "text": text }
-                }),
-            );
+            let _ = sess.ensure_did_open(&uri, profile.lsp_language_id, &text);
         }
         if matches!(
             s.kind,
@@ -2075,24 +2092,10 @@ fn lsp_changed_symbols(
         let abspath = std::fs::canonicalize(path).unwrap_or(std::path::PathBuf::from(path));
         let uri = path_to_uri(&abspath);
         let text = std::fs::read_to_string(&abspath).unwrap_or_else(|_| String::new());
-        // didOpen
-        let params = json!({
-            "textDocument": {
-                "uri": uri,
-                "languageId": profile.lsp_language_id,
-                "version": 1,
-                "text": text,
-            }
-        });
-        let _ = sess.notify("textDocument/didOpen", params);
-        // documentSymbol
-        let params = json!({ "textDocument": { "uri": uri } });
-        if let Ok(result) = sess.request("textDocument/documentSymbol", params, 500) {
-            // Result can be DocumentSymbol[] or SymbolInformation[]
-            if let Some(arr) = result.as_array() {
-                for item in arr {
-                    collect_symbols_from_item(path, profile.symbol_lang, item, &mut symbols, lines);
-                }
+        let _ = sess.ensure_did_open(&uri, profile.lsp_language_id, &text);
+        if let Ok(items) = sess.req_document_symbol(&uri) {
+            for item in &items {
+                collect_symbols_from_item(path, profile.symbol_lang, item, &mut symbols, lines);
             }
         }
     }
@@ -2373,7 +2376,7 @@ fn lsp_build_project_graph(
             let uri = path_to_uri(&abspath);
             // didOpen
             let text = std::fs::read_to_string(&abspath).unwrap_or_default();
-            let _ = sess.notify("textDocument/didOpen", serde_json::json!({"textDocument": {"uri": uri, "languageId": profile.lsp_language_id, "version": 1, "text": text}}));
+            let _ = sess.ensure_did_open(&uri, profile.lsp_language_id, &text);
             // documentSymbol
             if let Ok(items) = sess.req_document_symbol(&uri) {
                 collect_symbols_all(&path_str, profile.symbol_lang, &items, &mut all_symbols);
