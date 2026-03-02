@@ -103,6 +103,8 @@ pub struct LspSession {
     prepare_call_hierarchy_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
     definition_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
     references_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    incoming_calls_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    outgoing_calls_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
     opened_docs: std::collections::HashSet<String>,
 }
 
@@ -146,6 +148,8 @@ impl LspSession {
                 prepare_call_hierarchy_cache: std::collections::HashMap::new(),
                 definition_cache: std::collections::HashMap::new(),
                 references_cache: std::collections::HashMap::new(),
+                incoming_calls_cache: std::collections::HashMap::new(),
+                outgoing_calls_cache: std::collections::HashMap::new(),
                 opened_docs: std::collections::HashSet::new(),
             });
         }
@@ -243,6 +247,8 @@ impl LspSession {
                             prepare_call_hierarchy_cache: std::collections::HashMap::new(),
                             definition_cache: std::collections::HashMap::new(),
                             references_cache: std::collections::HashMap::new(),
+                            incoming_calls_cache: std::collections::HashMap::new(),
+                            outgoing_calls_cache: std::collections::HashMap::new(),
                             opened_docs: std::collections::HashSet::new(),
                         });
                     }
@@ -270,6 +276,33 @@ impl LspSession {
 
     fn pos_cache_key(uri: &str, line0: u32, character0: u32) -> String {
         format!("{}:{}:{}", uri, line0, character0)
+    }
+
+    fn call_item_key(item: &serde_json::Value) -> Option<String> {
+        let obj = if item.get("name").is_some() {
+            item
+        } else if let Some(from) = item.get("from") {
+            from
+        } else if let Some(to) = item.get("to") {
+            to
+        } else {
+            return None;
+        };
+        let uri = obj.get("uri").and_then(|v| v.as_str())?;
+        let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = obj.get("kind").and_then(|v| v.as_u64()).unwrap_or(0);
+        let range = obj.get("selectionRange").or_else(|| obj.get("range"));
+        let line0 = range
+            .and_then(|r| r.get("start"))
+            .and_then(|s| s.get("line"))
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        let ch0 = range
+            .and_then(|r| r.get("start"))
+            .and_then(|s| s.get("character"))
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        Some(format!("{}:{}:{}:{}:{}", uri, name, kind, line0, ch0))
     }
 
     #[allow(dead_code)]
@@ -461,9 +494,21 @@ impl LspSession {
         &mut self,
         item: &serde_json::Value,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let cache_key = Self::call_item_key(item);
+        if let Some(key) = cache_key.as_ref()
+            && let Some(cached) = self.incoming_calls_cache.get(key)
+        {
+            trace!("lsp: incomingCalls -> {} (cache)", cached.len());
+            return Ok(cached.clone());
+        }
         let params = json!({"item": item});
         let v = self.request("callHierarchy/incomingCalls", params, 1200)?;
         let out = v.as_array().cloned().unwrap_or_default();
+        if !out.is_empty()
+            && let Some(key) = cache_key
+        {
+            self.incoming_calls_cache.insert(key, out.clone());
+        }
         trace!("lsp: incomingCalls -> {}", out.len());
         Ok(out)
     }
@@ -472,9 +517,21 @@ impl LspSession {
         &mut self,
         item: &serde_json::Value,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let cache_key = Self::call_item_key(item);
+        if let Some(key) = cache_key.as_ref()
+            && let Some(cached) = self.outgoing_calls_cache.get(key)
+        {
+            trace!("lsp: outgoingCalls -> {} (cache)", cached.len());
+            return Ok(cached.clone());
+        }
         let params = json!({"item": item});
         let v = self.request("callHierarchy/outgoingCalls", params, 1200)?;
         let out = v.as_array().cloned().unwrap_or_default();
+        if !out.is_empty()
+            && let Some(key) = cache_key
+        {
+            self.outgoing_calls_cache.insert(key, out.clone());
+        }
         trace!("lsp: outgoingCalls -> {}", out.len());
         Ok(out)
     }
