@@ -100,6 +100,9 @@ pub struct LspSession {
     stdout: Option<std::process::ChildStdout>,
     next_id: std::sync::atomic::AtomicU64,
     doc_symbol_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    prepare_call_hierarchy_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    definition_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    references_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
 }
 
 impl LspSession {
@@ -139,6 +142,9 @@ impl LspSession {
                 stdout: None,
                 next_id: std::sync::atomic::AtomicU64::new(1),
                 doc_symbol_cache: std::collections::HashMap::new(),
+                prepare_call_hierarchy_cache: std::collections::HashMap::new(),
+                definition_cache: std::collections::HashMap::new(),
+                references_cache: std::collections::HashMap::new(),
             });
         }
         // Try to spawn a server for the given language
@@ -232,6 +238,9 @@ impl LspSession {
                             stdout: Some(stdout),
                             next_id: std::sync::atomic::AtomicU64::new(2),
                             doc_symbol_cache: std::collections::HashMap::new(),
+                            prepare_call_hierarchy_cache: std::collections::HashMap::new(),
+                            definition_cache: std::collections::HashMap::new(),
+                            references_cache: std::collections::HashMap::new(),
                         });
                     }
                 }
@@ -254,6 +263,10 @@ impl LspSession {
     fn next_request_id(&self) -> u64 {
         self.next_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn pos_cache_key(uri: &str, line0: u32, character0: u32) -> String {
+        format!("{}:{}:{}", uri, line0, character0)
     }
 
     #[allow(dead_code)]
@@ -392,6 +405,17 @@ impl LspSession {
         line0: u32,
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let key = Self::pos_cache_key(uri, line0, character0);
+        if let Some(cached) = self.prepare_call_hierarchy_cache.get(&key) {
+            trace!(
+                "lsp: prepareCallHierarchy uri={} line={} ch={} -> {} (cache)",
+                uri,
+                line0,
+                character0,
+                cached.len()
+            );
+            return Ok(cached.clone());
+        }
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}});
         let v = self.request("textDocument/prepareCallHierarchy", params.clone(), 700)?;
         let mut out = v.as_array().cloned().unwrap_or_default();
@@ -400,6 +424,7 @@ impl LspSession {
             let v2 = self.request("textDocument/prepareCallHierarchy", params, 900)?;
             out = v2.as_array().cloned().unwrap_or_default();
         }
+        self.prepare_call_hierarchy_cache.insert(key, out.clone());
         trace!(
             "lsp: prepareCallHierarchy uri={} line={} ch={} -> {}",
             uri,
@@ -459,6 +484,10 @@ impl LspSession {
         line0: u32,
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let key = Self::pos_cache_key(uri, line0, character0);
+        if let Some(cached) = self.definition_cache.get(&key) {
+            return Ok(cached.clone());
+        }
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}});
         let v = self.request("textDocument/definition", params, 800)?;
         let mut out = Vec::new();
@@ -467,6 +496,7 @@ impl LspSession {
         } else if v.get("targetUri").is_some() {
             out.push(v.clone());
         }
+        self.definition_cache.insert(key, out.clone());
         Ok(out)
     }
 
@@ -476,6 +506,17 @@ impl LspSession {
         line0: u32,
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let key = Self::pos_cache_key(uri, line0, character0);
+        if let Some(cached) = self.references_cache.get(&key) {
+            trace!(
+                "lsp: references uri={} line={} ch={} -> {} (cache)",
+                uri,
+                line0,
+                character0,
+                cached.len()
+            );
+            return Ok(cached.clone());
+        }
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}, "context": {"includeDeclaration": true}});
         let v = self.request("textDocument/references", params.clone(), 1200)?;
         let mut out = v.as_array().cloned().unwrap_or_default();
@@ -484,6 +525,7 @@ impl LspSession {
             let v2 = self.request("textDocument/references", params, 1400)?;
             out = v2.as_array().cloned().unwrap_or_default();
         }
+        self.references_cache.insert(key, out.clone());
         trace!(
             "lsp: references uri={} line={} ch={} -> {}",
             uri,
