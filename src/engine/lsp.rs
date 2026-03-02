@@ -21,6 +21,76 @@ pub struct LspConfig {
     pub mock_caps: Option<super::CapsHint>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LangProfile {
+    symbol_lang: &'static str,
+    lsp_language_id: &'static str,
+}
+
+fn profile_for_mode(lang: LanguageMode) -> Option<LangProfile> {
+    match lang {
+        LanguageMode::Rust => Some(LangProfile {
+            symbol_lang: "rust",
+            lsp_language_id: "rust",
+        }),
+        LanguageMode::Ruby => Some(LangProfile {
+            symbol_lang: "ruby",
+            lsp_language_id: "ruby",
+        }),
+        LanguageMode::Javascript => Some(LangProfile {
+            symbol_lang: "javascript",
+            lsp_language_id: "javascript",
+        }),
+        LanguageMode::Typescript => Some(LangProfile {
+            symbol_lang: "typescript",
+            lsp_language_id: "typescript",
+        }),
+        LanguageMode::Tsx => Some(LangProfile {
+            symbol_lang: "tsx",
+            lsp_language_id: "typescriptreact",
+        }),
+        LanguageMode::Auto => None,
+    }
+}
+
+fn profile_for_path(path: &str) -> Option<LangProfile> {
+    if path.ends_with(".rs") {
+        return profile_for_mode(LanguageMode::Rust);
+    }
+    if path.ends_with(".rb") {
+        return profile_for_mode(LanguageMode::Ruby);
+    }
+    if path.ends_with(".tsx") {
+        return profile_for_mode(LanguageMode::Tsx);
+    }
+    if path.ends_with(".ts") || path.ends_with(".mts") || path.ends_with(".cts") {
+        return profile_for_mode(LanguageMode::Typescript);
+    }
+    if path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs") {
+        return profile_for_mode(LanguageMode::Javascript);
+    }
+    None
+}
+
+fn path_matches_mode(path: &str, lang: LanguageMode) -> bool {
+    match lang {
+        LanguageMode::Auto => profile_for_path(path).is_some(),
+        LanguageMode::Rust => path.ends_with(".rs"),
+        LanguageMode::Ruby => path.ends_with(".rb"),
+        LanguageMode::Javascript => {
+            path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs")
+        }
+        LanguageMode::Typescript => {
+            path.ends_with(".ts") || path.ends_with(".mts") || path.ends_with(".cts")
+        }
+        LanguageMode::Tsx => path.ends_with(".tsx"),
+    }
+}
+
+fn profile_for_path_or_mode(path: &str, lang: LanguageMode) -> Option<LangProfile> {
+    profile_for_mode(lang).or_else(|| profile_for_path(path))
+}
+
 /// Stub LSP session. Will later speak JSON-RPC over stdio.
 pub struct LspSession {
     _cfg: LspConfig,
@@ -277,9 +347,9 @@ impl LspSession {
         if self.stdin.is_none() || self.stdout.is_none() {
             return;
         }
-        // pick first Rust file, if any
-        let rust = files.iter().find(|p| p.ends_with(".rs"));
-        if let Some(path) = rust {
+        // pick first LSP-supported file, if any
+        let first_supported = files.iter().find(|p| profile_for_path(p).is_some());
+        if let Some(path) = first_supported {
             let p = std::path::Path::new(path);
             if let Ok(abs) = std::fs::canonicalize(p) {
                 let uri = path_to_uri(&abs);
@@ -812,7 +882,15 @@ impl super::AnalysisEngine for LspEngine {
             mock: self.cfg.mock_lsp,
             mock_caps: self.cfg.mock_caps,
         };
-        let mut sess = LspSession::new(lang, lsp_cfg)?;
+        let mut sess = match LspSession::new(lang, lsp_cfg) {
+            Ok(s) => s,
+            Err(e) => {
+                if self.cfg.lsp_strict {
+                    return Err(e);
+                }
+                return self.fallback.impact_from_symbols(changed, lang, opts);
+            }
+        };
         sess.probe_update();
         if self.cfg.dump_capabilities {
             eprintln!(
@@ -858,6 +936,7 @@ fn item_to_symbol(item: &serde_json::Value) -> Option<crate::ir::Symbol> {
             .and_then(|f| f.get("uri").and_then(|u| u.as_str()))
     })?;
     let file = uri_to_path(uri);
+    let profile = profile_for_path(&file)?;
     let range_v = item.get("selectionRange").or_else(|| item.get("range"))?;
     let sl = range_v
         .get("start")
@@ -871,7 +950,7 @@ fn item_to_symbol(item: &serde_json::Value) -> Option<crate::ir::Symbol> {
         .and_then(|n| n.as_u64())
         .unwrap_or(0) as u32;
     Some(crate::ir::Symbol {
-        id: crate::ir::SymbolId::new("rust", &file, &kind, &name, sl),
+        id: crate::ir::SymbolId::new(profile.symbol_lang, &file, &kind, &name, sl),
         name,
         kind,
         file,
@@ -879,7 +958,7 @@ fn item_to_symbol(item: &serde_json::Value) -> Option<crate::ir::Symbol> {
             start_line: sl,
             end_line: el.max(sl),
         },
-        language: "rust".to_string(),
+        language: profile.symbol_lang.to_string(),
     })
 }
 
@@ -899,9 +978,9 @@ fn lsp_impact_bfs(
     // roots: prepareCallHierarchy for each changed symbol
     let mut seeded_roots = 0usize;
     for s in changed.iter() {
-        if !s.file.ends_with(".rs") {
+        let Some(profile) = profile_for_path(&s.file) else {
             continue;
-        }
+        };
         let abspath =
             std::fs::canonicalize(&s.file).unwrap_or_else(|_| std::path::PathBuf::from(&s.file));
         let uri = path_to_uri(&abspath);
@@ -911,7 +990,7 @@ fn lsp_impact_bfs(
             let _ = sess.notify(
                 "textDocument/didOpen",
                 json!({
-                    "textDocument": { "uri": uri, "languageId": "rust", "version": 1, "text": text }
+                    "textDocument": { "uri": uri, "languageId": profile.lsp_language_id, "version": 1, "text": text }
                 }),
             );
         }
@@ -1749,6 +1828,7 @@ fn enclosing_symbol_in_doc(
     file: &str,
     line0: u32,
 ) -> Option<crate::ir::Symbol> {
+    let profile = profile_for_path(file)?;
     // Walk both DocumentSymbol (with children) and SymbolInformation
     for it in items {
         // DocumentSymbol path
@@ -1762,7 +1842,7 @@ fn enclosing_symbol_in_doc(
                 let kind =
                     map_lsp_symbol_kind(it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12));
                 return Some(crate::ir::Symbol {
-                    id: crate::ir::SymbolId::new("rust", file, &kind, name, sl + 1),
+                    id: crate::ir::SymbolId::new(profile.symbol_lang, file, &kind, name, sl + 1),
                     name: name.to_string(),
                     kind,
                     file: file.to_string(),
@@ -1770,7 +1850,7 @@ fn enclosing_symbol_in_doc(
                         start_line: sl + 1,
                         end_line: el.max(sl) + 1,
                     },
-                    language: "rust".to_string(),
+                    language: profile.symbol_lang.to_string(),
                 });
             }
         }
@@ -1799,7 +1879,7 @@ fn enclosing_symbol_in_doc(
                 let kind =
                     map_lsp_symbol_kind(it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12));
                 return Some(crate::ir::Symbol {
-                    id: crate::ir::SymbolId::new("rust", file, &kind, name, sl + 1),
+                    id: crate::ir::SymbolId::new(profile.symbol_lang, file, &kind, name, sl + 1),
                     name: name.to_string(),
                     kind,
                     file: file.to_string(),
@@ -1807,7 +1887,7 @@ fn enclosing_symbol_in_doc(
                         start_line: sl + 1,
                         end_line: el.max(sl) + 1,
                     },
-                    language: "rust".to_string(),
+                    language: profile.symbol_lang.to_string(),
                 });
             }
         }
@@ -1847,9 +1927,12 @@ fn lsp_changed_symbols(
     changed_files.dedup();
     let mut symbols: Vec<crate::ir::Symbol> = Vec::new();
     for (path, lines) in changed_lines_by_file.iter() {
-        if !path.ends_with(".rs") {
+        if !path_matches_mode(path, lang) {
             continue;
         }
+        let Some(profile) = profile_for_path_or_mode(path, lang) else {
+            continue;
+        };
         let abspath = std::fs::canonicalize(path).unwrap_or(std::path::PathBuf::from(path));
         let uri = path_to_uri(&abspath);
         let text = std::fs::read_to_string(&abspath).unwrap_or_else(|_| String::new());
@@ -1857,7 +1940,7 @@ fn lsp_changed_symbols(
         let params = json!({
             "textDocument": {
                 "uri": uri,
-                "languageId": "rust",
+                "languageId": profile.lsp_language_id,
                 "version": 1,
                 "text": text,
             }
@@ -1869,7 +1952,7 @@ fn lsp_changed_symbols(
             // Result can be DocumentSymbol[] or SymbolInformation[]
             if let Some(arr) = result.as_array() {
                 for item in arr {
-                    collect_symbols_from_item(path, item, &mut symbols, lines);
+                    collect_symbols_from_item(path, profile.symbol_lang, item, &mut symbols, lines);
                 }
             }
         }
@@ -1928,6 +2011,7 @@ fn uri_to_path(uri: &str) -> String {
 
 fn collect_symbols_from_item(
     path: &str,
+    symbol_lang: &str,
     item: &serde_json::Value,
     out: &mut Vec<crate::ir::Symbol>,
     changed_lines: &std::collections::HashSet<u32>,
@@ -1975,7 +2059,7 @@ fn collect_symbols_from_item(
     let kind = map_lsp_symbol_kind(kind_num);
     if allowed && !name.is_empty() && intersects_lines(start_line, end_line, changed_lines) {
         out.push(crate::ir::Symbol {
-            id: crate::ir::SymbolId::new("rust", path, &kind, name, start_line),
+            id: crate::ir::SymbolId::new(symbol_lang, path, &kind, name, start_line),
             name: name.to_string(),
             kind,
             file: path.to_string(),
@@ -1983,12 +2067,12 @@ fn collect_symbols_from_item(
                 start_line,
                 end_line,
             },
-            language: "rust".to_string(),
+            language: symbol_lang.to_string(),
         });
     }
     if let Some(children) = item.get("children").and_then(|v| v.as_array()) {
         for ch in children {
-            collect_symbols_from_item(path, ch, out, changed_lines);
+            collect_symbols_from_item(path, symbol_lang, ch, out, changed_lines);
         }
     }
 }
@@ -2054,7 +2138,12 @@ pub fn decide_impact_strategy(caps: &CapabilityMatrix) -> ImpactStrategy {
 
 // ---- LSP graph builder (TS相当) ----
 
-fn collect_symbols_all(path: &str, items: &[serde_json::Value], out: &mut Vec<crate::ir::Symbol>) {
+fn collect_symbols_all(
+    path: &str,
+    symbol_lang: &str,
+    items: &[serde_json::Value],
+    out: &mut Vec<crate::ir::Symbol>,
+) {
     for it in items {
         let name = it.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let kind_num = it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12);
@@ -2096,7 +2185,7 @@ fn collect_symbols_all(path: &str, items: &[serde_json::Value], out: &mut Vec<cr
         let kind = map_lsp_symbol_kind(kind_num);
         if allowed && !name.is_empty() {
             out.push(crate::ir::Symbol {
-                id: crate::ir::SymbolId::new("rust", path, &kind, name, start_line),
+                id: crate::ir::SymbolId::new(symbol_lang, path, &kind, name, start_line),
                 name: name.to_string(),
                 kind,
                 file: path.to_string(),
@@ -2104,11 +2193,11 @@ fn collect_symbols_all(path: &str, items: &[serde_json::Value], out: &mut Vec<cr
                     start_line,
                     end_line,
                 },
-                language: "rust".to_string(),
+                language: symbol_lang.to_string(),
             });
         }
         if let Some(children) = it.get("children").and_then(|v| v.as_array()) {
-            collect_symbols_all(path, children, out);
+            collect_symbols_all(path, symbol_lang, children, out);
         }
     }
 }
@@ -2133,22 +2222,22 @@ fn lsp_build_project_graph(
     {
         let path = entry.path();
         if path.is_file() {
-            if path.extension().and_then(|s| s.to_str()) != Some("rs") {
-                continue;
-            }
-            let abspath = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
-            let uri = path_to_uri(&abspath);
             let path_str = if let Ok(rel) = path.strip_prefix("./") {
                 rel.to_string_lossy().to_string()
             } else {
                 path.to_string_lossy().to_string()
             };
+            let Some(profile) = profile_for_path(&path_str) else {
+                continue;
+            };
+            let abspath = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
+            let uri = path_to_uri(&abspath);
             // didOpen
             let text = std::fs::read_to_string(&abspath).unwrap_or_default();
-            let _ = sess.notify("textDocument/didOpen", serde_json::json!({"textDocument": {"uri": uri, "languageId":"rust", "version": 1, "text": text}}));
+            let _ = sess.notify("textDocument/didOpen", serde_json::json!({"textDocument": {"uri": uri, "languageId": profile.lsp_language_id, "version": 1, "text": text}}));
             // documentSymbol
             if let Ok(items) = sess.req_document_symbol(&uri) {
-                collect_symbols_all(&path_str, &items, &mut all_symbols);
+                collect_symbols_all(&path_str, profile.symbol_lang, &items, &mut all_symbols);
             }
         }
     }
@@ -2227,5 +2316,57 @@ mod tests {
         let sess = LspSession::new(crate::mapping::LanguageMode::Rust, cfg).expect("mock ok");
         assert!(sess.capabilities.document_symbol);
         assert!(sess.capabilities.call_hierarchy);
+    }
+
+    #[test]
+    fn profile_for_path_detects_languages() {
+        assert_eq!(
+            profile_for_path("src/lib.rs"),
+            Some(LangProfile {
+                symbol_lang: "rust",
+                lsp_language_id: "rust"
+            })
+        );
+        assert_eq!(
+            profile_for_path("src/app.rb"),
+            Some(LangProfile {
+                symbol_lang: "ruby",
+                lsp_language_id: "ruby"
+            })
+        );
+        assert_eq!(
+            profile_for_path("web/main.ts"),
+            Some(LangProfile {
+                symbol_lang: "typescript",
+                lsp_language_id: "typescript"
+            })
+        );
+        assert_eq!(
+            profile_for_path("web/main.tsx"),
+            Some(LangProfile {
+                symbol_lang: "tsx",
+                lsp_language_id: "typescriptreact"
+            })
+        );
+        assert_eq!(
+            profile_for_path("web/main.js"),
+            Some(LangProfile {
+                symbol_lang: "javascript",
+                lsp_language_id: "javascript"
+            })
+        );
+        assert_eq!(profile_for_path("README.md"), None);
+    }
+
+    #[test]
+    fn path_matches_mode_respects_lang_filters() {
+        assert!(path_matches_mode("src/lib.rs", LanguageMode::Rust));
+        assert!(!path_matches_mode("src/lib.rs", LanguageMode::Ruby));
+        assert!(path_matches_mode("src/app.tsx", LanguageMode::Tsx));
+        assert!(!path_matches_mode("src/app.tsx", LanguageMode::Typescript));
+        assert!(path_matches_mode("src/app.mjs", LanguageMode::Javascript));
+        assert!(path_matches_mode("src/app.mts", LanguageMode::Typescript));
+        assert!(path_matches_mode("src/app.rb", LanguageMode::Auto));
+        assert!(!path_matches_mode("src/app.md", LanguageMode::Auto));
     }
 }
