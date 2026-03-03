@@ -238,3 +238,46 @@ fn lsp_engine_strict_impact_errors_when_caps_missing() {
     std::env::set_current_dir(cwd).unwrap();
     assert!(err.is_some(), "strict + no impact caps should error");
 }
+
+#[test]
+#[serial]
+fn lsp_engine_non_strict_impact_from_symbols_falls_back_when_lsp_unavailable() {
+    // Ensure this path exercises fallback from LSP session init failure
+    unsafe {
+        std::env::set_var("DIMPACT_DISABLE_REAL_LSP", "1");
+    }
+    let (_tmp, repo) = setup_repo_basic();
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: false,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let changed = vec![dimpact::Symbol {
+        id: dimpact::SymbolId::new("rust", "main.rs", &dimpact::SymbolKind::Function, "bar", 1),
+        name: "bar".to_string(),
+        kind: dimpact::SymbolKind::Function,
+        file: "main.rs".to_string(),
+        range: dimpact::TextRange {
+            start_line: 1,
+            end_line: 1,
+        },
+        language: "rust".to_string(),
+    }];
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(3),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let out = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Rust, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+}

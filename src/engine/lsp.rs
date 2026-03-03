@@ -21,6 +21,76 @@ pub struct LspConfig {
     pub mock_caps: Option<super::CapsHint>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LangProfile {
+    symbol_lang: &'static str,
+    lsp_language_id: &'static str,
+}
+
+fn profile_for_mode(lang: LanguageMode) -> Option<LangProfile> {
+    match lang {
+        LanguageMode::Rust => Some(LangProfile {
+            symbol_lang: "rust",
+            lsp_language_id: "rust",
+        }),
+        LanguageMode::Ruby => Some(LangProfile {
+            symbol_lang: "ruby",
+            lsp_language_id: "ruby",
+        }),
+        LanguageMode::Javascript => Some(LangProfile {
+            symbol_lang: "javascript",
+            lsp_language_id: "javascript",
+        }),
+        LanguageMode::Typescript => Some(LangProfile {
+            symbol_lang: "typescript",
+            lsp_language_id: "typescript",
+        }),
+        LanguageMode::Tsx => Some(LangProfile {
+            symbol_lang: "tsx",
+            lsp_language_id: "typescriptreact",
+        }),
+        LanguageMode::Auto => None,
+    }
+}
+
+fn profile_for_path(path: &str) -> Option<LangProfile> {
+    if path.ends_with(".rs") {
+        return profile_for_mode(LanguageMode::Rust);
+    }
+    if path.ends_with(".rb") {
+        return profile_for_mode(LanguageMode::Ruby);
+    }
+    if path.ends_with(".tsx") {
+        return profile_for_mode(LanguageMode::Tsx);
+    }
+    if path.ends_with(".ts") || path.ends_with(".mts") || path.ends_with(".cts") {
+        return profile_for_mode(LanguageMode::Typescript);
+    }
+    if path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs") {
+        return profile_for_mode(LanguageMode::Javascript);
+    }
+    None
+}
+
+fn path_matches_mode(path: &str, lang: LanguageMode) -> bool {
+    match lang {
+        LanguageMode::Auto => profile_for_path(path).is_some(),
+        LanguageMode::Rust => path.ends_with(".rs"),
+        LanguageMode::Ruby => path.ends_with(".rb"),
+        LanguageMode::Javascript => {
+            path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs")
+        }
+        LanguageMode::Typescript => {
+            path.ends_with(".ts") || path.ends_with(".mts") || path.ends_with(".cts")
+        }
+        LanguageMode::Tsx => path.ends_with(".tsx"),
+    }
+}
+
+fn profile_for_path_or_mode(path: &str, lang: LanguageMode) -> Option<LangProfile> {
+    profile_for_mode(lang).or_else(|| profile_for_path(path))
+}
+
 /// Stub LSP session. Will later speak JSON-RPC over stdio.
 pub struct LspSession {
     _cfg: LspConfig,
@@ -29,6 +99,13 @@ pub struct LspSession {
     stdin: Option<std::process::ChildStdin>,
     stdout: Option<std::process::ChildStdout>,
     next_id: std::sync::atomic::AtomicU64,
+    doc_symbol_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    prepare_call_hierarchy_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    definition_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    references_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    incoming_calls_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    outgoing_calls_cache: std::collections::HashMap<String, Vec<serde_json::Value>>,
+    opened_docs: std::collections::HashSet<String>,
 }
 
 impl LspSession {
@@ -67,6 +144,13 @@ impl LspSession {
                 stdin: None,
                 stdout: None,
                 next_id: std::sync::atomic::AtomicU64::new(1),
+                doc_symbol_cache: std::collections::HashMap::new(),
+                prepare_call_hierarchy_cache: std::collections::HashMap::new(),
+                definition_cache: std::collections::HashMap::new(),
+                references_cache: std::collections::HashMap::new(),
+                incoming_calls_cache: std::collections::HashMap::new(),
+                outgoing_calls_cache: std::collections::HashMap::new(),
+                opened_docs: std::collections::HashSet::new(),
             });
         }
         // Try to spawn a server for the given language
@@ -159,6 +243,13 @@ impl LspSession {
                             stdin: Some(stdin),
                             stdout: Some(stdout),
                             next_id: std::sync::atomic::AtomicU64::new(2),
+                            doc_symbol_cache: std::collections::HashMap::new(),
+                            prepare_call_hierarchy_cache: std::collections::HashMap::new(),
+                            definition_cache: std::collections::HashMap::new(),
+                            references_cache: std::collections::HashMap::new(),
+                            incoming_calls_cache: std::collections::HashMap::new(),
+                            outgoing_calls_cache: std::collections::HashMap::new(),
+                            opened_docs: std::collections::HashSet::new(),
                         });
                     }
                 }
@@ -181,6 +272,37 @@ impl LspSession {
     fn next_request_id(&self) -> u64 {
         self.next_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn pos_cache_key(uri: &str, line0: u32, character0: u32) -> String {
+        format!("{}:{}:{}", uri, line0, character0)
+    }
+
+    fn call_item_key(item: &serde_json::Value) -> Option<String> {
+        let obj = if item.get("name").is_some() {
+            item
+        } else if let Some(from) = item.get("from") {
+            from
+        } else if let Some(to) = item.get("to") {
+            to
+        } else {
+            return None;
+        };
+        let uri = obj.get("uri").and_then(|v| v.as_str())?;
+        let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = obj.get("kind").and_then(|v| v.as_u64()).unwrap_or(0);
+        let range = obj.get("selectionRange").or_else(|| obj.get("range"));
+        let line0 = range
+            .and_then(|r| r.get("start"))
+            .and_then(|s| s.get("line"))
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        let ch0 = range
+            .and_then(|r| r.get("start"))
+            .and_then(|s| s.get("character"))
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        Some(format!("{}:{}:{}:{}:{}", uri, name, kind, line0, ch0))
     }
 
     #[allow(dead_code)]
@@ -241,6 +363,25 @@ impl LspSession {
         Ok(())
     }
 
+    fn ensure_did_open(&mut self, uri: &str, language_id: &str, text: &str) -> anyhow::Result<()> {
+        if self.opened_docs.contains(uri) {
+            return Ok(());
+        }
+        self.notify(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language_id,
+                    "version": 1,
+                    "text": text,
+                }
+            }),
+        )?;
+        self.opened_docs.insert(uri.to_string());
+        Ok(())
+    }
+
     #[allow(dead_code)]
     pub fn shutdown(mut self) {
         if self._cfg.mock {
@@ -277,9 +418,9 @@ impl LspSession {
         if self.stdin.is_none() || self.stdout.is_none() {
             return;
         }
-        // pick first Rust file, if any
-        let rust = files.iter().find(|p| p.ends_with(".rs"));
-        if let Some(path) = rust {
+        // pick first LSP-supported file, if any
+        let first_supported = files.iter().find(|p| profile_for_path(p).is_some());
+        if let Some(path) = first_supported {
             let p = std::path::Path::new(path);
             if let Ok(abs) = std::fs::canonicalize(p) {
                 let uri = path_to_uri(&abs);
@@ -319,33 +460,101 @@ impl LspSession {
         line0: u32,
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let key = Self::pos_cache_key(uri, line0, character0);
+        if let Some(cached) = self.prepare_call_hierarchy_cache.get(&key) {
+            trace!(
+                "lsp: prepareCallHierarchy uri={} line={} ch={} -> {} (cache)",
+                uri,
+                line0,
+                character0,
+                cached.len()
+            );
+            return Ok(cached.clone());
+        }
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}});
-        let v = self.request("textDocument/prepareCallHierarchy", params, 700)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let v = self.request("textDocument/prepareCallHierarchy", params.clone(), 700)?;
+        let mut out = v.as_array().cloned().unwrap_or_default();
+        if out.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            let v2 = self.request("textDocument/prepareCallHierarchy", params, 900)?;
+            out = v2.as_array().cloned().unwrap_or_default();
+        }
+        self.prepare_call_hierarchy_cache.insert(key, out.clone());
+        trace!(
+            "lsp: prepareCallHierarchy uri={} line={} ch={} -> {}",
+            uri,
+            line0,
+            character0,
+            out.len()
+        );
+        Ok(out)
     }
 
     fn req_incoming_calls(
         &mut self,
         item: &serde_json::Value,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let cache_key = Self::call_item_key(item);
+        if let Some(key) = cache_key.as_ref()
+            && let Some(cached) = self.incoming_calls_cache.get(key)
+        {
+            trace!("lsp: incomingCalls -> {} (cache)", cached.len());
+            return Ok(cached.clone());
+        }
         let params = json!({"item": item});
         let v = self.request("callHierarchy/incomingCalls", params, 1200)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let out = v.as_array().cloned().unwrap_or_default();
+        if !out.is_empty()
+            && let Some(key) = cache_key
+        {
+            self.incoming_calls_cache.insert(key, out.clone());
+        }
+        trace!("lsp: incomingCalls -> {}", out.len());
+        Ok(out)
     }
 
     fn req_outgoing_calls(
         &mut self,
         item: &serde_json::Value,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let cache_key = Self::call_item_key(item);
+        if let Some(key) = cache_key.as_ref()
+            && let Some(cached) = self.outgoing_calls_cache.get(key)
+        {
+            trace!("lsp: outgoingCalls -> {} (cache)", cached.len());
+            return Ok(cached.clone());
+        }
         let params = json!({"item": item});
         let v = self.request("callHierarchy/outgoingCalls", params, 1200)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let out = v.as_array().cloned().unwrap_or_default();
+        if !out.is_empty()
+            && let Some(key) = cache_key
+        {
+            self.outgoing_calls_cache.insert(key, out.clone());
+        }
+        trace!("lsp: outgoingCalls -> {}", out.len());
+        Ok(out)
     }
 
     fn req_document_symbol(&mut self, uri: &str) -> anyhow::Result<Vec<serde_json::Value>> {
         let params = json!({"textDocument": {"uri": uri}});
         let v = self.request("textDocument/documentSymbol", params, 800)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let out = v.as_array().cloned().unwrap_or_default();
+        if !out.is_empty() {
+            self.doc_symbol_cache.insert(uri.to_string(), out.clone());
+            trace!("lsp: documentSymbol uri={} -> {}", uri, out.len());
+            return Ok(out);
+        }
+        if let Some(cached) = self.doc_symbol_cache.get(uri) {
+            trace!(
+                "lsp: documentSymbol uri={} -> 0 (use cache={})",
+                uri,
+                cached.len()
+            );
+            return Ok(cached.clone());
+        }
+        trace!("lsp: documentSymbol uri={} -> 0", uri);
+        Ok(out)
     }
 
     fn req_definition(
@@ -354,6 +563,10 @@ impl LspSession {
         line0: u32,
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let key = Self::pos_cache_key(uri, line0, character0);
+        if let Some(cached) = self.definition_cache.get(&key) {
+            return Ok(cached.clone());
+        }
         let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}});
         let v = self.request("textDocument/definition", params, 800)?;
         let mut out = Vec::new();
@@ -362,6 +575,7 @@ impl LspSession {
         } else if v.get("targetUri").is_some() {
             out.push(v.clone());
         }
+        self.definition_cache.insert(key, out.clone());
         Ok(out)
     }
 
@@ -371,9 +585,34 @@ impl LspSession {
         line0: u32,
         character0: u32,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
-        let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}, "context": {"includeDeclaration": false}});
-        let v = self.request("textDocument/references", params, 1200)?;
-        Ok(v.as_array().cloned().unwrap_or_default())
+        let key = Self::pos_cache_key(uri, line0, character0);
+        if let Some(cached) = self.references_cache.get(&key) {
+            trace!(
+                "lsp: references uri={} line={} ch={} -> {} (cache)",
+                uri,
+                line0,
+                character0,
+                cached.len()
+            );
+            return Ok(cached.clone());
+        }
+        let params = json!({"textDocument": {"uri": uri}, "position": {"line": line0, "character": character0}, "context": {"includeDeclaration": true}});
+        let v = self.request("textDocument/references", params.clone(), 1200)?;
+        let mut out = v.as_array().cloned().unwrap_or_default();
+        if out.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            let v2 = self.request("textDocument/references", params, 1400)?;
+            out = v2.as_array().cloned().unwrap_or_default();
+        }
+        self.references_cache.insert(key, out.clone());
+        trace!(
+            "lsp: references uri={} line={} ch={} -> {}",
+            uri,
+            line0,
+            character0,
+            out.len()
+        );
+        Ok(out)
     }
 }
 
@@ -812,7 +1051,15 @@ impl super::AnalysisEngine for LspEngine {
             mock: self.cfg.mock_lsp,
             mock_caps: self.cfg.mock_caps,
         };
-        let mut sess = LspSession::new(lang, lsp_cfg)?;
+        let mut sess = match LspSession::new(lang, lsp_cfg) {
+            Ok(s) => s,
+            Err(e) => {
+                if self.cfg.lsp_strict {
+                    return Err(e);
+                }
+                return self.fallback.impact_from_symbols(changed, lang, opts);
+            }
+        };
         sess.probe_update();
         if self.cfg.dump_capabilities {
             eprintln!(
@@ -851,14 +1098,23 @@ impl super::AnalysisEngine for LspEngine {
 }
 
 fn item_to_symbol(item: &serde_json::Value) -> Option<crate::ir::Symbol> {
-    let name = item.get("name")?.as_str()?.to_string();
-    let kind = map_lsp_symbol_kind(item.get("kind")?.as_u64().unwrap_or(12));
-    let uri = item.get("uri").and_then(|v| v.as_str()).or_else(|| {
-        item.get("from")
-            .and_then(|f| f.get("uri").and_then(|u| u.as_str()))
-    })?;
+    // callHierarchy responses can wrap items in {from: CallHierarchyItem} / {to: CallHierarchyItem}
+    let obj = if item.get("name").is_some() {
+        item
+    } else if let Some(from) = item.get("from") {
+        from
+    } else if let Some(to) = item.get("to") {
+        to
+    } else {
+        item
+    };
+
+    let name = obj.get("name")?.as_str()?.to_string();
+    let kind = map_lsp_symbol_kind(obj.get("kind")?.as_u64().unwrap_or(12));
+    let uri = obj.get("uri").and_then(|v| v.as_str())?;
     let file = uri_to_path(uri);
-    let range_v = item.get("selectionRange").or_else(|| item.get("range"))?;
+    let profile = profile_for_path(&file)?;
+    let range_v = obj.get("selectionRange").or_else(|| obj.get("range"))?;
     let sl = range_v
         .get("start")
         .and_then(|s| s.get("line"))
@@ -871,7 +1127,7 @@ fn item_to_symbol(item: &serde_json::Value) -> Option<crate::ir::Symbol> {
         .and_then(|n| n.as_u64())
         .unwrap_or(0) as u32;
     Some(crate::ir::Symbol {
-        id: crate::ir::SymbolId::new("rust", &file, &kind, &name, sl),
+        id: crate::ir::SymbolId::new(profile.symbol_lang, &file, &kind, &name, sl),
         name,
         kind,
         file,
@@ -879,7 +1135,7 @@ fn item_to_symbol(item: &serde_json::Value) -> Option<crate::ir::Symbol> {
             start_line: sl,
             end_line: el.max(sl),
         },
-        language: "rust".to_string(),
+        language: profile.symbol_lang.to_string(),
     })
 }
 
@@ -899,30 +1155,35 @@ fn lsp_impact_bfs(
     // roots: prepareCallHierarchy for each changed symbol
     let mut seeded_roots = 0usize;
     for s in changed.iter() {
-        if !s.file.ends_with(".rs") {
+        let Some(profile) = profile_for_path(&s.file) else {
             continue;
-        }
+        };
         let abspath =
             std::fs::canonicalize(&s.file).unwrap_or_else(|_| std::path::PathBuf::from(&s.file));
         let uri = path_to_uri(&abspath);
         if !sess._cfg.mock
             && let Ok(text) = std::fs::read_to_string(&abspath)
         {
-            let _ = sess.notify(
-                "textDocument/didOpen",
-                json!({
-                    "textDocument": { "uri": uri, "languageId": "rust", "version": 1, "text": text }
-                }),
-            );
+            let _ = sess.ensure_did_open(&uri, profile.lsp_language_id, &text);
         }
         if matches!(
             s.kind,
             crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method
         ) {
             // Directly seed from the changed callable itself
-            let (mut line0, mut ch0) = guess_callable_position(&s.file, s)
+            let (line0, ch0) = guess_callable_position(&s.file, s)
                 .unwrap_or((s.range.start_line.saturating_sub(1), 0));
-            if let Ok(defs) = sess.req_definition(&uri, line0, ch0)
+            let mut roots = sess
+                .req_prepare_call_hierarchy(&uri, line0, ch0)
+                .unwrap_or_default();
+            if roots.is_empty() && ch0 != 0 {
+                roots = sess
+                    .req_prepare_call_hierarchy(&uri, line0, 0)
+                    .unwrap_or_default();
+            }
+            // If direct prepare failed, resolve definition once and retry on its position.
+            if roots.is_empty()
+                && let Ok(defs) = sess.req_definition(&uri, line0, ch0)
                 && let Some(loc) = defs.first()
                 && let Some(r) = loc.get("targetSelectionRange").or_else(|| loc.get("range"))
                 && let (Some(sl), Some(sc)) = (
@@ -934,16 +1195,16 @@ fn lsp_impact_bfs(
                         .and_then(|n| n.as_u64()),
                 )
             {
-                line0 = sl as u32;
-                ch0 = sc as u32;
-            }
-            let mut roots = sess
-                .req_prepare_call_hierarchy(&uri, line0, ch0)
-                .unwrap_or_default();
-            if roots.is_empty() && ch0 != 0 {
+                let dl0 = sl as u32;
+                let dc0 = sc as u32;
                 roots = sess
-                    .req_prepare_call_hierarchy(&uri, line0, 0)
+                    .req_prepare_call_hierarchy(&uri, dl0, dc0)
                     .unwrap_or_default();
+                if roots.is_empty() && dc0 != 0 {
+                    roots = sess
+                        .req_prepare_call_hierarchy(&uri, dl0, 0)
+                        .unwrap_or_default();
+                }
             }
             for it in roots {
                 let key = format!(
@@ -963,25 +1224,30 @@ fn lsp_impact_bfs(
             let defs = sess
                 .req_definition(&uri, s.range.start_line.saturating_sub(1), 0)
                 .unwrap_or_default();
-            let (def_uri, def_line0) = if let Some(loc) = defs.first() {
+            let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
                 let u = loc
                     .get("uri")
                     .or_else(|| loc.get("targetUri"))
                     .and_then(|v| v.as_str())
                     .unwrap_or(&uri)
                     .to_string();
-                let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
+                let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
                 let l0 = r
                     .and_then(|rr| rr.get("start"))
                     .and_then(|st| st.get("line"))
                     .and_then(|n| n.as_u64())
                     .unwrap_or(0) as u32;
-                (u, l0)
+                let c0 = r
+                    .and_then(|rr| rr.get("start"))
+                    .and_then(|st| st.get("character"))
+                    .and_then(|n| n.as_u64())
+                    .unwrap_or(0) as u32;
+                (u, l0, c0)
             } else {
-                (uri.clone(), s.range.start_line.saturating_sub(1))
+                (uri.clone(), s.range.start_line.saturating_sub(1), 0)
             };
             let refs = sess
-                .req_references(&def_uri, def_line0, 0)
+                .req_references(&def_uri, def_line0, def_ch0)
                 .unwrap_or_default();
             for loc in refs {
                 let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
@@ -1063,21 +1329,24 @@ fn lsp_impact_bfs(
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
                 };
-                for inc in sess.req_incoming_calls(&item).unwrap_or_default() {
+                let incoming = sess.req_incoming_calls(&item).unwrap_or_default();
+                for inc in &incoming {
                     if let Some(from) = inc.get("from") {
                         enqueue_edge(&mut env, from, &cur_sym, d + 1, true);
                     }
                 }
-                // Supplement callers via references to catch cases callHierarchy misses
-                enqueue_callers_via_references(
-                    sess,
-                    &cur_sym,
-                    &mut q,
-                    &mut edges,
-                    &mut seen_keys,
-                    &mut node_map,
-                    d + 1,
-                );
+                // Supplement callers via references only when callHierarchy yielded nothing.
+                if incoming.is_empty() {
+                    enqueue_callers_via_references(
+                        sess,
+                        &cur_sym,
+                        &mut q,
+                        &mut edges,
+                        &mut seen_keys,
+                        &mut node_map,
+                        d + 1,
+                    );
+                }
             }
             crate::impact::ImpactDirection::Callees => {
                 let mut env = EnqueueEnv {
@@ -1109,20 +1378,23 @@ fn lsp_impact_bfs(
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
                 };
-                for inc in sess.req_incoming_calls(&item).unwrap_or_default() {
+                let incoming = sess.req_incoming_calls(&item).unwrap_or_default();
+                for inc in &incoming {
                     if let Some(from) = inc.get("from") {
                         enqueue_edge(&mut env, from, &cur_sym, d + 1, true);
                     }
                 }
-                enqueue_callers_via_references(
-                    sess,
-                    &cur_sym,
-                    &mut q,
-                    &mut edges,
-                    &mut seen_keys,
-                    &mut node_map,
-                    d + 1,
-                );
+                if incoming.is_empty() {
+                    enqueue_callers_via_references(
+                        sess,
+                        &cur_sym,
+                        &mut q,
+                        &mut edges,
+                        &mut seen_keys,
+                        &mut node_map,
+                        d + 1,
+                    );
+                }
                 let mut env2 = EnqueueEnv {
                     q: &mut q,
                     edges: &mut edges,
@@ -1354,29 +1626,42 @@ fn enqueue_callers_via_references(
     next_depth: usize,
 ) {
     let uri = path_to_uri(std::path::Path::new(&cur_sym.file));
-    let defs = sess
-        .req_definition(&uri, cur_sym.range.start_line.saturating_sub(1), 0)
-        .unwrap_or_default();
-    let (def_uri, def_line0) = if let Some(loc) = defs.first() {
-        let u = loc
-            .get("uri")
-            .or_else(|| loc.get("targetUri"))
-            .and_then(|v| v.as_str())
-            .unwrap_or(&uri)
-            .to_string();
-        let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
-        let l0 = r
-            .and_then(|rr| rr.get("start"))
-            .and_then(|st| st.get("line"))
-            .and_then(|n| n.as_u64())
-            .unwrap_or(0) as u32;
-        (u, l0)
-    } else {
-        (uri.clone(), cur_sym.range.start_line.saturating_sub(1))
-    };
-    let refs = sess
-        .req_references(&def_uri, def_line0, 0)
-        .unwrap_or_default();
+    let (line0, ch0) = guess_callable_position(&cur_sym.file, cur_sym)
+        .unwrap_or((cur_sym.range.start_line.saturating_sub(1), 0));
+    let mut refs = sess.req_references(&uri, line0, ch0).unwrap_or_default();
+
+    // If direct references are sparse, resolve definition and retry at def position.
+    if refs.len() <= 1 {
+        let defs = sess.req_definition(&uri, line0, ch0).unwrap_or_default();
+        let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
+            let u = loc
+                .get("uri")
+                .or_else(|| loc.get("targetUri"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(&uri)
+                .to_string();
+            let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
+            let l0 = r
+                .and_then(|rr| rr.get("start"))
+                .and_then(|st| st.get("line"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0) as u32;
+            let c0 = r
+                .and_then(|rr| rr.get("start"))
+                .and_then(|st| st.get("character"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0) as u32;
+            (u, l0, c0)
+        } else {
+            (uri.clone(), line0, ch0)
+        };
+        let refs2 = sess
+            .req_references(&def_uri, def_line0, def_ch0)
+            .unwrap_or_default();
+        if refs2.len() > refs.len() || refs.is_empty() {
+            refs = refs2;
+        }
+    }
     for loc in refs {
         let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
         let file = uri_to_path(loc_uri);
@@ -1539,7 +1824,7 @@ fn scan_callees_symbols(
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
                             let def_file = uri_to_path(def_uri);
-                            let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
+                            let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
                             let def_l0 = r
                                 .and_then(|rr| rr.get("start"))
                                 .and_then(|st| st.get("line"))
@@ -1657,25 +1942,30 @@ fn lsp_impact_references(
         let (line0, ch0) = guess_callable_position(&sym.file, &sym)
             .unwrap_or((sym.range.start_line.saturating_sub(1), 0));
         let defs = sess.req_definition(&uri, line0, ch0).unwrap_or_default();
-        let (def_uri, def_line0) = if let Some(loc) = defs.first() {
+        let (def_uri, def_line0, def_ch0) = if let Some(loc) = defs.first() {
             let u = loc
                 .get("uri")
                 .or_else(|| loc.get("targetUri"))
                 .and_then(|v| v.as_str())
                 .unwrap_or(&uri)
                 .to_string();
-            let r = loc.get("range").or_else(|| loc.get("targetSelectionRange"));
+            let r = loc.get("targetSelectionRange").or_else(|| loc.get("range"));
             let l0 = r
                 .and_then(|rr| rr.get("start"))
                 .and_then(|s| s.get("line"))
                 .and_then(|n| n.as_u64())
                 .unwrap_or(0) as u32;
-            (u, l0)
+            let c0 = r
+                .and_then(|rr| rr.get("start"))
+                .and_then(|s| s.get("character"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0) as u32;
+            (u, l0, c0)
         } else {
-            (uri.clone(), sym.range.start_line.saturating_sub(1))
+            (uri.clone(), sym.range.start_line.saturating_sub(1), 0)
         };
         let refs = sess
-            .req_references(&def_uri, def_line0, 0)
+            .req_references(&def_uri, def_line0, def_ch0)
             .unwrap_or_default();
         for loc in refs {
             let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
@@ -1688,7 +1978,12 @@ fn lsp_impact_references(
                 .unwrap_or(0) as u32;
             // find enclosing symbol via documentSymbol
             let items = sess.req_document_symbol(loc_uri).unwrap_or_default();
-            if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0) {
+            if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0)
+                && matches!(
+                    caller.kind,
+                    crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method
+                )
+            {
                 let key = caller.id.0.clone();
                 node_map.entry(key.clone()).or_insert(caller.clone());
                 if seen.insert(format!("edge:{}->{}", caller.id.0, sym.id.0)) {
@@ -1744,13 +2039,18 @@ fn lsp_impact_references(
     })
 }
 
-fn enclosing_symbol_in_doc(
+fn collect_enclosing_candidates(
     items: &[serde_json::Value],
     file: &str,
+    symbol_lang: &str,
     line0: u32,
-) -> Option<crate::ir::Symbol> {
-    // Walk both DocumentSymbol (with children) and SymbolInformation
+    out: &mut Vec<crate::ir::Symbol>,
+) {
     for it in items {
+        if let Some(children) = it.get("children").and_then(|v| v.as_array()) {
+            collect_enclosing_candidates(children, file, symbol_lang, line0, out);
+        }
+
         // DocumentSymbol path
         if let Some(r) = it.get("range")
             && let (Some(s), Some(e)) = (r.get("start"), r.get("end"))
@@ -1761,8 +2061,8 @@ fn enclosing_symbol_in_doc(
                 let name = it.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let kind =
                     map_lsp_symbol_kind(it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12));
-                return Some(crate::ir::Symbol {
-                    id: crate::ir::SymbolId::new("rust", file, &kind, name, sl + 1),
+                out.push(crate::ir::Symbol {
+                    id: crate::ir::SymbolId::new(symbol_lang, file, &kind, name, sl + 1),
                     name: name.to_string(),
                     kind,
                     file: file.to_string(),
@@ -1770,16 +2070,11 @@ fn enclosing_symbol_in_doc(
                         start_line: sl + 1,
                         end_line: el.max(sl) + 1,
                     },
-                    language: "rust".to_string(),
+                    language: symbol_lang.to_string(),
                 });
             }
         }
-        // children
-        if let Some(children) = it.get("children").and_then(|v| v.as_array())
-            && let Some(sym) = enclosing_symbol_in_doc(children, file, line0)
-        {
-            return Some(sym);
-        }
+
         // SymbolInformation path
         if let Some(loc) = it.get("location")
             && let Some(r) = loc.get("range")
@@ -1798,8 +2093,8 @@ fn enclosing_symbol_in_doc(
                 let name = it.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let kind =
                     map_lsp_symbol_kind(it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12));
-                return Some(crate::ir::Symbol {
-                    id: crate::ir::SymbolId::new("rust", file, &kind, name, sl + 1),
+                out.push(crate::ir::Symbol {
+                    id: crate::ir::SymbolId::new(symbol_lang, file, &kind, name, sl + 1),
                     name: name.to_string(),
                     kind,
                     file: file.to_string(),
@@ -1807,12 +2102,28 @@ fn enclosing_symbol_in_doc(
                         start_line: sl + 1,
                         end_line: el.max(sl) + 1,
                     },
-                    language: "rust".to_string(),
+                    language: symbol_lang.to_string(),
                 });
             }
         }
     }
-    None
+}
+
+fn enclosing_symbol_in_doc(
+    items: &[serde_json::Value],
+    file: &str,
+    line0: u32,
+) -> Option<crate::ir::Symbol> {
+    let profile = profile_for_path(file)?;
+    let mut candidates = Vec::new();
+    collect_enclosing_candidates(items, file, profile.symbol_lang, line0, &mut candidates);
+    candidates.into_iter().min_by(|a, b| {
+        let a_span = a.range.end_line.saturating_sub(a.range.start_line);
+        let b_span = b.range.end_line.saturating_sub(b.range.start_line);
+        a_span
+            .cmp(&b_span)
+            .then_with(|| b.range.start_line.cmp(&a.range.start_line))
+    })
 }
 
 fn lsp_changed_symbols(
@@ -1847,30 +2158,19 @@ fn lsp_changed_symbols(
     changed_files.dedup();
     let mut symbols: Vec<crate::ir::Symbol> = Vec::new();
     for (path, lines) in changed_lines_by_file.iter() {
-        if !path.ends_with(".rs") {
+        if !path_matches_mode(path, lang) {
             continue;
         }
+        let Some(profile) = profile_for_path_or_mode(path, lang) else {
+            continue;
+        };
         let abspath = std::fs::canonicalize(path).unwrap_or(std::path::PathBuf::from(path));
         let uri = path_to_uri(&abspath);
         let text = std::fs::read_to_string(&abspath).unwrap_or_else(|_| String::new());
-        // didOpen
-        let params = json!({
-            "textDocument": {
-                "uri": uri,
-                "languageId": "rust",
-                "version": 1,
-                "text": text,
-            }
-        });
-        let _ = sess.notify("textDocument/didOpen", params);
-        // documentSymbol
-        let params = json!({ "textDocument": { "uri": uri } });
-        if let Ok(result) = sess.request("textDocument/documentSymbol", params, 500) {
-            // Result can be DocumentSymbol[] or SymbolInformation[]
-            if let Some(arr) = result.as_array() {
-                for item in arr {
-                    collect_symbols_from_item(path, item, &mut symbols, lines);
-                }
+        let _ = sess.ensure_did_open(&uri, profile.lsp_language_id, &text);
+        if let Ok(items) = sess.req_document_symbol(&uri) {
+            for item in &items {
+                collect_symbols_from_item(path, profile.symbol_lang, item, &mut symbols, lines);
             }
         }
     }
@@ -1928,6 +2228,7 @@ fn uri_to_path(uri: &str) -> String {
 
 fn collect_symbols_from_item(
     path: &str,
+    symbol_lang: &str,
     item: &serde_json::Value,
     out: &mut Vec<crate::ir::Symbol>,
     changed_lines: &std::collections::HashSet<u32>,
@@ -1975,7 +2276,7 @@ fn collect_symbols_from_item(
     let kind = map_lsp_symbol_kind(kind_num);
     if allowed && !name.is_empty() && intersects_lines(start_line, end_line, changed_lines) {
         out.push(crate::ir::Symbol {
-            id: crate::ir::SymbolId::new("rust", path, &kind, name, start_line),
+            id: crate::ir::SymbolId::new(symbol_lang, path, &kind, name, start_line),
             name: name.to_string(),
             kind,
             file: path.to_string(),
@@ -1983,12 +2284,12 @@ fn collect_symbols_from_item(
                 start_line,
                 end_line,
             },
-            language: "rust".to_string(),
+            language: symbol_lang.to_string(),
         });
     }
     if let Some(children) = item.get("children").and_then(|v| v.as_array()) {
         for ch in children {
-            collect_symbols_from_item(path, ch, out, changed_lines);
+            collect_symbols_from_item(path, symbol_lang, ch, out, changed_lines);
         }
     }
 }
@@ -2054,7 +2355,12 @@ pub fn decide_impact_strategy(caps: &CapabilityMatrix) -> ImpactStrategy {
 
 // ---- LSP graph builder (TS相当) ----
 
-fn collect_symbols_all(path: &str, items: &[serde_json::Value], out: &mut Vec<crate::ir::Symbol>) {
+fn collect_symbols_all(
+    path: &str,
+    symbol_lang: &str,
+    items: &[serde_json::Value],
+    out: &mut Vec<crate::ir::Symbol>,
+) {
     for it in items {
         let name = it.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let kind_num = it.get("kind").and_then(|v| v.as_u64()).unwrap_or(12);
@@ -2096,7 +2402,7 @@ fn collect_symbols_all(path: &str, items: &[serde_json::Value], out: &mut Vec<cr
         let kind = map_lsp_symbol_kind(kind_num);
         if allowed && !name.is_empty() {
             out.push(crate::ir::Symbol {
-                id: crate::ir::SymbolId::new("rust", path, &kind, name, start_line),
+                id: crate::ir::SymbolId::new(symbol_lang, path, &kind, name, start_line),
                 name: name.to_string(),
                 kind,
                 file: path.to_string(),
@@ -2104,11 +2410,11 @@ fn collect_symbols_all(path: &str, items: &[serde_json::Value], out: &mut Vec<cr
                     start_line,
                     end_line,
                 },
-                language: "rust".to_string(),
+                language: symbol_lang.to_string(),
             });
         }
         if let Some(children) = it.get("children").and_then(|v| v.as_array()) {
-            collect_symbols_all(path, children, out);
+            collect_symbols_all(path, symbol_lang, children, out);
         }
     }
 }
@@ -2133,22 +2439,22 @@ fn lsp_build_project_graph(
     {
         let path = entry.path();
         if path.is_file() {
-            if path.extension().and_then(|s| s.to_str()) != Some("rs") {
-                continue;
-            }
-            let abspath = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
-            let uri = path_to_uri(&abspath);
             let path_str = if let Ok(rel) = path.strip_prefix("./") {
                 rel.to_string_lossy().to_string()
             } else {
                 path.to_string_lossy().to_string()
             };
+            let Some(profile) = profile_for_path(&path_str) else {
+                continue;
+            };
+            let abspath = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
+            let uri = path_to_uri(&abspath);
             // didOpen
             let text = std::fs::read_to_string(&abspath).unwrap_or_default();
-            let _ = sess.notify("textDocument/didOpen", serde_json::json!({"textDocument": {"uri": uri, "languageId":"rust", "version": 1, "text": text}}));
+            let _ = sess.ensure_did_open(&uri, profile.lsp_language_id, &text);
             // documentSymbol
             if let Ok(items) = sess.req_document_symbol(&uri) {
-                collect_symbols_all(&path_str, &items, &mut all_symbols);
+                collect_symbols_all(&path_str, profile.symbol_lang, &items, &mut all_symbols);
             }
         }
     }
@@ -2173,6 +2479,10 @@ fn lsp_build_project_graph(
             let items = sess.req_document_symbol(loc_uri).unwrap_or_default();
             if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0)
                 && caller.id.0 != to_sym.id.0
+                && matches!(
+                    caller.kind,
+                    crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method
+                )
             {
                 edges.push(crate::ir::reference::Reference {
                     from: caller.id.clone(),
@@ -2184,6 +2494,26 @@ fn lsp_build_project_graph(
             }
         }
     }
+
+    // Fallback: if references route yields nothing, synthesize edges by scanning callsites.
+    if edges.is_empty() {
+        trace!("lsp: graph references empty, fallback to callsite scan");
+        let id_set: std::collections::HashSet<String> =
+            all_symbols.iter().map(|s| s.id.0.clone()).collect();
+        for from_sym in &all_symbols {
+            let (_callees, extra_edges) = scan_callees_symbols(sess, from_sym);
+            for e in extra_edges {
+                if id_set.contains(&e.from.0) && id_set.contains(&e.to.0) {
+                    edges.push(e);
+                }
+            }
+        }
+    }
+
+    // Deduplicate edges.
+    let mut seen = std::collections::HashSet::new();
+    edges.retain(|e| seen.insert(format!("{}->{}", e.from.0, e.to.0)));
+
     let index = crate::ir::reference::SymbolIndex::build(all_symbols);
     Ok((index, edges))
 }
@@ -2227,5 +2557,125 @@ mod tests {
         let sess = LspSession::new(crate::mapping::LanguageMode::Rust, cfg).expect("mock ok");
         assert!(sess.capabilities.document_symbol);
         assert!(sess.capabilities.call_hierarchy);
+    }
+
+    #[test]
+    fn profile_for_path_detects_languages() {
+        assert_eq!(
+            profile_for_path("src/lib.rs"),
+            Some(LangProfile {
+                symbol_lang: "rust",
+                lsp_language_id: "rust"
+            })
+        );
+        assert_eq!(
+            profile_for_path("src/app.rb"),
+            Some(LangProfile {
+                symbol_lang: "ruby",
+                lsp_language_id: "ruby"
+            })
+        );
+        assert_eq!(
+            profile_for_path("web/main.ts"),
+            Some(LangProfile {
+                symbol_lang: "typescript",
+                lsp_language_id: "typescript"
+            })
+        );
+        assert_eq!(
+            profile_for_path("web/main.tsx"),
+            Some(LangProfile {
+                symbol_lang: "tsx",
+                lsp_language_id: "typescriptreact"
+            })
+        );
+        assert_eq!(
+            profile_for_path("web/main.js"),
+            Some(LangProfile {
+                symbol_lang: "javascript",
+                lsp_language_id: "javascript"
+            })
+        );
+        assert_eq!(profile_for_path("README.md"), None);
+    }
+
+    #[test]
+    fn path_matches_mode_respects_lang_filters() {
+        assert!(path_matches_mode("src/lib.rs", LanguageMode::Rust));
+        assert!(!path_matches_mode("src/lib.rs", LanguageMode::Ruby));
+        assert!(path_matches_mode("src/app.tsx", LanguageMode::Tsx));
+        assert!(!path_matches_mode("src/app.tsx", LanguageMode::Typescript));
+        assert!(path_matches_mode("src/app.mjs", LanguageMode::Javascript));
+        assert!(path_matches_mode("src/app.mts", LanguageMode::Typescript));
+        assert!(path_matches_mode("src/app.rb", LanguageMode::Auto));
+        assert!(!path_matches_mode("src/app.md", LanguageMode::Auto));
+    }
+
+    #[test]
+    fn item_to_symbol_handles_call_hierarchy_wrappers() {
+        let incoming = json!({
+            "from": {
+                "name": "foo",
+                "kind": 12,
+                "uri": "file:///tmp/src/main.rs",
+                "selectionRange": {
+                    "start": {"line": 9, "character": 3},
+                    "end": {"line": 9, "character": 6}
+                }
+            }
+        });
+        let sym = item_to_symbol(&incoming).expect("incoming wrapper should parse");
+        assert_eq!(sym.name, "foo");
+        assert_eq!(sym.file, "/tmp/src/main.rs");
+        assert_eq!(sym.range.start_line, 10);
+
+        let outgoing = json!({
+            "to": {
+                "name": "bar",
+                "kind": 12,
+                "uri": "file:///tmp/src/lib.rs",
+                "selectionRange": {
+                    "start": {"line": 4, "character": 1},
+                    "end": {"line": 4, "character": 4}
+                }
+            }
+        });
+        let sym2 = item_to_symbol(&outgoing).expect("outgoing wrapper should parse");
+        assert_eq!(sym2.name, "bar");
+        assert_eq!(sym2.file, "/tmp/src/lib.rs");
+        assert_eq!(sym2.range.start_line, 5);
+    }
+
+    #[test]
+    fn enclosing_symbol_prefers_most_specific_candidate() {
+        let items = vec![
+            json!({
+                "name": "bar",
+                "kind": 12,
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 3, "character": 0}
+                }
+            }),
+            json!({
+                "name": "foo",
+                "kind": 12,
+                "range": {
+                    "start": {"line": 1, "character": 0},
+                    "end": {"line": 3, "character": 0}
+                }
+            }),
+            json!({
+                "name": "main",
+                "kind": 12,
+                "range": {
+                    "start": {"line": 2, "character": 0},
+                    "end": {"line": 3, "character": 0}
+                }
+            }),
+        ];
+        let sym = enclosing_symbol_in_doc(&items, "/tmp/src/main.rs", 2)
+            .expect("should pick enclosing symbol");
+        assert_eq!(sym.name, "main");
     }
 }
