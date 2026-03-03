@@ -3,6 +3,10 @@ name: Impact Analysis
 on:
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   impact:
     runs-on: ubuntu-latest
@@ -30,6 +34,7 @@ jobs:
           '  > impact-tables.md
 
       - name: comment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           path: impact-tables.md

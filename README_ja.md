@@ -109,6 +109,9 @@ git diff --no-ext-diff | dimpact impact --engine ts -f json
 git diff --no-ext-diff | dimpact impact --engine lsp --engine-lsp-strict --engine-dump-capabilities -f json
 # Tip: `RUST_LOG=info` で詳細なログを確認
 
+# 同一 diff で TS と LSP(strict) の速度/件数を比較
+scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust
+
 # Symbol ID でシードし、diff 不要で影響解析
 dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json
 
