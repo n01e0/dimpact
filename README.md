@@ -88,6 +88,8 @@ Usage Examples
 - Try LSP engine (experimental) with strict mode and capability dump:
   - `git diff --no-ext-diff | dimpact impact --engine lsp --engine-lsp-strict --engine-dump-capabilities -f json`
   - Tip: `RUST_LOG=info` to see more diagnostics
+- Benchmark TS vs LSP(strict) on the same diff:
+  - `scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust`
 - Seed via Symbol IDs (no diff needed):
   - `dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json`
 - Seed via JSON file:
