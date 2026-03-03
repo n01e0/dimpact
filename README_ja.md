@@ -94,6 +94,10 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 ## ロギング
 `env_logger` を使用。`RUST_LOG=info`（または `debug`/`trace`）で診断ログを有効化。
 
+## LSP strict E2E テスト
+- strict LSP の E2E テストは、`rust-analyzer` がない環境での CI ぶれ回避のため opt-in です。
+- 実行方法: `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+
 ## 使用例
 ```bash
 # 呼び出し元チェーンをエッジ付き JSON で出力

@@ -78,6 +78,10 @@ Engine Selection
 Logging
 - Uses `env_logger`. Set `RUST_LOG=info` (or `debug|trace`) to see diagnostics.
 
+LSP strict E2E tests
+- Strict LSP E2E tests are opt-in (to avoid flaky CI environments without rust-analyzer).
+- Run with: `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+
 Usage Examples
 - Callers from a diff (JSON with edges):
   - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges -f json`
