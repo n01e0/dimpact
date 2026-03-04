@@ -4,12 +4,14 @@ set -euo pipefail
 # Benchmark Tree-Sitter vs LSP(strict) on the same diff input.
 #
 # Usage:
-#   scripts/bench-impact-engines.sh [--base origin/main] [--runs 3] [--direction callers] [--lang rust]
+#   scripts/bench-impact-engines.sh [--base origin/main] [--diff-file /path/to.diff] [--runs 3] [--direction callers] [--lang rust]
 #
-# Example:
+# Examples:
 #   scripts/bench-impact-engines.sh --base origin/main --runs 5 --direction callers --lang rust
+#   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 3 --lang rust
 
 BASE_REF="origin/main"
+DIFF_INPUT=""
 RUNS=3
 DIRECTION="callers"
 LANG="rust"
@@ -18,6 +20,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --base)
       BASE_REF="${2:?missing value for --base}"
+      shift 2
+      ;;
+    --diff-file)
+      DIFF_INPUT="${2:?missing value for --diff-file}"
       shift 2
       ;;
     --runs)
@@ -53,6 +59,11 @@ if ! [[ "$RUNS" =~ ^[0-9]+$ ]] || [[ "$RUNS" -lt 1 ]]; then
   exit 2
 fi
 
+if [[ -n "$DIFF_INPUT" && ! -f "$DIFF_INPUT" ]]; then
+  echo "--diff-file not found: $DIFF_INPUT" >&2
+  exit 2
+fi
+
 BIN="./target/release/dimpact"
 if [[ ! -x "$BIN" ]]; then
   echo "building release binary..." >&2
@@ -64,12 +75,15 @@ TS_JSON="$(mktemp)"
 LSP_JSON="$(mktemp)"
 trap 'rm -f "$DIFF_FILE" "$TS_JSON" "$LSP_JSON"' EXIT
 
-# Ensure base exists locally
-if [[ "$BASE_REF" == origin/* ]]; then
-  git fetch origin "${BASE_REF#origin/}" >/dev/null 2>&1 || true
+if [[ -n "$DIFF_INPUT" ]]; then
+  cp "$DIFF_INPUT" "$DIFF_FILE"
+else
+  # Ensure base exists locally
+  if [[ "$BASE_REF" == origin/* ]]; then
+    git fetch origin "${BASE_REF#origin/}" >/dev/null 2>&1 || true
+  fi
+  git diff --no-ext-diff "${BASE_REF}"...HEAD > "$DIFF_FILE"
 fi
-
-git diff --no-ext-diff "${BASE_REF}"...HEAD > "$DIFF_FILE"
 
 measure_engine() {
   local mode="$1"; shift
@@ -87,7 +101,11 @@ summarize() {
   awk 'NR==1{min=$1;max=$1}{s+=$1;if($1<min)min=$1;if($1>max)max=$1} END{printf("avg=%.3fs min=%.3fs max=%.3fs", s/NR, min, max)}'
 }
 
-echo "base=$BASE_REF runs=$RUNS direction=$DIRECTION lang=$LANG"
+if [[ -n "$DIFF_INPUT" ]]; then
+  echo "diff_file=$DIFF_INPUT runs=$RUNS direction=$DIRECTION lang=$LANG"
+else
+  echo "base=$BASE_REF runs=$RUNS direction=$DIRECTION lang=$LANG"
+fi
 
 ts_times="$(measure_engine ts)"
 lsp_times="$(measure_engine lsp "--engine-lsp-strict")"

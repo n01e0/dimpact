@@ -1,0 +1,65 @@
+name: Benchmark Impact Engines
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/engine/**"
+      - "scripts/bench-impact-engines.sh"
+      - ".github/workflows/bench.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bench-impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install rust-analyzer component
+        run: rustup component add rust-analyzer
+
+      - name: Build release binary
+        run: cargo build --release -q
+
+      - name: Run TS vs LSP(strict) benchmark
+        id: bench
+        continue-on-error: true
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BASE="origin/main"
+          fi
+
+          echo "base=$BASE" > bench-report.txt
+          scripts/bench-impact-engines.sh \
+            --base "$BASE" \
+            --runs 2 \
+            --direction callers \
+            --lang rust \
+            | tee -a bench-report.txt
+
+      - name: Publish benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## Impact engine benchmark"
+            echo
+            if [ -f bench-report.txt ]; then
+              sed 's/^/`/;s/$/`/' bench-report.txt
+            else
+              echo "benchmark report missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-impact-engines
+          path: bench-report.txt
+          if-no-files-found: warn

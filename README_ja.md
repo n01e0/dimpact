@@ -115,6 +115,9 @@ git diff --no-ext-diff | dimpact impact --engine lsp --engine-lsp-strict --engin
 
 # 同一 diff で TS と LSP(strict) の速度/件数を比較
 scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust
+# 固定 diff ファイルを使って比較
+scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust
+# CI ワークフロー: Benchmark Impact Engines（手動実行 + 対象PRで自動実行）
 
 # Symbol ID でシードし、diff 不要で影響解析
 dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json
