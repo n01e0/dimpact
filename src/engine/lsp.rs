@@ -1335,8 +1335,8 @@ fn lsp_impact_bfs(
                         enqueue_edge(&mut env, from, &cur_sym, d + 1, true);
                     }
                 }
-                // Supplement callers via references only when callHierarchy yielded nothing.
-                if incoming.is_empty() {
+                // Supplement callers via references only for roots when callHierarchy yields nothing.
+                if incoming.is_empty() && d == 0 {
                     enqueue_callers_via_references(
                         sess,
                         &cur_sym,
@@ -1384,7 +1384,7 @@ fn lsp_impact_bfs(
                         enqueue_edge(&mut env, from, &cur_sym, d + 1, true);
                     }
                 }
-                if incoming.is_empty() {
+                if incoming.is_empty() && d == 0 {
                     enqueue_callers_via_references(
                         sess,
                         &cur_sym,
