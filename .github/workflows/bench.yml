@@ -11,9 +11,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: bench-impact-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   bench-impact:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,17 +33,20 @@ jobs:
       - name: Run TS vs LSP(strict) benchmark
         id: bench
         continue-on-error: true
+        timeout-minutes: 12
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="origin/${{ github.base_ref }}"
+            RUNS=1
           else
             BASE="origin/main"
+            RUNS=2
           fi
 
-          echo "base=$BASE" > bench-report.txt
-          scripts/bench-impact-engines.sh \
+          echo "base=$BASE runs=$RUNS" > bench-report.txt
+          timeout 10m scripts/bench-impact-engines.sh \
             --base "$BASE" \
-            --runs 2 \
+            --runs "$RUNS" \
             --direction callers \
             --lang rust \
             | tee -a bench-report.txt
