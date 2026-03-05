@@ -49,6 +49,7 @@ jobs:
             --runs "$RUNS" \
             --direction callers \
             --lang rust \
+            --rpc-counts \
             | tee -a bench-report.txt
 
       - name: Publish benchmark summary

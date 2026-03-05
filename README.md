@@ -95,6 +95,7 @@ Usage Examples
 - Benchmark TS vs LSP(strict) on the same diff:
   - `scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust`
   - fixed diff file: `scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust`
+  - include LSP RPC method counts: `scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts`
   - CI workflow: `Benchmark Impact Engines` (manual + PR on engine/script changes)
 - Seed via Symbol IDs (no diff needed):
   - `dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json`
