@@ -5,11 +5,14 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/bench-impact-engines.sh [--base origin/main] [--diff-file /path/to.diff] [--runs 3] [--direction callers] [--lang rust] [--rpc-counts]
+#                                  [--min-ts-changed N] [--min-ts-impacted N]
+#                                  [--min-lsp-changed N] [--min-lsp-impacted N]
 #
 # Examples:
 #   scripts/bench-impact-engines.sh --base origin/main --runs 5 --direction callers --lang rust
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 3 --lang rust
 #   scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts
+#   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 1 --min-lsp-changed 40 --min-lsp-impacted 18
 
 BASE_REF="origin/main"
 DIFF_INPUT=""
@@ -17,6 +20,10 @@ RUNS=3
 DIRECTION="callers"
 LANG="rust"
 RPC_COUNTS=0
+MIN_TS_CHANGED=""
+MIN_TS_IMPACTED=""
+MIN_LSP_CHANGED=""
+MIN_LSP_IMPACTED=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +51,22 @@ while [[ $# -gt 0 ]]; do
       RPC_COUNTS=1
       shift
       ;;
+    --min-ts-changed)
+      MIN_TS_CHANGED="${2:?missing value for --min-ts-changed}"
+      shift 2
+      ;;
+    --min-ts-impacted)
+      MIN_TS_IMPACTED="${2:?missing value for --min-ts-impacted}"
+      shift 2
+      ;;
+    --min-lsp-changed)
+      MIN_LSP_CHANGED="${2:?missing value for --min-lsp-changed}"
+      shift 2
+      ;;
+    --min-lsp-impacted)
+      MIN_LSP_IMPACTED="${2:?missing value for --min-lsp-impacted}"
+      shift 2
+      ;;
     -h|--help)
       sed -n '1,30p' "$0"
       exit 0
@@ -64,6 +87,13 @@ if ! [[ "$RUNS" =~ ^[0-9]+$ ]] || [[ "$RUNS" -lt 1 ]]; then
   echo "--runs must be >= 1" >&2
   exit 2
 fi
+
+for v in "$MIN_TS_CHANGED" "$MIN_TS_IMPACTED" "$MIN_LSP_CHANGED" "$MIN_LSP_IMPACTED"; do
+  if [[ -n "$v" && ! "$v" =~ ^[0-9]+$ ]]; then
+    echo "expect values must be non-negative integers" >&2
+    exit 2
+  fi
+done
 
 if [[ -n "$DIFF_INPUT" && ! -f "$DIFF_INPUT" ]]; then
   echo "--diff-file not found: $DIFF_INPUT" >&2
@@ -134,15 +164,32 @@ printf "%s" "$lsp_times" | summarize
 echo
 echo
 
-python3 - "$TS_JSON" "$LSP_JSON" <<'PY'
+read -r TS_CHANGED TS_IMPACTED LSP_CHANGED LSP_IMPACTED < <(python3 - "$TS_JSON" "$LSP_JSON" <<'PY'
 import json, sys
 from pathlib import Path
 
 ts=json.loads(Path(sys.argv[1]).read_text())
 lsp=json.loads(Path(sys.argv[2]).read_text())
-print(f"ts changed={len(ts.get('changed_symbols',[]))} impacted={len(ts.get('impacted_symbols',[]))}")
-print(f"lsp(strict) changed={len(lsp.get('changed_symbols',[]))} impacted={len(lsp.get('impacted_symbols',[]))}")
+print(len(ts.get('changed_symbols',[])), len(ts.get('impacted_symbols',[])), len(lsp.get('changed_symbols',[])), len(lsp.get('impacted_symbols',[])))
 PY
+)
+
+echo "ts changed=$TS_CHANGED impacted=$TS_IMPACTED"
+echo "lsp(strict) changed=$LSP_CHANGED impacted=$LSP_IMPACTED"
+
+check_min() {
+  local name="$1" actual="$2" minv="$3"
+  if [[ -n "$minv" && "$actual" -lt "$minv" ]]; then
+    echo "THRESHOLD FAILED: $name actual=$actual min=$minv" >&2
+    return 1
+  fi
+  return 0
+}
+
+check_min "ts.changed" "$TS_CHANGED" "$MIN_TS_CHANGED"
+check_min "ts.impacted" "$TS_IMPACTED" "$MIN_TS_IMPACTED"
+check_min "lsp.changed" "$LSP_CHANGED" "$MIN_LSP_CHANGED"
+check_min "lsp.impacted" "$LSP_IMPACTED" "$MIN_LSP_IMPACTED"
 
 if [[ "$RPC_COUNTS" -eq 1 ]]; then
   echo
