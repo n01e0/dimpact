@@ -58,6 +58,10 @@ impl SymbolIndex {
         self.by_file
             .get(file)?
             .iter()
-            .find(|s| s.range.start_line <= line && line <= s.range.end_line)
+            .filter(|s| s.range.start_line <= line && line <= s.range.end_line)
+            .min_by_key(|s| {
+                let span = s.range.end_line.saturating_sub(s.range.start_line);
+                (span, u32::MAX.saturating_sub(s.range.start_line))
+            })
     }
 }

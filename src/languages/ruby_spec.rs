@@ -131,7 +131,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
         // Fallback: paren-less bare call like `m` (no args, no receiver)
         use regex::Regex;
         let re_bare = Regex::new(r"^\s*([a-zA-Z_][A-Za-z0-9_?!]*)").unwrap();
-        let seen: std::collections::HashSet<(u32, String)> =
+        let mut seen: std::collections::HashSet<(u32, String)> =
             out.iter().map(|r| (r.line, r.name.clone())).collect();
         for (i, line) in source.lines().enumerate() {
             if let Some(cap) = re_bare.captures(line) {
@@ -146,7 +146,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                     // likely assignment, receiver call, namespace, or explicit paren-call handled elsewhere
                 } else {
                     let ln = (i as u32) + 1;
-                    if !seen.contains(&(ln, name.to_string())) {
+                    if seen.insert((ln, name.to_string())) {
                         out.push(UnresolvedRef {
                             name: name.to_string(),
                             kind: RefKind::Call,
@@ -156,6 +156,26 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                             is_method: true,
                         });
                     }
+                }
+            }
+        }
+
+        // Additional fallback: explicit receiver call forms like `self.m` / `obj.m` / `obj&.m`
+        let re_receiver =
+            Regex::new(r"(?:^|[^:&\w])(?:self|[a-zA-Z_][A-Za-z0-9_]*)\s*(?:\.|&\.)\s*([a-zA-Z_][A-Za-z0-9_?!]*)").unwrap();
+        for (i, line) in source.lines().enumerate() {
+            let ln = (i as u32) + 1;
+            for cap in re_receiver.captures_iter(line) {
+                let name = cap.get(1).unwrap().as_str().to_string();
+                if seen.insert((ln, name.clone())) {
+                    out.push(UnresolvedRef {
+                        name,
+                        kind: RefKind::Call,
+                        file: path.to_string(),
+                        line: ln,
+                        qualifier: None,
+                        is_method: true,
+                    });
                 }
             }
         }
@@ -240,6 +260,7 @@ mod tests {
 def foo
   a=nil
   a&.m
+  self.m
   m
   self.send(:m)
 end
@@ -248,7 +269,7 @@ end
         let refs = ana.unresolved_refs("a.rb", src);
         let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
         assert!(names.contains(&"m"));
-        // at least 2 occurrences (a&.m and m)
-        assert!(names.iter().filter(|&&n| n == "m").count() >= 2);
+        // at least 3 occurrences (a&.m, self.m, and bare m)
+        assert!(names.iter().filter(|&&n| n == "m").count() >= 3);
     }
 }

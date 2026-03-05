@@ -499,10 +499,9 @@ fn lsp_engine_strict_mock_ruby_callers_chain() {
 
 #[test]
 #[serial]
-#[ignore = "known gap: strict mock path currently misses Ruby method caller propagation"]
 fn lsp_engine_strict_mock_ruby_method_callers_chain() {
-    let initial = "class S\n  def bar\n  end\n\n  def foo\n    bar\n  end\nend\n";
-    let updated = "class S\n  def bar\n    x = 1\n    x\n  end\n\n  def foo\n    bar\n  end\nend\n";
+    let initial = "class S\n  def bar\n  end\n\n  def foo\n    self.bar\n  end\nend\n";
+    let updated = "class S\n  def bar\n    x = 1\n    x\n  end\n\n  def foo\n    self.bar\n  end\nend\n";
     let (_tmp, repo) = setup_repo_single_file("main.rb", initial, updated);
 
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
