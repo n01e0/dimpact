@@ -993,23 +993,12 @@ impl super::AnalysisEngine for LspEngine {
                         }
                     }
                 } else if _sess.capabilities.references || _sess.capabilities.definition {
-                    if matches!(
-                        opts.direction,
-                        crate::impact::ImpactDirection::Callees
-                            | crate::impact::ImpactDirection::Both
-                    ) {
-                        if self.cfg.lsp_strict {
-                            anyhow::bail!(
-                                "lsp impact callees/both via references not implemented; strict mode"
-                            )
-                        } else {
-                            return self.fallback.impact(diffs, lang, opts);
-                        }
-                    }
                     let changed = lsp_changed_symbols(&mut _sess, diffs, lang)?;
-                    let out =
-                        lsp_impact_references(&mut _sess, changed.changed_symbols.clone(), opts)?;
-                    Ok(out)
+                    lsp_impact_references_definition(
+                        &mut _sess,
+                        changed.changed_symbols.clone(),
+                        opts,
+                    )
                 } else if self.cfg.lsp_strict {
                     anyhow::bail!("lsp: no suitable impact capability; strict mode")
                 } else {
@@ -1087,8 +1076,7 @@ impl super::AnalysisEngine for LspEngine {
                 }
             }
         } else if sess.capabilities.references || sess.capabilities.definition {
-            let out = lsp_impact_references(&mut sess, changed.to_vec(), opts)?;
-            Ok(out)
+            lsp_impact_references_definition(&mut sess, changed.to_vec(), opts)
         } else if self.cfg.lsp_strict {
             anyhow::bail!("lsp: no suitable capabilities for impact_from_symbols")
         } else {
@@ -1914,6 +1902,54 @@ fn enqueue_edge(
     }
 }
 
+fn build_impact_output(
+    changed: Vec<crate::ir::Symbol>,
+    mut impacted_symbols: Vec<crate::ir::Symbol>,
+    mut edges: Vec<crate::ir::reference::Reference>,
+    with_edges: bool,
+) -> crate::impact::ImpactOutput {
+    impacted_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    impacted_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
+
+    let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
+    impacted_files.sort();
+    impacted_files.dedup();
+
+    if !with_edges {
+        edges.clear();
+    } else {
+        edges.sort_by(|a, b| {
+            a.from
+                .0
+                .cmp(&b.from.0)
+                .then_with(|| a.to.0.cmp(&b.to.0))
+                .then_with(|| a.line.cmp(&b.line))
+        });
+        edges.dedup_by(|a, b| a.from.0 == b.from.0 && a.to.0 == b.to.0 && a.line == b.line);
+    }
+
+    let mut impacted_by_file: std::collections::HashMap<String, Vec<crate::ir::Symbol>> =
+        std::collections::HashMap::new();
+    for s in &impacted_symbols {
+        impacted_by_file
+            .entry(s.file.clone())
+            .or_default()
+            .push(s.clone());
+    }
+    for v in impacted_by_file.values_mut() {
+        v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        v.dedup_by(|a, b| a.id.0 == b.id.0);
+    }
+
+    crate::impact::ImpactOutput {
+        changed_symbols: changed,
+        impacted_symbols,
+        impacted_files,
+        edges,
+        impacted_by_file,
+    }
+}
+
 fn lsp_impact_references(
     sess: &mut LspSession,
     changed: Vec<crate::ir::Symbol>,
@@ -2003,40 +2039,61 @@ fn lsp_impact_references(
         }
     }
     let changed_ids: HashSet<String> = changed.iter().map(|s| s.id.0.clone()).collect();
-    let mut impacted_symbols: Vec<crate::ir::Symbol> = node_map
+    let impacted_symbols: Vec<crate::ir::Symbol> = node_map
         .values()
         .filter(|s| !changed_ids.contains(&s.id.0))
         .cloned()
         .collect();
-    impacted_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-    impacted_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
-    let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
-    impacted_files.sort();
-    impacted_files.dedup();
-    let edges = if opts.with_edges.unwrap_or(false) {
-        edges
-    } else {
-        Vec::new()
-    };
-    let mut impacted_by_file: std::collections::HashMap<String, Vec<crate::ir::Symbol>> =
-        std::collections::HashMap::new();
-    for s in &impacted_symbols {
-        impacted_by_file
-            .entry(s.file.clone())
-            .or_default()
-            .push(s.clone());
-    }
-    for v in impacted_by_file.values_mut() {
-        v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-        v.dedup_by(|a, b| a.id.0 == b.id.0);
-    }
-    Ok(crate::impact::ImpactOutput {
-        changed_symbols: changed,
+
+    Ok(build_impact_output(
+        changed,
         impacted_symbols,
-        impacted_files,
         edges,
-        impacted_by_file,
-    })
+        opts.with_edges.unwrap_or(false),
+    ))
+}
+
+fn lsp_impact_references_definition(
+    sess: &mut LspSession,
+    changed: Vec<crate::ir::Symbol>,
+    opts: &crate::impact::ImpactOptions,
+) -> anyhow::Result<crate::impact::ImpactOutput> {
+    if sess._cfg.mock {
+        // Keep strict mock deterministic by reusing the language graph path.
+        let (index, refs) = crate::impact::build_project_graph()?;
+        return Ok(crate::impact::compute_impact(&changed, &index, &refs, opts));
+    }
+
+    let want_callers = matches!(
+        opts.direction,
+        crate::impact::ImpactDirection::Callers | crate::impact::ImpactDirection::Both
+    );
+    let want_callees = matches!(
+        opts.direction,
+        crate::impact::ImpactDirection::Callees | crate::impact::ImpactDirection::Both
+    );
+
+    let mut impacted_symbols: Vec<crate::ir::Symbol> = Vec::new();
+    let mut edges: Vec<crate::ir::reference::Reference> = Vec::new();
+
+    if want_callers {
+        let callers_out = lsp_impact_references(sess, changed.clone(), opts)?;
+        impacted_symbols.extend(callers_out.impacted_symbols);
+        edges.extend(callers_out.edges);
+    }
+
+    if want_callees {
+        let (callees, callee_edges) = scan_callees_for_changed(sess, &changed);
+        impacted_symbols.extend(callees);
+        edges.extend(callee_edges);
+    }
+
+    Ok(build_impact_output(
+        changed,
+        impacted_symbols,
+        edges,
+        opts.with_edges.unwrap_or(false),
+    ))
 }
 
 fn collect_enclosing_candidates(
