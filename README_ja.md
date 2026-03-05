@@ -119,6 +119,8 @@ scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers 
 scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust
 # LSP の RPC メソッド呼び出し回数も出力
 scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts
+# 最小件数ガード（閾値未満なら失敗）
+scripts/bench-impact-engines.sh --base origin/main --runs 1 --min-lsp-changed 40 --min-lsp-impacted 15
 # CI ワークフロー: Benchmark Impact Engines（手動実行 + 対象PRで自動実行）
 
 # Symbol ID でシードし、diff 不要で影響解析
