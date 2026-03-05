@@ -625,6 +625,96 @@ fn lsp_engine_strict_mock_ruby_both_chain() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_mock_ruby_both_chain_with_refs_only_caps() {
+    let (_tmp, repo) = setup_repo_ruby_both_chain_fixture();
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let caps = CapsHint {
+        document_symbol: true,
+        workspace_symbol: true,
+        call_hierarchy: false,
+        references: true,
+        definition: true,
+    };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: Some(caps),
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Ruby)
+        .unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Ruby, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "bar"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "main"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_mock_ruby_callees_chain_with_refs_only_caps() {
+    let (_tmp, repo) = setup_repo_ruby_both_chain_fixture();
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let caps = CapsHint {
+        document_symbol: true,
+        workspace_symbol: true,
+        call_hierarchy: false,
+        references: true,
+        definition: true,
+    };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: Some(caps),
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Ruby)
+        .unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Ruby, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "bar"));
+    assert!(!out.impacted_symbols.iter().any(|s| s.name == "main"));
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_mock_ruby_method_callers_chain() {
     let initial = "class S\n  def bar\n  end\n\n  def foo\n    self.bar\n  end\nend\n";
     let updated =
