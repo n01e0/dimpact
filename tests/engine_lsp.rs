@@ -421,6 +421,45 @@ fn lsp_engine_strict_mock_tsx_callers_chain() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_mock_javascript_callers_chain() {
+    let initial = "function bar() {}\nfunction foo() { bar(); }\n";
+    let updated = "function bar() { const x = 1; return x; }\nfunction foo() { bar(); }\n";
+    let (_tmp, repo) = setup_repo_single_file("main.js", initial, updated);
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Javascript)
+        .unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Javascript, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_callers_chain_is_stable_when_available() {
     if !should_run_strict_lsp_e2e() {
         eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
