@@ -80,6 +80,25 @@ fn impacted_name_set(out: &dimpact::ImpactOutput) -> BTreeSet<String> {
     out.impacted_symbols.iter().map(|s| s.name.clone()).collect()
 }
 
+fn setup_repo_single_file(
+    filename: &str,
+    initial_src: &str,
+    updated_src: &str,
+) -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(path.join(filename), initial_src).unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(path.join(filename), updated_src).unwrap();
+    (dir, path)
+}
+
 #[test]
 #[serial]
 fn lsp_engine_falls_back_changed() {
@@ -321,6 +340,82 @@ fn lsp_engine_non_strict_impact_from_symbols_falls_back_when_lsp_unavailable() {
         .unwrap();
     std::env::set_current_dir(cwd).unwrap();
 
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_mock_typescript_callers_chain() {
+    let initial = "function bar() {}\nfunction foo() { bar(); }\n";
+    let updated = "function bar() { const x = 1; return x; }\nfunction foo() { bar(); }\n";
+    let (_tmp, repo) = setup_repo_single_file("main.ts", initial, updated);
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Typescript)
+        .unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Typescript, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_mock_tsx_callers_chain() {
+    let initial = "function bar() { return 1; }\nfunction foo() { return bar(); }\nexport default function App() { return <div>{foo()}</div>; }\n";
+    let updated = "function bar() { return 2; }\nfunction foo() { return bar(); }\nexport default function App() { return <div>{foo()}</div>; }\n";
+    let (_tmp, repo) = setup_repo_single_file("app.tsx", initial, updated);
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Tsx)
+        .unwrap();
+    let out = engine.impact(&files, dimpact::LanguageMode::Tsx, &opts).unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
 }
 
