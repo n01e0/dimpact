@@ -421,6 +421,46 @@ fn lsp_engine_strict_mock_tsx_callers_chain() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_mock_typescript_callees_chain() {
+    let initial = "function bar() { return 1; }\nfunction baz() { return 2; }\nfunction foo() { return bar() + baz(); }\n";
+    let updated = "function bar() { return 1; }\nfunction baz() { return 2; }\nfunction foo() { const x = 1; return bar() + baz() + x; }\n";
+    let (_tmp, repo) = setup_repo_single_file("main.ts", initial, updated);
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Typescript)
+        .unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Typescript, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "bar"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "baz"));
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_mock_javascript_callers_chain() {
     let initial = "function bar() {}\nfunction foo() { bar(); }\n";
     let updated = "function bar() { const x = 1; return x; }\nfunction foo() { bar(); }\n";
@@ -456,6 +496,46 @@ fn lsp_engine_strict_mock_javascript_callers_chain() {
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_mock_javascript_both_chain() {
+    let initial = "function bar() { return 1; }\nfunction foo() { return bar(); }\nfunction main() { return foo(); }\n";
+    let updated = "function bar() { return 1; }\nfunction foo() { const x = 1; return bar() + x; }\nfunction main() { return foo(); }\n";
+    let (_tmp, repo) = setup_repo_single_file("main.js", initial, updated);
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Javascript)
+        .unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Javascript, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "bar"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "main"));
 }
 
 #[test]
