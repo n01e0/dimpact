@@ -48,10 +48,7 @@ fn has_rust_analyzer() -> bool {
 }
 
 fn should_run_strict_lsp_e2e() -> bool {
-    std::env::var("DIMPACT_E2E_STRICT_LSP")
-        .ok()
-        .as_deref()
-        == Some("1")
+    std::env::var("DIMPACT_E2E_STRICT_LSP").ok().as_deref() == Some("1")
 }
 
 fn setup_repo_rust_project(initial_src: &str, updated_src: &str) -> (TempDir, std::path::PathBuf) {
@@ -77,7 +74,10 @@ fn setup_repo_rust_project(initial_src: &str, updated_src: &str) -> (TempDir, st
 }
 
 fn impacted_name_set(out: &dimpact::ImpactOutput) -> BTreeSet<String> {
-    out.impacted_symbols.iter().map(|s| s.name.clone()).collect()
+    out.impacted_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect()
 }
 
 fn setup_repo_single_file(
@@ -97,6 +97,12 @@ fn setup_repo_single_file(
 
     fs::write(path.join(filename), updated_src).unwrap();
     (dir, path)
+}
+
+fn setup_repo_ruby_both_chain_fixture() -> (TempDir, std::path::PathBuf) {
+    let initial = "def bar\nend\n\ndef foo\n  bar\nend\n\ndef main\n  foo\nend\n";
+    let updated = "def bar\nend\n\ndef foo\n  x = 1\n  bar\n  x\nend\n\ndef main\n  foo\nend\n";
+    setup_repo_single_file("main.rb", initial, updated)
 }
 
 #[test]
@@ -412,7 +418,9 @@ fn lsp_engine_strict_mock_tsx_callers_chain() {
     let changed = engine
         .changed_symbols(&files, dimpact::LanguageMode::Tsx)
         .unwrap();
-    let out = engine.impact(&files, dimpact::LanguageMode::Tsx, &opts).unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Tsx, &opts)
+        .unwrap();
     std::env::set_current_dir(cwd).unwrap();
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
@@ -579,9 +587,48 @@ fn lsp_engine_strict_mock_ruby_callers_chain() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_mock_ruby_both_chain() {
+    let (_tmp, repo) = setup_repo_ruby_both_chain_fixture();
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = engine
+        .changed_symbols(&files, dimpact::LanguageMode::Ruby)
+        .unwrap();
+    let out = engine
+        .impact(&files, dimpact::LanguageMode::Ruby, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "bar"));
+    assert!(out.impacted_symbols.iter().any(|s| s.name == "main"));
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_mock_ruby_method_callers_chain() {
     let initial = "class S\n  def bar\n  end\n\n  def foo\n    self.bar\n  end\nend\n";
-    let updated = "class S\n  def bar\n    x = 1\n    x\n  end\n\n  def foo\n    self.bar\n  end\nend\n";
+    let updated =
+        "class S\n  def bar\n    x = 1\n    x\n  end\n\n  def foo\n    self.bar\n  end\nend\n";
     let (_tmp, repo) = setup_repo_single_file("main.rb", initial, updated);
 
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
