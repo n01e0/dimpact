@@ -4,17 +4,19 @@ set -euo pipefail
 # Benchmark Tree-Sitter vs LSP(strict) on the same diff input.
 #
 # Usage:
-#   scripts/bench-impact-engines.sh [--base origin/main] [--diff-file /path/to.diff] [--runs 3] [--direction callers] [--lang rust]
+#   scripts/bench-impact-engines.sh [--base origin/main] [--diff-file /path/to.diff] [--runs 3] [--direction callers] [--lang rust] [--rpc-counts]
 #
 # Examples:
 #   scripts/bench-impact-engines.sh --base origin/main --runs 5 --direction callers --lang rust
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 3 --lang rust
+#   scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts
 
 BASE_REF="origin/main"
 DIFF_INPUT=""
 RUNS=3
 DIRECTION="callers"
 LANG="rust"
+RPC_COUNTS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,6 +39,10 @@ while [[ $# -gt 0 ]]; do
     --lang)
       LANG="${2:?missing value for --lang}"
       shift 2
+      ;;
+    --rpc-counts)
+      RPC_COUNTS=1
+      shift
       ;;
     -h|--help)
       sed -n '1,30p' "$0"
@@ -73,7 +79,8 @@ fi
 DIFF_FILE="$(mktemp)"
 TS_JSON="$(mktemp)"
 LSP_JSON="$(mktemp)"
-trap 'rm -f "$DIFF_FILE" "$TS_JSON" "$LSP_JSON"' EXIT
+LSP_DEBUG_LOG="$(mktemp)"
+trap 'rm -f "$DIFF_FILE" "$TS_JSON" "$LSP_JSON" "$LSP_DEBUG_LOG"' EXIT
 
 if [[ -n "$DIFF_INPUT" ]]; then
   cp "$DIFF_INPUT" "$DIFF_FILE"
@@ -102,9 +109,9 @@ summarize() {
 }
 
 if [[ -n "$DIFF_INPUT" ]]; then
-  echo "diff_file=$DIFF_INPUT runs=$RUNS direction=$DIRECTION lang=$LANG"
+  echo "diff_file=$DIFF_INPUT runs=$RUNS direction=$DIRECTION lang=$LANG rpc_counts=$RPC_COUNTS"
 else
-  echo "base=$BASE_REF runs=$RUNS direction=$DIRECTION lang=$LANG"
+  echo "base=$BASE_REF runs=$RUNS direction=$DIRECTION lang=$LANG rpc_counts=$RPC_COUNTS"
 fi
 
 ts_times="$(measure_engine ts)"
@@ -136,3 +143,14 @@ lsp=json.loads(Path(sys.argv[2]).read_text())
 print(f"ts changed={len(ts.get('changed_symbols',[]))} impacted={len(ts.get('impacted_symbols',[]))}")
 print(f"lsp(strict) changed={len(lsp.get('changed_symbols',[]))} impacted={len(lsp.get('impacted_symbols',[]))}")
 PY
+
+if [[ "$RPC_COUNTS" -eq 1 ]]; then
+  echo
+  echo "[lsp-rpc-counts]"
+  RUST_LOG=debug "$BIN" impact --engine lsp --engine-lsp-strict --direction "$DIRECTION" --lang "$LANG" -f json < "$DIFF_FILE" >/dev/null 2>"$LSP_DEBUG_LOG" || true
+  if command -v rg >/dev/null 2>&1; then
+    rg -o "method=[^ ]+" "$LSP_DEBUG_LOG" | sort | uniq -c | sort -nr | sed 's/^ *//'
+  else
+    grep -o "method=[^ ]*" "$LSP_DEBUG_LOG" | sort | uniq -c | sort -nr | sed 's/^ *//'
+  fi
+fi
