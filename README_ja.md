@@ -100,6 +100,21 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 - strict LSP の E2E テストは、言語サーバー未導入環境での CI ぶれ回避のため opt-in です。
 - Rust strict E2E（`rust-analyzer` が必要）:
   - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+- Go strict E2E（`gopls` が必要）:
+  - `DIMPACT_E2E_STRICT_LSP_GO=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` でも Go strict E2E が有効になります。
+- Java strict E2E（`jdtls` が必要）:
+  - `DIMPACT_E2E_STRICT_LSP_JAVA=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` でも Java strict E2E が有効になります。
+- TypeScript strict E2E（`typescript-language-server` が必要）:
+  - `DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` でも TypeScript strict E2E が有効になります。
+- JavaScript strict E2E（`typescript-language-server` が必要）:
+  - `DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` でも JavaScript strict E2E が有効になります。
+- Ruby strict E2E（`ruby-lsp` が必要）:
+  - `DIMPACT_E2E_STRICT_LSP_RUBY=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` でも Ruby strict E2E が有効になります。
 - Python strict E2E（`pyright-langserver` / `basedpyright-langserver` / `pylsp` のいずれかが必要）:
   - `DIMPACT_E2E_STRICT_LSP_PYTHON=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` でも Python strict E2E が有効になります。
