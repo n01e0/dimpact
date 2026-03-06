@@ -58,6 +58,22 @@ pub fn analyzer_for_path(path: &str, lang: LanguageKind) -> Option<Box<dyn Langu
         "js" => Some(Box::new(js_spec::SpecJsAnalyzer::new())),
         "ts" => Some(Box::new(ts_spec::SpecTsAnalyzer::new_ts())),
         "tsx" => Some(Box::new(ts_spec::SpecTsAnalyzer::new_tsx())),
+        // Go/Java extension dispatch is recognized in Loop 31.
+        // Concrete analyzers are added in Loop 32.
+        "go" | "java" => None,
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LanguageKind, analyzer_for_path};
+
+    #[test]
+    fn analyzer_for_path_recognizes_go_java_extensions() {
+        assert!(analyzer_for_path("main.go", LanguageKind::Auto).is_none());
+        assert!(analyzer_for_path("Main.java", LanguageKind::Auto).is_none());
+        assert!(analyzer_for_path("main.any", LanguageKind::Go).is_none());
+        assert!(analyzer_for_path("main.any", LanguageKind::Java).is_none());
     }
 }
