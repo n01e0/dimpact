@@ -105,6 +105,12 @@ fn setup_repo_ruby_both_chain_fixture() -> (TempDir, std::path::PathBuf) {
     setup_repo_single_file("main.rb", initial, updated)
 }
 
+fn setup_repo_python_both_chain_fixture() -> (TempDir, std::path::PathBuf) {
+    let initial = "def bar():\n    return 1\n\ndef foo():\n    return bar()\n\ndef main():\n    return foo()\n";
+    let updated = "def bar():\n    return 1\n\ndef foo():\n    x = 1\n    return bar() + x\n\ndef main():\n    return foo()\n";
+    setup_repo_single_file("main.py", initial, updated)
+}
+
 #[test]
 #[serial]
 fn lsp_engine_falls_back_changed() {
@@ -751,6 +757,59 @@ fn lsp_engine_strict_mock_ruby_method_callers_chain() {
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+}
+
+#[test]
+#[serial]
+fn python_fixture_for_changed_flow_is_prepared() {
+    let (_tmp, repo) = setup_repo_python_both_chain_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    let f = &files[0];
+    assert_eq!(f.new_path.as_deref(), Some("main.py"));
+    assert!(
+        f.changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+}
+
+#[test]
+#[serial]
+fn python_fixture_for_impact_flow_has_call_chain() {
+    let (_tmp, repo) = setup_repo_python_both_chain_fixture();
+    let src = fs::read_to_string(repo.join("main.py")).expect("read fixture source");
+
+    let spec = dimpact::ts_core::load_python_spec();
+    let compiled = dimpact::ts_core::compile_queries_python(&spec).expect("compile py queries");
+    let runner = dimpact::ts_core::QueryRunner::new_python();
+
+    let decls = runner.run_captures(&src, &compiled.decl);
+    let calls = runner.run_captures(&src, &compiled.calls);
+
+    let mut decl_names = BTreeSet::new();
+    for caps in &decls {
+        if let Some(name_cap) = caps.iter().find(|c| c.name == "name") {
+            decl_names.insert(src[name_cap.start..name_cap.end].to_string());
+        }
+    }
+
+    let mut call_names = BTreeSet::new();
+    for caps in &calls {
+        if let Some(name_cap) = caps.iter().find(|c| c.name == "name") {
+            call_names.insert(src[name_cap.start..name_cap.end].to_string());
+        }
+    }
+
+    assert!(decl_names.contains("bar"));
+    assert!(decl_names.contains("foo"));
+    assert!(decl_names.contains("main"));
+    assert!(call_names.contains("bar"));
+    assert!(call_names.contains("foo"));
 }
 
 #[test]
