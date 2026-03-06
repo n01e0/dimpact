@@ -649,11 +649,27 @@ fn lsp_engine_strict_mock_python_callers_fixture_runs() {
         .unwrap();
     std::env::set_current_dir(cwd).unwrap();
 
-    assert_eq!(
-        impacted_name_set(&out1),
-        impacted_name_set(&out2),
-        "strict mock callers fixture should be stable"
-    );
+    let changed1: BTreeSet<String> = out1
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let changed2: BTreeSet<String> = out2
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let impacted1 = impacted_name_set(&out1);
+    let impacted2 = impacted_name_set(&out2);
+
+    assert_eq!(changed1, changed2, "changed_symbols should be stable");
+    assert_eq!(impacted1, impacted2, "impacted_symbols should be stable");
+
+    let expected_changed = BTreeSet::from(["bar".to_string()]);
+    let expected_impacted: BTreeSet<String> = BTreeSet::new();
+
+    assert_eq!(changed1, expected_changed);
+    assert_eq!(impacted1, expected_impacted);
 }
 
 #[test]
