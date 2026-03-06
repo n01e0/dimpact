@@ -79,8 +79,15 @@ Logging
 - Uses `env_logger`. Set `RUST_LOG=info` (or `debug|trace`) to see diagnostics.
 
 LSP strict E2E tests
-- Strict LSP E2E tests are opt-in (to avoid flaky CI environments without rust-analyzer).
-- Run with: `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+- Strict LSP E2E tests are opt-in (to avoid flaky CI environments without language servers).
+- Rust strict E2E (requires `rust-analyzer`):
+  - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+- Python strict E2E (requires one of `pyright-langserver`, `basedpyright-langserver`, `pylsp`):
+  - `DIMPACT_E2E_STRICT_LSP_PYTHON=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` also enables Python strict E2E tests.
+- Python LSP server selection:
+  - auto-detect order: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
+  - override with: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
 
 Usage Examples
 - Callers from a diff (JSON with edges):
