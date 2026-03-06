@@ -38,6 +38,8 @@ enum LangOpt {
     Auto,
     Rust,
     Ruby,
+    #[value(alias = "py")]
+    Python,
     Javascript,
     Typescript,
     Tsx,
@@ -628,6 +630,7 @@ fn run_changed(
         LangOpt::Auto => LanguageMode::Auto,
         LangOpt::Rust => LanguageMode::Rust,
         LangOpt::Ruby => LanguageMode::Ruby,
+        LangOpt::Python => LanguageMode::Python,
         LangOpt::Javascript => LanguageMode::Javascript,
         LangOpt::Typescript => LanguageMode::Typescript,
         LangOpt::Tsx => LanguageMode::Tsx,
@@ -739,6 +742,7 @@ fn run_impact(
             LangOpt::Auto => LanguageMode::Auto,
             LangOpt::Rust => LanguageMode::Rust,
             LangOpt::Ruby => LanguageMode::Ruby,
+            LangOpt::Python => LanguageMode::Python,
             LangOpt::Javascript => LanguageMode::Javascript,
             LangOpt::Typescript => LanguageMode::Typescript,
             LangOpt::Tsx => LanguageMode::Tsx,
@@ -1054,9 +1058,7 @@ fn lang_mode_from_str(s: &str) -> Option<LanguageMode> {
         "tsx" => Some(LanguageMode::Tsx),
         "go" | "golang" => Some(LanguageMode::Go),
         "java" => Some(LanguageMode::Java),
-        // Python seeds are currently routed through Auto mode until a dedicated
-        // LanguageMode::Python is introduced.
-        "python" | "py" => Some(LanguageMode::Auto),
+        "python" | "py" => Some(LanguageMode::Python),
         "auto" => Some(LanguageMode::Auto),
         _ => None,
     }
@@ -1083,6 +1085,7 @@ fn run_id(
             LangOpt::Auto => dimpact::LanguageKind::Auto,
             LangOpt::Rust => dimpact::LanguageKind::Rust,
             LangOpt::Ruby => dimpact::LanguageKind::Ruby,
+            LangOpt::Python => dimpact::LanguageKind::Auto,
             LangOpt::Javascript => dimpact::LanguageKind::Javascript,
             LangOpt::Typescript => dimpact::LanguageKind::Typescript,
             LangOpt::Tsx => dimpact::LanguageKind::Tsx,
@@ -1189,6 +1192,7 @@ fn collect_candidate_files(path: Option<&str>, lang_opt: LangOpt) -> anyhow::Res
         LangOpt::Auto => vec!["rs", "rb", "js", "ts", "tsx", "py", "go", "java"],
         LangOpt::Rust => vec!["rs"],
         LangOpt::Ruby => vec!["rb"],
+        LangOpt::Python => vec!["py"],
         LangOpt::Javascript => vec!["js"],
         LangOpt::Typescript => vec!["ts"],
         LangOpt::Tsx => vec!["tsx"],
@@ -1266,6 +1270,7 @@ fn impact_from_diff(args: Args, files: Vec<dimpact::FileChanges>) -> anyhow::Res
         LangOpt::Auto => LanguageMode::Auto,
         LangOpt::Rust => LanguageMode::Rust,
         LangOpt::Ruby => LanguageMode::Ruby,
+        LangOpt::Python => LanguageMode::Python,
         LangOpt::Javascript => LanguageMode::Javascript,
         LangOpt::Typescript => LanguageMode::Typescript,
         LangOpt::Tsx => LanguageMode::Tsx,
@@ -1328,8 +1333,8 @@ mod tests {
 
     #[test]
     fn lang_mode_from_str_accepts_python_aliases() {
-        assert_eq!(lang_mode_from_str("python"), Some(LanguageMode::Auto));
-        assert_eq!(lang_mode_from_str("Py"), Some(LanguageMode::Auto));
+        assert_eq!(lang_mode_from_str("python"), Some(LanguageMode::Python));
+        assert_eq!(lang_mode_from_str("Py"), Some(LanguageMode::Python));
     }
 
     #[test]
@@ -1340,7 +1345,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_lang_value_enum_accepts_go_java() {
+    fn cli_lang_value_enum_accepts_go_java_python_and_keeps_rust() {
         let a = Args::try_parse_from(["dimpact", "changed", "--lang", "go"])
             .expect("go should be accepted by --lang");
         match a.cmd {
@@ -1353,6 +1358,27 @@ mod tests {
         match b.cmd {
             Some(Command::Impact { lang, .. }) => assert!(matches!(lang, LangOpt::Java)),
             _ => panic!("expected impact subcommand"),
+        }
+
+        let c = Args::try_parse_from(["dimpact", "changed", "--lang", "python"])
+            .expect("python should be accepted by --lang");
+        match c.cmd {
+            Some(Command::Changed { lang, .. }) => assert!(matches!(lang, LangOpt::Python)),
+            _ => panic!("expected changed subcommand"),
+        }
+
+        let d = Args::try_parse_from(["dimpact", "changed", "--lang", "py"])
+            .expect("py alias should be accepted by --lang");
+        match d.cmd {
+            Some(Command::Changed { lang, .. }) => assert!(matches!(lang, LangOpt::Python)),
+            _ => panic!("expected changed subcommand"),
+        }
+
+        let e = Args::try_parse_from(["dimpact", "changed", "--lang", "rust"])
+            .expect("rust should keep working by --lang");
+        match e.cmd {
+            Some(Command::Changed { lang, .. }) => assert!(matches!(lang, LangOpt::Rust)),
+            _ => panic!("expected changed subcommand"),
         }
     }
 }

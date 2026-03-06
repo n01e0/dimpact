@@ -42,6 +42,7 @@ fn profile_for_mode(lang: LanguageMode) -> Option<LangProfile> {
             symbol_lang: "ruby",
             lsp_language_id: "ruby",
         }),
+        LanguageMode::Python => Some(PYTHON_PROFILE),
         LanguageMode::Javascript => Some(LangProfile {
             symbol_lang: "javascript",
             lsp_language_id: "javascript",
@@ -99,6 +100,7 @@ fn path_matches_mode(path: &str, lang: LanguageMode) -> bool {
         LanguageMode::Auto => profile_for_path(path).is_some(),
         LanguageMode::Rust => path.ends_with(".rs"),
         LanguageMode::Ruby => path.ends_with(".rb"),
+        LanguageMode::Python => path.ends_with(".py"),
         LanguageMode::Javascript => {
             path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs")
         }
@@ -250,6 +252,7 @@ fn server_command_for_mode(lang: LanguageMode) -> Option<(&'static str, Vec<&'st
     match lang {
         LanguageMode::Rust => Some(("rust-analyzer", vec![])),
         LanguageMode::Ruby => Some(("ruby-lsp", vec![])),
+        LanguageMode::Python => detect_python_lsp_server(),
         LanguageMode::Javascript | LanguageMode::Typescript | LanguageMode::Tsx => {
             Some(("typescript-language-server", vec!["--stdio"]))
         }
@@ -2893,7 +2896,11 @@ mod tests {
     }
 
     #[test]
-    fn server_command_for_mode_includes_go_java() {
+    fn server_command_for_mode_includes_python_go_java() {
+        assert_eq!(
+            server_command_for_mode(LanguageMode::Python),
+            detect_python_lsp_server()
+        );
         assert_eq!(
             server_command_for_mode(LanguageMode::Go),
             Some(("gopls", vec![]))
@@ -2975,7 +2982,14 @@ mod tests {
     }
 
     #[test]
-    fn profile_for_mode_includes_go_java() {
+    fn profile_for_mode_includes_python_go_java() {
+        assert_eq!(
+            profile_for_mode(LanguageMode::Python),
+            Some(LangProfile {
+                symbol_lang: "python",
+                lsp_language_id: "python"
+            })
+        );
         assert_eq!(
             profile_for_mode(LanguageMode::Go),
             Some(LangProfile {
@@ -3065,6 +3079,7 @@ mod tests {
         assert!(path_matches_mode("src/tool.py", LanguageMode::Auto));
         assert!(path_matches_mode("cmd/main.go", LanguageMode::Auto));
         assert!(path_matches_mode("src/Main.java", LanguageMode::Auto));
+        assert!(path_matches_mode("src/tool.py", LanguageMode::Python));
         assert!(path_matches_mode("cmd/main.go", LanguageMode::Go));
         assert!(path_matches_mode("src/Main.java", LanguageMode::Java));
         assert!(!path_matches_mode("src/tool.py", LanguageMode::Rust));
@@ -3077,6 +3092,13 @@ mod tests {
     fn profile_for_path_or_mode_python_detection_and_override() {
         assert_eq!(
             profile_for_path_or_mode("pkg/module.py", LanguageMode::Auto),
+            Some(LangProfile {
+                symbol_lang: "python",
+                lsp_language_id: "python"
+            })
+        );
+        assert_eq!(
+            profile_for_path_or_mode("pkg/module.py", LanguageMode::Python),
             Some(LangProfile {
                 symbol_lang: "python",
                 lsp_language_id: "python"
@@ -3108,6 +3130,10 @@ mod tests {
         assert_eq!(
             did_open_language_id_for_path("pkg/module.py", LanguageMode::Rust),
             Some("rust")
+        );
+        assert_eq!(
+            did_open_language_id_for_path("any.ext", LanguageMode::Python),
+            Some("python")
         );
         assert_eq!(
             did_open_language_id_for_path("any.ext", LanguageMode::Go),

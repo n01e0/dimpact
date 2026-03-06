@@ -10,6 +10,7 @@ pub enum LanguageMode {
     Auto,
     Rust,
     Ruby,
+    Python,
     Javascript,
     Typescript,
     Tsx,
@@ -65,6 +66,7 @@ pub fn compute_changed_symbols(
             LanguageMode::Auto => LanguageKind::Auto,
             LanguageMode::Rust => LanguageKind::Rust,
             LanguageMode::Ruby => LanguageKind::Ruby,
+            LanguageMode::Python => LanguageKind::Auto,
             LanguageMode::Javascript => LanguageKind::Javascript,
             LanguageMode::Typescript => LanguageKind::Typescript,
             LanguageMode::Tsx => LanguageKind::Tsx,
@@ -235,6 +237,41 @@ diff --git a/b.rs b/b.rs
                 .changed_symbols
                 .iter()
                 .any(|s| s.file.ends_with("Main.java"))
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn changed_symbols_python_mode_matches_auto_for_py_diff() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("main.py"), "def foo():\n    return 1\n").unwrap();
+
+        let py_diff = r#"diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -1,2 +1,3 @@
+ def foo():
++    x = 1
+     return 1
+"#;
+        let parsed_py = parse_unified_diff(py_diff).unwrap();
+
+        let cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let out_auto = compute_changed_symbols(&parsed_py, LanguageMode::Auto).unwrap();
+        let out_python = compute_changed_symbols(&parsed_py, LanguageMode::Python).unwrap();
+        std::env::set_current_dir(cwd).unwrap();
+
+        assert!(
+            out_python
+                .changed_files
+                .iter()
+                .any(|p| p.ends_with("main.py"))
+        );
+        assert_eq!(out_python.changed_files, out_auto.changed_files);
+        assert_eq!(
+            out_python.changed_symbols, out_auto.changed_symbols,
+            "explicit python mode should preserve existing behavior"
         );
     }
 }
