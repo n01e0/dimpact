@@ -198,6 +198,19 @@ fn detect_python_lsp_server() -> Option<(&'static str, Vec<&'static str>)> {
     None
 }
 
+fn server_command_for_mode(lang: LanguageMode) -> Option<(&'static str, Vec<&'static str>)> {
+    match lang {
+        LanguageMode::Rust => Some(("rust-analyzer", vec![])),
+        LanguageMode::Ruby => Some(("ruby-lsp", vec![])),
+        LanguageMode::Javascript | LanguageMode::Typescript | LanguageMode::Tsx => {
+            Some(("typescript-language-server", vec!["--stdio"]))
+        }
+        LanguageMode::Go => Some(("gopls", vec![])),
+        LanguageMode::Java => Some(("jdtls", vec![])),
+        LanguageMode::Auto => detect_python_lsp_server(),
+    }
+}
+
 /// Stub LSP session. Will later speak JSON-RPC over stdio.
 pub struct LspSession {
     _cfg: LspConfig,
@@ -261,15 +274,7 @@ impl LspSession {
             });
         }
         // Try to spawn a server for the given language
-        let cmd = match lang {
-            LanguageMode::Rust => Some(("rust-analyzer", vec![] as Vec<&str>)),
-            LanguageMode::Ruby => Some(("ruby-lsp", vec![] as Vec<&str>)),
-            LanguageMode::Javascript | LanguageMode::Typescript | LanguageMode::Tsx => {
-                Some(("typescript-language-server", vec!["--stdio"]))
-            }
-            LanguageMode::Go | LanguageMode::Java => None,
-            LanguageMode::Auto => detect_python_lsp_server(),
-        };
+        let cmd = server_command_for_mode(lang);
         let Some((exe, args)) = cmd else {
             anyhow::bail!("lsp server not determined for language")
         };
@@ -2836,6 +2841,18 @@ mod tests {
         assert!(!sess.capabilities.definition);
         assert!(sess.capabilities.document_symbol);
         assert!(!sess.capabilities.workspace_symbol);
+    }
+
+    #[test]
+    fn server_command_for_mode_includes_go_java() {
+        assert_eq!(
+            server_command_for_mode(LanguageMode::Go),
+            Some(("gopls", vec![]))
+        );
+        assert_eq!(
+            server_command_for_mode(LanguageMode::Java),
+            Some(("jdtls", vec![]))
+        );
     }
 
     #[test]
