@@ -69,7 +69,8 @@ dimpact id --name foo -f json
 - `--ignore-dir DIR`            : 相対パスプレフィックスでディレクトリを無視（繰り返し可）
 - `--with-pdg`                  : PDG ベースの依存解析を使用 (Rust/Ruby の DFG)
 - `--with-propagation`          : 変数・関数をまたいだシンボリック伝播を有効化 (PDG を含む)
-- `--engine auto|ts|lsp`        : 分析エンジン (既定: auto → TS)
+- `--engine auto|ts|lsp`        : 分析エンジン (既定: auto)
+- `--auto-policy compat|strict-if-available` : `--engine auto` 用ポリシー (既定: compat)
 - `--engine-lsp-strict`         : strict モードで LSP を実行（フォールバックなし）
 - `--engine-dump-capabilities`  : エンジンの機能一覧を stderr に出力
 - `--seed-symbol LANG:PATH:KIND:NAME:LINE` : ID ベースのシード (繰り返し可)
@@ -88,10 +89,22 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 - HTML ビューにはフィルタや自動レイアウト機能があり、ハイライトされた経路エッジは赤色で表示されます。
 
 ## エンジン選択
-- Auto: デフォルトで Tree‑Sitter エンジン (推奨)
+- Auto (`--engine auto`) はポリシーで挙動を切り替え可能
+  - `compat` (既定): 互換挙動を維持（auto は TS 経路を選択）
+  - `strict-if-available`: LSP 経路を優先し、capability/session が不足する場合は理由付きログを出して TS にフォールバック
 - LSP (GA): `--engine lsp`
   - `--engine-lsp-strict`: LSP 課題時に TS にフォールバックしない
   - `--engine-dump-capabilities`: LSP 機能一覧を stderr に出力
+
+## Auto policy の運用
+- 優先順位: CLI (`--auto-policy`) > 環境変数 (`DIMPACT_AUTO_POLICY`) > 既定値 (`compat`)
+- 典型コマンド:
+  - 互換デフォルトを明示する場合:
+    - `git diff --no-ext-diff | dimpact impact --engine auto --auto-policy compat -f json`
+  - strict-if-available を使う場合:
+    - `git diff --no-ext-diff | dimpact impact --engine auto --auto-policy strict-if-available -f json`
+  - 環境変数で既定を切り替える場合:
+    - `export DIMPACT_AUTO_POLICY=strict-if-available`
 
 ## ロギング
 `env_logger` を使用。`RUST_LOG=info`（または `debug`/`trace`）で診断ログを有効化。
@@ -160,14 +173,15 @@ git diff --no-ext-diff | dimpact impact --engine ts -f json
 git diff --no-ext-diff | dimpact impact --engine lsp --engine-lsp-strict --engine-dump-capabilities -f json
 # Tip: `RUST_LOG=info` で詳細なログを確認
 
-# 同一 diff で TS と LSP(strict) の速度/件数を比較
-scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust
+# policy 差分ベンチ（TS固定 vs auto strict-if-available）
+scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust --compare-auto-strict-if-available
 # 固定 diff ファイルを使って比較
-scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust
-# LSP の RPC メソッド呼び出し回数も出力
-scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts
-# 最小件数ガード（閾値未満なら失敗）
-scripts/bench-impact-engines.sh --base origin/main --runs 1 --min-lsp-changed 40 --min-lsp-impacted 15
+scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust --compare-auto-strict-if-available
+# 第2経路の RPC メソッド呼び出し回数も出力
+scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts --compare-auto-strict-if-available
+# 最小件数ガード（第2経路が閾値未満なら失敗）
+scripts/bench-impact-engines.sh --base origin/main --runs 1 --min-lsp-changed 40 --min-lsp-impacted 15 --compare-auto-strict-if-available
+# NOTE: `--compare-auto-strict-if-available` を外すと従来どおり TS vs LSP(strict) 比較
 # Go strict-LSP ベンチ（`gopls` が必要）
 scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go --min-lsp-changed 6 --min-lsp-impacted 15
 # Java strict-LSP ベンチ（`jdtls` が必要）

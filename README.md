@@ -54,6 +54,7 @@ CLI Overview
   - `--with-pdg`                : use PDG-based dependence analysis (Rust/Ruby for DFG)
   - `--with-propagation`        : enable symbolic propagation across variables and functions (implies PDG)
   - `--engine auto|ts|lsp`      : analysis engine (default: auto)
+  - `--auto-policy compat|strict-if-available` : policy for `--engine auto` (default: compat)
   - `--engine-lsp-strict`       : strict mode for LSP engine
   - `--engine-dump-capabilities`: dump engine capabilities to stderr
   - `--seed-symbol LANG:PATH:KIND:NAME:LINE` : seed symbols by ID (repeatable)
@@ -72,10 +73,22 @@ Path highlighting in DOT/HTML
 - HTML view provides filters and automatic layout; highlighted path edges are shown in red.
 
 Engine Selection
-- Auto: Tree‑Sitter by default (recommended)
+- Auto (`--engine auto`) supports policy-based operation:
+  - `compat` (default): preserves existing behavior (auto resolves to TS path)
+  - `strict-if-available`: prefers LSP path; if capability/session is insufficient, falls back to TS with reasoned logs
 - LSP (GA): `--engine lsp`
   - `--engine-lsp-strict`: don’t fall back to TS on LSP issues
   - `--engine-dump-capabilities`: emit LSP capabilities JSON to stderr
+
+Auto policy operation
+- Priority: CLI (`--auto-policy`) > env (`DIMPACT_AUTO_POLICY`) > default (`compat`)
+- Typical commands:
+  - keep compatibility default explicitly:
+    - `git diff --no-ext-diff | dimpact impact --engine auto --auto-policy compat -f json`
+  - prefer strict-if-available path:
+    - `git diff --no-ext-diff | dimpact impact --engine auto --auto-policy strict-if-available -f json`
+  - set once via environment variable:
+    - `export DIMPACT_AUTO_POLICY=strict-if-available`
 
 Logging
 - Uses `env_logger`. Set `RUST_LOG=info` (or `debug|trace`) to see diagnostics.
@@ -139,11 +152,12 @@ Usage Examples
 - Try LSP engine (GA) with strict mode and capability dump:
   - `git diff --no-ext-diff | dimpact impact --engine lsp --engine-lsp-strict --engine-dump-capabilities -f json`
   - Tip: `RUST_LOG=info` to see more diagnostics
-- Benchmark TS vs LSP(strict) on the same diff:
-  - `scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust`
-  - fixed diff file: `scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust`
-  - include LSP RPC method counts: `scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts`
-  - optional minimum guards (fail on low counts): `scripts/bench-impact-engines.sh --base origin/main --runs 1 --min-lsp-changed 40 --min-lsp-impacted 15`
+- Benchmark policy difference on the same diff (TS fixed vs auto strict-if-available):
+  - `scripts/bench-impact-engines.sh --base origin/main --runs 3 --direction callers --lang rust --compare-auto-strict-if-available`
+  - fixed diff file: `scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust --compare-auto-strict-if-available`
+  - include second-path RPC method counts: `scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts --compare-auto-strict-if-available`
+  - note: without `--compare-auto-strict-if-available`, the script keeps the original TS vs LSP(strict) comparison mode
+  - optional minimum guards for the second path (fail on low counts): `scripts/bench-impact-engines.sh --base origin/main --runs 1 --min-lsp-changed 40 --min-lsp-impacted 15 --compare-auto-strict-if-available`
   - Go strict-LSP bench (requires `gopls`): `scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go --min-lsp-changed 6 --min-lsp-impacted 15`
   - Java strict-LSP bench (requires `jdtls`): `scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java --min-lsp-changed 7 --min-lsp-impacted 15`
   - CI workflow: `Benchmark Impact Engines` (includes rust + Go + Java strict-LSP jobs)
