@@ -103,6 +103,41 @@ fn did_open_language_id_for_path(path: &str, lang: LanguageMode) -> Option<&'sta
     profile_for_path_or_mode(path, lang).map(|p| p.lsp_language_id)
 }
 
+fn command_exists(exe: &str, probe_args: &[&str]) -> bool {
+    std::process::Command::new(exe)
+        .args(probe_args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
+}
+
+fn detect_python_lsp_server() -> Option<(&'static str, Vec<&'static str>)> {
+    if let Ok(preferred) = std::env::var("DIMPACT_PYTHON_LSP") {
+        return match preferred.to_ascii_lowercase().as_str() {
+            "pyright" | "pyright-langserver" => Some(("pyright-langserver", vec!["--stdio"])),
+            "basedpyright" | "basedpyright-langserver" => {
+                Some(("basedpyright-langserver", vec!["--stdio"]))
+            }
+            "pylsp" => Some(("pylsp", vec![])),
+            _ => None,
+        };
+    }
+
+    if command_exists("pyright-langserver", &["--help"]) {
+        return Some(("pyright-langserver", vec!["--stdio"]));
+    }
+    if command_exists("basedpyright-langserver", &["--help"]) {
+        return Some(("basedpyright-langserver", vec!["--stdio"]));
+    }
+    if command_exists("pylsp", &["--help"]) {
+        return Some(("pylsp", vec![]));
+    }
+
+    None
+}
+
 /// Stub LSP session. Will later speak JSON-RPC over stdio.
 pub struct LspSession {
     _cfg: LspConfig,
@@ -172,7 +207,7 @@ impl LspSession {
             LanguageMode::Javascript | LanguageMode::Typescript | LanguageMode::Tsx => {
                 Some(("typescript-language-server", vec!["--stdio"]))
             }
-            LanguageMode::Auto => None, // unknown until a file is opened; skip
+            LanguageMode::Auto => detect_python_lsp_server(),
         };
         let Some((exe, args)) = cmd else {
             anyhow::bail!("lsp server not determined for language")
