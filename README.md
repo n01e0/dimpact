@@ -96,6 +96,12 @@ Known limitations
   - Highly dynamic constructs (for example runtime-resolved calls) are outside current guarantees.
 - Strict mode requires capability support per phase/direction; otherwise it returns explicit strict errors with language/direction/capability hints.
 
+Python parity status (P-END-*)
+- ✅ P-END-1: strict + mock covers `callers` / `callees` / `both` with dedicated Python fixtures/tests.
+- ✅ P-END-2: strict + `references/definition` route covers `callers` / `callees` / `both` (no not-implemented branch for these directions).
+- ✅ P-END-3: real-LSP opt-in E2E exists with env gating (`DIMPACT_E2E_STRICT_LSP_PYTHON` / `DIMPACT_E2E_STRICT_LSP`).
+- ✅ P-END-4: Python strict operation/setup is documented in `README.md` and `README_ja.md`.
+
 Usage Examples
 - Callers from a diff (JSON with edges):
   - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges -f json`
