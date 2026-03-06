@@ -1,0 +1,52 @@
+diff --git a/bench-fixtures/python-heavy/main.py b/bench-fixtures/python-heavy/main.py
+--- a/bench-fixtures/python-heavy/main.py
++++ b/bench-fixtures/python-heavy/main.py
+@@ -2 +2,2 @@
+-    return 0
++    v = 0
++    return v
+@@ -5 +6,3 @@
+-    return f00() + 1
++    v = f00()
++    inc = 1
++    return v + inc
+@@ -8 +11,3 @@
+-    return f01() + 1
++    v = f01()
++    inc = 1
++    return v + inc
+@@ -11 +16,3 @@
+-    return f02() + 1
++    v = f02()
++    inc = 1
++    return v + inc
+@@ -14 +21,3 @@
+-    return f03() + 1
++    v = f03()
++    inc = 1
++    return v + inc
+@@ -17 +26,3 @@
+-    return f04() + 1
++    v = f04()
++    inc = 1
++    return v + inc
+@@ -20 +31,3 @@
+-    return f05() + 1
++    v = f05()
++    inc = 1
++    return v + inc
+@@ -23 +36,3 @@
+-    return f06() + 1
++    v = f06()
++    inc = 1
++    return v + inc
+@@ -26 +41,3 @@
+-    return f07() + 1
++    v = f07()
++    inc = 1
++    return v + inc
+@@ -29 +46,3 @@
+-    return f08() + 1
++    v = f08()
++    inc = 1
++    return v + inc

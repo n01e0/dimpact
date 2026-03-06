@@ -1,0 +1,3 @@
+[project]
+name = "bench-python-heavy-fixture"
+version = "0.1.0"
