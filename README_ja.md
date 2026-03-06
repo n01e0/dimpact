@@ -143,7 +143,11 @@ scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang ru
 scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts
 # 最小件数ガード（閾値未満なら失敗）
 scripts/bench-impact-engines.sh --base origin/main --runs 1 --min-lsp-changed 40 --min-lsp-impacted 15
-# CI ワークフロー: Benchmark Impact Engines（手動実行 + 対象PRで自動実行）
+# Go strict-LSP ベンチ（`gopls` が必要）
+scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go --min-lsp-changed 6 --min-lsp-impacted 15
+# Java strict-LSP ベンチ（`jdtls` が必要）
+scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java --min-lsp-changed 7 --min-lsp-impacted 15
+# CI ワークフロー: Benchmark Impact Engines（rust + Go + Java strict-LSP ジョブを実行）
 
 # Symbol ID でシードし、diff 不要で影響解析
 dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json
