@@ -54,8 +54,14 @@ fn profile_for_mode(lang: LanguageMode) -> Option<LangProfile> {
             symbol_lang: "tsx",
             lsp_language_id: "typescriptreact",
         }),
-        LanguageMode::Go => None,
-        LanguageMode::Java => None,
+        LanguageMode::Go => Some(LangProfile {
+            symbol_lang: "go",
+            lsp_language_id: "go",
+        }),
+        LanguageMode::Java => Some(LangProfile {
+            symbol_lang: "java",
+            lsp_language_id: "java",
+        }),
         LanguageMode::Auto => None,
     }
 }
@@ -2824,6 +2830,24 @@ mod tests {
         assert!(!sess.capabilities.definition);
         assert!(sess.capabilities.document_symbol);
         assert!(!sess.capabilities.workspace_symbol);
+    }
+
+    #[test]
+    fn profile_for_mode_includes_go_java() {
+        assert_eq!(
+            profile_for_mode(LanguageMode::Go),
+            Some(LangProfile {
+                symbol_lang: "go",
+                lsp_language_id: "go"
+            })
+        );
+        assert_eq!(
+            profile_for_mode(LanguageMode::Java),
+            Some(LangProfile {
+                symbol_lang: "java",
+                lsp_language_id: "java"
+            })
+        );
     }
 
     #[test]
