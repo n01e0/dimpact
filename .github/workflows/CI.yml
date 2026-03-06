@@ -46,6 +46,20 @@ jobs:
       - name: Run cargo test
         run: cargo test -q
 
+  engine_lsp_regression:
+    runs-on: ubuntu-latest
+    container: ghcr.io/n01e0/dimpact-ci:latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache CARGO_HOME
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}
+      - name: Run engine_lsp regression test suite
+        run: cargo test -q --test engine_lsp
+
   image_build:
     runs-on: ubuntu-latest
     steps:
