@@ -286,3 +286,198 @@ jobs:
             bench-python-ts.json
             bench-python-lsp.json
           if-no-files-found: warn
+
+  bench-typescript-strict-lsp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install TypeScript language server
+        run: |
+          npm install -g typescript typescript-language-server
+          typescript-language-server --help >/dev/null
+
+      - name: Build release binary
+        run: cargo build --release -q
+
+      - name: Run TypeScript strict-LSP benchmark
+        timeout-minutes: 12
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RUNS=1
+          else
+            RUNS=2
+          fi
+
+          echo "runs=$RUNS lang=typescript fixture=bench-fixtures/ts-heavy.diff" > bench-typescript-report.txt
+          timeout 10m scripts/bench-impact-engines.sh \
+            --diff-file bench-fixtures/ts-heavy.diff \
+            --runs "$RUNS" \
+            --direction callers \
+            --lang typescript \
+            --min-lsp-changed 6 \
+            --min-lsp-impacted 15 \
+            --save-ts-json bench-typescript-ts.json \
+            --save-lsp-json bench-typescript-lsp.json \
+            | tee -a bench-typescript-report.txt
+
+      - name: Publish TypeScript benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## TypeScript strict-LSP benchmark"
+            echo
+            if [ -f bench-typescript-report.txt ]; then
+              sed 's/^/`/;s/$/`/' bench-typescript-report.txt
+            else
+              echo "typescript benchmark report missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload TypeScript benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-typescript-strict-lsp
+          path: |
+            bench-typescript-report.txt
+            bench-typescript-ts.json
+            bench-typescript-lsp.json
+          if-no-files-found: warn
+
+  bench-javascript-strict-lsp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install JavaScript language server
+        run: |
+          npm install -g typescript typescript-language-server
+          typescript-language-server --help >/dev/null
+
+      - name: Build release binary
+        run: cargo build --release -q
+
+      - name: Run JavaScript strict-LSP benchmark
+        timeout-minutes: 12
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RUNS=1
+          else
+            RUNS=2
+          fi
+
+          echo "runs=$RUNS lang=javascript fixture=bench-fixtures/js-heavy.diff" > bench-javascript-report.txt
+          timeout 10m scripts/bench-impact-engines.sh \
+            --diff-file bench-fixtures/js-heavy.diff \
+            --runs "$RUNS" \
+            --direction callers \
+            --lang javascript \
+            --min-lsp-changed 6 \
+            --min-lsp-impacted 15 \
+            --save-ts-json bench-javascript-ts.json \
+            --save-lsp-json bench-javascript-lsp.json \
+            | tee -a bench-javascript-report.txt
+
+      - name: Publish JavaScript benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## JavaScript strict-LSP benchmark"
+            echo
+            if [ -f bench-javascript-report.txt ]; then
+              sed 's/^/`/;s/$/`/' bench-javascript-report.txt
+            else
+              echo "javascript benchmark report missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload JavaScript benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-javascript-strict-lsp
+          path: |
+            bench-javascript-report.txt
+            bench-javascript-ts.json
+            bench-javascript-lsp.json
+          if-no-files-found: warn
+
+  bench-ruby-strict-lsp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+
+      - name: Install ruby-lsp
+        run: |
+          gem install ruby-lsp --no-document
+          ruby-lsp --help >/dev/null
+
+      - name: Build release binary
+        run: cargo build --release -q
+
+      - name: Run Ruby strict-LSP benchmark
+        timeout-minutes: 12
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RUNS=1
+          else
+            RUNS=2
+          fi
+
+          echo "runs=$RUNS lang=ruby fixture=bench-fixtures/ruby-heavy.diff" > bench-ruby-report.txt
+          timeout 10m scripts/bench-impact-engines.sh \
+            --diff-file bench-fixtures/ruby-heavy.diff \
+            --runs "$RUNS" \
+            --direction callers \
+            --lang ruby \
+            --min-lsp-changed 3 \
+            --min-lsp-impacted 5 \
+            --save-ts-json bench-ruby-ts.json \
+            --save-lsp-json bench-ruby-lsp.json \
+            | tee -a bench-ruby-report.txt
+
+      - name: Publish Ruby benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## Ruby strict-LSP benchmark"
+            echo
+            if [ -f bench-ruby-report.txt ]; then
+              sed 's/^/`/;s/$/`/' bench-ruby-report.txt
+            else
+              echo "ruby benchmark report missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Ruby benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-ruby-strict-lsp
+          path: |
+            bench-ruby-report.txt
+            bench-ruby-ts.json
+            bench-ruby-lsp.json
+          if-no-files-found: warn
