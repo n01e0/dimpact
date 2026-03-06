@@ -85,6 +85,12 @@ fn profile_for_path(path: &str) -> Option<LangProfile> {
     if path.ends_with(".py") {
         return Some(PYTHON_PROFILE);
     }
+    if path.ends_with(".go") {
+        return profile_for_mode(LanguageMode::Go);
+    }
+    if path.ends_with(".java") {
+        return profile_for_mode(LanguageMode::Java);
+    }
     None
 }
 
@@ -2894,6 +2900,20 @@ mod tests {
                 lsp_language_id: "python"
             })
         );
+        assert_eq!(
+            profile_for_path("cmd/main.go"),
+            Some(LangProfile {
+                symbol_lang: "go",
+                lsp_language_id: "go"
+            })
+        );
+        assert_eq!(
+            profile_for_path("src/Main.java"),
+            Some(LangProfile {
+                symbol_lang: "java",
+                lsp_language_id: "java"
+            })
+        );
         assert_eq!(profile_for_path("README.md"), None);
     }
 
@@ -2907,7 +2927,13 @@ mod tests {
         assert!(path_matches_mode("src/app.mts", LanguageMode::Typescript));
         assert!(path_matches_mode("src/app.rb", LanguageMode::Auto));
         assert!(path_matches_mode("src/tool.py", LanguageMode::Auto));
+        assert!(path_matches_mode("cmd/main.go", LanguageMode::Auto));
+        assert!(path_matches_mode("src/Main.java", LanguageMode::Auto));
+        assert!(path_matches_mode("cmd/main.go", LanguageMode::Go));
+        assert!(path_matches_mode("src/Main.java", LanguageMode::Java));
         assert!(!path_matches_mode("src/tool.py", LanguageMode::Rust));
+        assert!(!path_matches_mode("cmd/main.go", LanguageMode::Java));
+        assert!(!path_matches_mode("src/Main.java", LanguageMode::Go));
         assert!(!path_matches_mode("src/app.md", LanguageMode::Auto));
     }
 
