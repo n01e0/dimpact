@@ -177,6 +177,29 @@ PY
 echo "ts changed=$TS_CHANGED impacted=$TS_IMPACTED"
 echo "lsp(strict) changed=$LSP_CHANGED impacted=$LSP_IMPACTED"
 
+echo
+
+echo "[lang-summary]"
+python3 - "$TS_JSON" "$LSP_JSON" <<'PY'
+import json, sys
+from collections import Counter
+from pathlib import Path
+
+ts = json.loads(Path(sys.argv[1]).read_text())
+lsp = json.loads(Path(sys.argv[2]).read_text())
+
+def by_lang(symbols):
+    c = Counter((s.get("language") or "unknown") for s in symbols)
+    if not c:
+        return "-"
+    return ", ".join(f"{lang}:{c[lang]}" for lang in sorted(c))
+
+print(f"ts changed_by_lang: {by_lang(ts.get('changed_symbols', []))}")
+print(f"ts impacted_by_lang: {by_lang(ts.get('impacted_symbols', []))}")
+print(f"lsp(strict) changed_by_lang: {by_lang(lsp.get('changed_symbols', []))}")
+print(f"lsp(strict) impacted_by_lang: {by_lang(lsp.get('impacted_symbols', []))}")
+PY
+
 check_min() {
   local name="$1" actual="$2" minv="$3"
   if [[ -n "$minv" && "$actual" -lt "$minv" ]]; then
