@@ -1,0 +1,52 @@
+diff --git a/bench-fixtures/go-heavy/main.go b/bench-fixtures/go-heavy/main.go
+--- a/bench-fixtures/go-heavy/main.go
++++ b/bench-fixtures/go-heavy/main.go
+@@ -4 +4,2 @@
+-	return 0
++	v := 0
++	return v
+@@ -8 +9,3 @@
+-	return f00() + 1
++	v := f00()
++	inc := 1
++	return v + inc
+@@ -12 +15,3 @@
+-	return f01() + 1
++	v := f01()
++	inc := 1
++	return v + inc
+@@ -16 +21,3 @@
+-	return f02() + 1
++	v := f02()
++	inc := 1
++	return v + inc
+@@ -20 +27,3 @@
+-	return f03() + 1
++	v := f03()
++	inc := 1
++	return v + inc
+@@ -24 +33,3 @@
+-	return f04() + 1
++	v := f04()
++	inc := 1
++	return v + inc
+@@ -28 +39,3 @@
+-	return f05() + 1
++	v := f05()
++	inc := 1
++	return v + inc
+@@ -32 +45,3 @@
+-	return f06() + 1
++	v := f06()
++	inc := 1
++	return v + inc
+@@ -36 +51,3 @@
+-	return f07() + 1
++	v := f07()
++	inc := 1
++	return v + inc
+@@ -40 +57,3 @@
+-	return f08() + 1
++	v := f08()
++	inc := 1
++	return v + inc
