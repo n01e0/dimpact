@@ -1,4 +1,4 @@
-use crate::ir::reference::UnresolvedRef;
+use crate::ir::reference::{RefKind, UnresolvedRef};
 use crate::ir::{Symbol, SymbolId, SymbolKind, TextRange};
 use crate::languages::LanguageAnalyzer;
 use crate::languages::util::{byte_to_line, line_offsets};
@@ -111,8 +111,133 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             .collect()
     }
 
-    fn unresolved_refs(&self, _path: &str, _source: &str) -> Vec<UnresolvedRef> {
-        Vec::new()
+    fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
+        use std::collections::HashSet;
+
+        let offs = line_offsets(source);
+        let mut out = Vec::new();
+        let mut seen: HashSet<(u32, String, Option<String>, bool)> = HashSet::new();
+
+        for caps in self.runner.run_captures(source, &self.queries.calls) {
+            let Some(name_cap) = caps.iter().find(|c| c.name == "name") else {
+                continue;
+            };
+            let name = source[name_cap.start..name_cap.end].trim();
+            if name.is_empty() {
+                continue;
+            }
+
+            let qual = caps
+                .iter()
+                .find(|c| c.name == "qual")
+                .map(|q| source[q.start..q.end].trim().replace([' ', '\t', '\n'], ""))
+                .filter(|q| !q.is_empty());
+            let call_cap = caps.iter().find(|c| c.name == "call");
+            let ln = if let Some(c) = call_cap {
+                byte_to_line(&offs, c.start)
+            } else {
+                byte_to_line(&offs, name_cap.start)
+            };
+
+            let is_method = qual.is_some();
+            let key = (ln, name.to_string(), qual.clone(), is_method);
+            if !seen.insert(key) {
+                continue;
+            }
+
+            out.push(UnresolvedRef {
+                name: name.to_string(),
+                kind: RefKind::Call,
+                file: path.to_string(),
+                line: ln,
+                qualifier: qual,
+                is_method,
+            });
+        }
+
+        out
+    }
+
+    fn imports_in_file(
+        &self,
+        path: &str,
+        source: &str,
+    ) -> std::collections::HashMap<String, String> {
+        use regex::Regex;
+
+        let mut map = std::collections::HashMap::new();
+        let from_mod = module_path_for_file(path);
+
+        let re_import = Regex::new(r"(?m)^\s*import\s+(.+)$").unwrap();
+        let re_from =
+            Regex::new(r"(?m)^\s*from\s+([A-Za-z0-9_\.]+|\.+[A-Za-z0-9_\.]*)\s+import\s+(.+)$")
+                .unwrap();
+
+        for cap in re_import.captures_iter(source) {
+            let rhs = cap.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+            for item in rhs.split(',') {
+                let item = item.trim();
+                if item.is_empty() {
+                    continue;
+                }
+                let (module_raw, alias) = if let Some((m, a)) = item.split_once(" as ") {
+                    (m.trim(), a.trim())
+                } else {
+                    (item, item.split('.').next().unwrap_or(item).trim())
+                };
+                if module_raw.is_empty() || alias.is_empty() {
+                    continue;
+                }
+                let module_path = module_raw.replace('.', "::");
+                map.insert(alias.to_string(), module_path.clone());
+                map.insert(format!("__glob__{}", module_path.clone()), module_path);
+            }
+        }
+
+        for cap in re_from.captures_iter(source) {
+            let module_raw = cap.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+            let rhs = cap.get(2).map(|m| m.as_str()).unwrap_or("").trim();
+            if module_raw.is_empty() || rhs.is_empty() {
+                continue;
+            }
+
+            let module_path = resolve_from_import_module(&from_mod, module_raw);
+            if module_path.is_empty() {
+                continue;
+            }
+
+            let rhs = rhs
+                .trim_start_matches('(')
+                .trim_end_matches(')')
+                .trim_end_matches(',')
+                .trim();
+
+            for item in rhs.split(',') {
+                let item = item.trim();
+                if item.is_empty() {
+                    continue;
+                }
+                if item == "*" {
+                    map.insert(
+                        format!("__glob__{}", module_path.clone()),
+                        module_path.clone(),
+                    );
+                    continue;
+                }
+
+                let (name, alias) = if let Some((n, a)) = item.split_once(" as ") {
+                    (n.trim(), a.trim())
+                } else {
+                    (item, item)
+                };
+                if name.is_empty() || alias.is_empty() {
+                    continue;
+                }
+                map.insert(alias.to_string(), format!("{}::{}", module_path, name));
+            }
+        }
+
+        map
     }
 }
 
@@ -140,6 +265,48 @@ fn find_python_block_end(lines: &[&str], start_idx: usize) -> usize {
         }
     }
     lines.len()
+}
+
+fn module_path_for_file(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    let mut s = p.to_string_lossy().replace('\\', "/");
+    if let Some(rest) = s.strip_prefix("./") {
+        s = rest.to_string();
+    }
+    if s.ends_with("/__init__.py") {
+        s = s.trim_end_matches("/__init__.py").to_string();
+    } else if s.ends_with(".py") {
+        s = s.trim_end_matches(".py").to_string();
+    }
+    s.replace('/', "::")
+}
+
+fn resolve_from_import_module(from_mod: &str, module_raw: &str) -> String {
+    let dots = module_raw.chars().take_while(|c| *c == '.').count();
+    if dots == 0 {
+        return module_raw.replace('.', "::");
+    }
+
+    let rest = module_raw[dots..].trim_matches('.').replace('.', "::");
+    let mut parts: Vec<&str> = from_mod.split("::").filter(|s| !s.is_empty()).collect();
+    // current file module -> package scope
+    if !parts.is_empty() {
+        parts.pop();
+    }
+    for _ in 1..dots {
+        if !parts.is_empty() {
+            parts.pop();
+        }
+    }
+
+    let mut base = parts.join("::");
+    if !rest.is_empty() {
+        if !base.is_empty() {
+            base.push_str("::");
+        }
+        base.push_str(&rest);
+    }
+    base
 }
 
 #[cfg(test)]
@@ -177,9 +344,79 @@ def run(x):
     }
 
     #[test]
-    fn unresolved_refs_is_empty_for_symbols_phase() {
+    fn unresolved_refs_extracts_bare_and_qualified_calls() {
+        let src = r#"def call_all(obj):
+    foo()
+    obj.bar()
+    self.baz()
+"#;
         let ana = SpecPyAnalyzer::new();
-        let refs = ana.unresolved_refs("main.py", "def foo():\n    return bar()\n");
-        assert!(refs.is_empty());
+        let refs = ana.unresolved_refs("main.py", src);
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "foo" && r.qualifier.is_none() && !r.is_method && r.line == 2
+            })
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "bar" && r.qualifier.as_deref() == Some("obj") && r.is_method && r.line == 3
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "baz" && r.qualifier.as_deref() == Some("self") && r.is_method && r.line == 4
+        }));
+    }
+
+    #[test]
+    fn imports_extract_alias_from_and_relative_paths() {
+        let src = r#"import os
+import util.helpers as uh
+from pkg.service import run as runner, Client
+from .local import fn as local_fn
+from ..core import base
+from . import sibling
+from pkg.star import *
+"#;
+        let ana = SpecPyAnalyzer::new();
+        let im = ana.imports_in_file("pkg/sub/main.py", src);
+
+        assert_eq!(im.get("os").map(String::as_str), Some("os"));
+        assert_eq!(im.get("uh").map(String::as_str), Some("util::helpers"));
+        assert_eq!(
+            im.get("runner").map(String::as_str),
+            Some("pkg::service::run")
+        );
+        assert_eq!(
+            im.get("Client").map(String::as_str),
+            Some("pkg::service::Client")
+        );
+        assert_eq!(
+            im.get("local_fn").map(String::as_str),
+            Some("pkg::sub::local::fn")
+        );
+        assert_eq!(im.get("base").map(String::as_str), Some("pkg::core::base"));
+        assert_eq!(
+            im.get("sibling").map(String::as_str),
+            Some("pkg::sub::sibling")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::star").map(String::as_str),
+            Some("pkg::star")
+        );
+    }
+
+    #[test]
+    fn resolve_from_import_module_handles_relative_levels() {
+        assert_eq!(
+            resolve_from_import_module("pkg::sub::main", ".local"),
+            "pkg::sub::local"
+        );
+        assert_eq!(
+            resolve_from_import_module("pkg::sub::main", "..core"),
+            "pkg::core"
+        );
+        assert_eq!(
+            resolve_from_import_module("pkg::sub::main", "pkg.service"),
+            "pkg::service"
+        );
     }
 }
