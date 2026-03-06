@@ -400,6 +400,36 @@ fn setup_repo_javascript_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf)
     (dir, path)
 }
 
+fn setup_repo_javascript_callees_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("package.json"),
+        "{\n  \"name\": \"lsp-javascript-callees-fixture\",\n  \"private\": true,\n  \"version\": \"0.1.0\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.js"),
+        "function bar() {\n  return 1;\n}\n\nfunction baz() {\n  return 2;\n}\n\nfunction foo() {\n  return bar() + baz();\n}\n\nfunction main() {\n  return foo();\n}\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.js"),
+        "function bar() {\n  return 1;\n}\n\nfunction baz() {\n  return 2;\n}\n\nfunction foo() {\n  const x = 1;\n  return bar() + baz() + x;\n}\n\nfunction main() {\n  return foo();\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_repo_ruby_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -2567,6 +2597,231 @@ fn javascript_real_lsp_e2e_fixture_is_opt_in_gated() {
 
     let package_json = fs::read_to_string(repo.join("package.json")).expect("read package.json");
     assert!(package_json.contains("lsp-javascript-fixture"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_javascript_callers_chain_e2e_when_available() {
+    if !should_run_javascript_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_javascript_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict JavaScript LSP callers result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: JavaScript LSP did not report callers in this environment");
+        return;
+    }
+    assert!(names1.contains("foo"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_javascript_callees_chain_e2e_when_available() {
+    if !should_run_javascript_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_javascript_callees_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict JavaScript LSP callees result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: JavaScript LSP did not report callees in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_javascript_both_chain_e2e_when_available() {
+    if !should_run_javascript_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_javascript_callees_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict JavaScript both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict JavaScript LSP both result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: JavaScript LSP did not report both-direction impacts in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
 }
 
 #[test]
