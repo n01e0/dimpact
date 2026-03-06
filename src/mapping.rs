@@ -177,4 +177,51 @@ diff --git a/b.rs b/b.rs
         let unique: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
         assert_eq!(unique.len(), ids.len(), "ids should be unique: {ids:?}");
     }
+
+    #[test]
+    #[serial]
+    fn changed_symbols_handles_go_java_modes() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("main.go"), "package main\nfunc main() {}\n").unwrap();
+        fs::write(
+            dir.path().join("Main.java"),
+            "class Main { static void main(String[] args) {} }\n",
+        )
+        .unwrap();
+
+        let go_diff = r#"diff --git a/main.go b/main.go
+--- a/main.go
++++ b/main.go
+@@ -1,2 +1,3 @@
+ package main
+ func main() {}
++// changed
+"#;
+        let java_diff = r#"diff --git a/Main.java b/Main.java
+--- a/Main.java
++++ b/Main.java
+@@ -1 +1,2 @@
+ class Main { static void main(String[] args) {} }
++// changed
+"#;
+
+        let parsed_go = parse_unified_diff(go_diff).unwrap();
+        let parsed_java = parse_unified_diff(java_diff).unwrap();
+
+        let cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let out_go = compute_changed_symbols(&parsed_go, LanguageMode::Go).unwrap();
+        let out_java = compute_changed_symbols(&parsed_java, LanguageMode::Java).unwrap();
+        std::env::set_current_dir(cwd).unwrap();
+
+        assert!(out_go.changed_files.iter().any(|p| p.ends_with("main.go")));
+        assert!(
+            out_java
+                .changed_files
+                .iter()
+                .any(|p| p.ends_with("Main.java"))
+        );
+        assert!(out_go.changed_symbols.is_empty());
+        assert!(out_java.changed_symbols.is_empty());
+    }
 }
