@@ -47,8 +47,28 @@ fn has_rust_analyzer() -> bool {
         .unwrap_or(false)
 }
 
+fn has_python_lsp_server() -> bool {
+    ["pyright-langserver", "basedpyright-langserver", "pylsp"]
+        .iter()
+        .any(|exe| {
+            Command::new(exe)
+                .arg("--help")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+}
+
 fn should_run_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP").ok().as_deref() == Some("1")
+}
+
+fn should_run_python_strict_lsp_e2e() -> bool {
+    std::env::var("DIMPACT_E2E_STRICT_LSP_PYTHON")
+        .ok()
+        .as_deref()
+        == Some("1")
+        || should_run_strict_lsp_e2e()
 }
 
 fn setup_repo_rust_project(initial_src: &str, updated_src: &str) -> (TempDir, std::path::PathBuf) {
@@ -121,6 +141,36 @@ fn setup_repo_python_callees_chain_fixture() -> (TempDir, std::path::PathBuf) {
     let initial = "def bar():\n    return 1\n\ndef baz():\n    return 2\n\ndef foo():\n    return bar() + baz()\n\ndef main():\n    return foo()\n";
     let updated = "def bar():\n    return 1\n\ndef baz():\n    return 2\n\ndef foo():\n    x = 1\n    return bar() + baz() + x\n\ndef main():\n    return foo()\n";
     setup_repo_single_file("main.py", initial, updated)
+}
+
+fn setup_repo_python_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("pyproject.toml"),
+        "[project]\nname = \"lsp-python-fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.py"),
+        "def bar():\n    return 1\n\ndef foo():\n    return bar()\n\ndef main():\n    return foo()\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.py"),
+        "def bar():\n    x = 1\n    return x\n\ndef foo():\n    return bar()\n\ndef main():\n    return foo()\n",
+    )
+    .unwrap();
+
+    (dir, path)
 }
 
 #[test]
@@ -1171,6 +1221,41 @@ fn python_fixture_for_impact_flow_has_call_chain() {
     assert!(decl_names.contains("main"));
     assert!(call_names.contains("bar"));
     assert!(call_names.contains("foo"));
+}
+
+#[test]
+#[serial]
+fn python_real_lsp_e2e_fixture_is_opt_in_gated() {
+    if !should_run_python_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e fixture"
+        );
+        return;
+    }
+    if !has_python_lsp_server() {
+        eprintln!(
+            "skip: python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)"
+        );
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_python_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("main.py"));
+    assert!(
+        files[0]
+            .changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+
+    let pyproject = fs::read_to_string(repo.join("pyproject.toml")).expect("read pyproject");
+    assert!(pyproject.contains("name = \"lsp-python-fixture\""));
 }
 
 #[test]
