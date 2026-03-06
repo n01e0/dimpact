@@ -72,3 +72,55 @@ jobs:
           name: bench-impact-engines
           path: bench-report.txt
           if-no-files-found: warn
+
+  bench-go-strict-lsp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Install gopls
+        run: |
+          go install golang.org/x/tools/gopls@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build release binary
+        run: cargo build --release -q
+
+      - name: Run Go strict-LSP benchmark
+        timeout-minutes: 12
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RUNS=1
+          else
+            RUNS=2
+          fi
+
+          echo "runs=$RUNS lang=go fixture=bench-fixtures/go-heavy.diff" > bench-go-report.txt
+          timeout 10m scripts/bench-impact-engines.sh \
+            --diff-file bench-fixtures/go-heavy.diff \
+            --runs "$RUNS" \
+            --direction callers \
+            --lang go \
+            --min-lsp-changed 6 \
+            --min-lsp-impacted 15 \
+            | tee -a bench-go-report.txt
+
+      - name: Publish Go benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## Go strict-LSP benchmark"
+            echo
+            if [ -f bench-go-report.txt ]; then
+              sed 's/^/`/;s/$/`/' bench-go-report.txt
+            else
+              echo "go benchmark report missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
