@@ -112,6 +112,12 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
   - 実行時解決が必要な高動的ケースは、現時点では保証対象外です。
 - strict モードでは、phase/方向ごとの capability が不足すると、言語/方向/capability ヒント付きの明示エラーを返します。
 
+## Python parity ステータス（P-END-*）
+- ✅ P-END-1: strict + mock で `callers` / `callees` / `both` を Python fixture付きテストでカバー。
+- ✅ P-END-2: strict + `references/definition` 経路でも `callers` / `callees` / `both` が動作（未実装分岐なし）。
+- ✅ P-END-3: real-LSP opt-in E2E を環境変数ゲート付きで追加済み（`DIMPACT_E2E_STRICT_LSP_PYTHON` / `DIMPACT_E2E_STRICT_LSP`）。
+- ✅ P-END-4: Python strict 運用方法を `README.md` / `README_ja.md` に記載済み。
+
 ## 使用例
 ```bash
 # 呼び出し元チェーンをエッジ付き JSON で出力
