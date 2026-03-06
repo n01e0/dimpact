@@ -85,4 +85,32 @@ jobs:
       - name: Run strict real-LSP engine_lsp suite (env-gated)
         env:
           DIMPACT_E2E_STRICT_LSP: "1"
-        run: cargo test -q --test engine_lsp
+        run: |
+          set -o pipefail
+          echo "::group::cargo test -q --test engine_lsp (strict real-LSP, env-gated)"
+          cargo test -q --test engine_lsp 2>&1 | tee engine-lsp-strict-e2e.log
+          status=${PIPESTATUS[0]}
+          echo "::endgroup::"
+          exit $status
+
+      - name: Summarize strict E2E failure logs
+        if: failure()
+        run: |
+          {
+            echo "## strict real-LSP engine_lsp failure summary"
+            if [ -f engine-lsp-strict-e2e.log ]; then
+              echo
+              echo "### engine-lsp-strict-e2e.log (tail -n 200)"
+              echo '```'
+              tail -n 200 engine-lsp-strict-e2e.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload strict E2E log artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-strict-lsp-logs
+          path: engine-lsp-strict-e2e.log
+          if-no-files-found: warn
