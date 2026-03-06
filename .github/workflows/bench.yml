@@ -50,6 +50,8 @@ jobs:
             --direction callers \
             --lang rust \
             --rpc-counts \
+            --save-ts-json bench-rust-ts.json \
+            --save-lsp-json bench-rust-lsp.json \
             | tee -a bench-report.txt
 
       - name: Publish benchmark summary
@@ -70,7 +72,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-impact-engines
-          path: bench-report.txt
+          path: |
+            bench-report.txt
+            bench-rust-ts.json
+            bench-rust-lsp.json
           if-no-files-found: warn
 
   bench-go-strict-lsp:
@@ -110,6 +115,8 @@ jobs:
             --lang go \
             --min-lsp-changed 6 \
             --min-lsp-impacted 15 \
+            --save-ts-json bench-go-ts.json \
+            --save-lsp-json bench-go-lsp.json \
             | tee -a bench-go-report.txt
 
       - name: Publish Go benchmark summary
@@ -124,6 +131,17 @@ jobs:
               echo "go benchmark report missing"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Go benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-go-strict-lsp
+          path: |
+            bench-go-report.txt
+            bench-go-ts.json
+            bench-go-lsp.json
+          if-no-files-found: warn
 
   bench-java-strict-lsp:
     runs-on: ubuntu-latest
@@ -173,6 +191,8 @@ jobs:
             --lang java \
             --min-lsp-changed 7 \
             --min-lsp-impacted 15 \
+            --save-ts-json bench-java-ts.json \
+            --save-lsp-json bench-java-lsp.json \
             | tee -a bench-java-report.txt
 
       - name: Publish Java benchmark summary
@@ -187,3 +207,14 @@ jobs:
               echo "java benchmark report missing"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Java benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-java-strict-lsp
+          path: |
+            bench-java-report.txt
+            bench-java-ts.json
+            bench-java-lsp.json
+          if-no-files-found: warn
