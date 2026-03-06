@@ -482,3 +482,148 @@ jobs:
             bench-ruby-ts.json
             bench-ruby-lsp.json
           if-no-files-found: warn
+
+  bench-guardrail-language-summary:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - bench-go-strict-lsp
+      - bench-java-strict-lsp
+      - bench-python-strict-lsp
+      - bench-typescript-strict-lsp
+      - bench-javascript-strict-lsp
+      - bench-ruby-strict-lsp
+    steps:
+      - name: Download language benchmark artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*-strict-lsp
+          path: bench-artifacts
+          merge-multiple: false
+          if-no-files-found: warn
+
+      - name: Publish language guardrail summary
+        env:
+          GO_JOB_RESULT: ${{ needs['bench-go-strict-lsp'].result }}
+          JAVA_JOB_RESULT: ${{ needs['bench-java-strict-lsp'].result }}
+          PYTHON_JOB_RESULT: ${{ needs['bench-python-strict-lsp'].result }}
+          TYPESCRIPT_JOB_RESULT: ${{ needs['bench-typescript-strict-lsp'].result }}
+          JAVASCRIPT_JOB_RESULT: ${{ needs['bench-javascript-strict-lsp'].result }}
+          RUBY_JOB_RESULT: ${{ needs['bench-ruby-strict-lsp'].result }}
+        run: |
+          set -euo pipefail
+
+          fmt_delta() {
+            local d="$1"
+            if (( d >= 0 )); then
+              echo "+$d"
+            else
+              echo "$d"
+            fi
+          }
+
+          extract_metric() {
+            local report="$1"
+            local metric="$2"
+            local line
+            line=$(grep -E "^\[threshold\] (PASS|FAIL) ${metric} actual=[0-9]+ min=[0-9]+$" "$report" | tail -n 1 || true)
+            if [[ -z "$line" ]]; then
+              echo ""
+              return 0
+            fi
+            local state actual minv delta
+            state=$(echo "$line" | sed -E 's/^\[threshold\] (PASS|FAIL).*/\1/')
+            actual=$(echo "$line" | sed -E 's/.*actual=([0-9]+).*/\1/')
+            minv=$(echo "$line" | sed -E 's/.*min=([0-9]+).*/\1/')
+            delta=$((actual - minv))
+            echo "$state $actual $minv $delta"
+          }
+
+          extract_note() {
+            local report="$1"
+            local note=""
+            note=$(grep -E "^\[threshold-fail-at-a-glance\]" "$report" | tail -n 1 || true)
+            if [[ -z "$note" ]]; then
+              note=$(grep -E "^Error:" "$report" | head -n 1 || true)
+            fi
+            if [[ -z "$note" ]]; then
+              note=$(grep -E "^\[threshold-check\] RESULT=FAIL" "$report" | tail -n 1 || true)
+            fi
+            note=${note//|/\\|}
+            echo "$note"
+          }
+
+          append_row() {
+            local language="$1"
+            local job_result="$2"
+            local report="$3"
+
+            local guardrail="UNKNOWN"
+            local changed_cell="-"
+            local impacted_cell="-"
+            local note=""
+
+            if [[ ! -f "$report" ]]; then
+              if [[ "$job_result" == "success" ]]; then
+                guardrail="MISSING"
+              else
+                guardrail="BLOCKED"
+              fi
+              note="report missing"
+              echo "| ${language} | ${job_result} | ${guardrail} | ${changed_cell} | ${impacted_cell} | ${note} |" >> "$SUMMARY_TMP"
+              return 0
+            fi
+
+            local changed_info impacted_info
+            changed_info=$(extract_metric "$report" "lsp.changed")
+            impacted_info=$(extract_metric "$report" "lsp.impacted")
+
+            if [[ -n "$changed_info" ]]; then
+              read -r c_state c_actual c_min c_delta <<<"$changed_info"
+              changed_cell="${c_actual}/${c_min} (Δ$(fmt_delta "$c_delta"))"
+            fi
+            if [[ -n "$impacted_info" ]]; then
+              read -r i_state i_actual i_min i_delta <<<"$impacted_info"
+              impacted_cell="${i_actual}/${i_min} (Δ$(fmt_delta "$i_delta"))"
+            fi
+
+            if [[ -n "$changed_info" && -n "$impacted_info" ]]; then
+              if [[ "$c_state" == "PASS" && "$i_state" == "PASS" ]]; then
+                guardrail="PASS"
+              else
+                guardrail="FAIL"
+              fi
+            elif grep -q '^Error:' "$report"; then
+              guardrail="BLOCKED"
+            elif grep -q '^\[threshold-check\] RESULT=FAIL' "$report"; then
+              guardrail="FAIL"
+            elif [[ "$job_result" != "success" ]]; then
+              guardrail="BLOCKED"
+            else
+              guardrail="NO_METRICS"
+            fi
+
+            note=$(extract_note "$report")
+            if [[ -z "$note" && "$guardrail" == "NO_METRICS" ]]; then
+              note="threshold lines not emitted"
+            fi
+            echo "| ${language} | ${job_result} | ${guardrail} | ${changed_cell} | ${impacted_cell} | ${note} |" >> "$SUMMARY_TMP"
+          }
+
+          SUMMARY_TMP="$(mktemp)"
+          {
+            echo "## Strict-LSP language guardrail summary"
+            echo
+            echo "| Language | Job result | Guardrail | changed (actual/min, Δ) | impacted (actual/min, Δ) | Note |"
+            echo "|---|---|---|---|---|---|"
+          } > "$SUMMARY_TMP"
+
+          append_row "TypeScript" "$TYPESCRIPT_JOB_RESULT" "bench-artifacts/bench-typescript-strict-lsp/bench-typescript-report.txt"
+          append_row "JavaScript" "$JAVASCRIPT_JOB_RESULT" "bench-artifacts/bench-javascript-strict-lsp/bench-javascript-report.txt"
+          append_row "Ruby" "$RUBY_JOB_RESULT" "bench-artifacts/bench-ruby-strict-lsp/bench-ruby-report.txt"
+          append_row "Go" "$GO_JOB_RESULT" "bench-artifacts/bench-go-strict-lsp/bench-go-report.txt"
+          append_row "Java" "$JAVA_JOB_RESULT" "bench-artifacts/bench-java-strict-lsp/bench-java-report.txt"
+          append_row "Python" "$PYTHON_JOB_RESULT" "bench-artifacts/bench-python-strict-lsp/bench-python-report.txt"
+
+          cat "$SUMMARY_TMP" >> "$GITHUB_STEP_SUMMARY"
+          cat "$SUMMARY_TMP"
