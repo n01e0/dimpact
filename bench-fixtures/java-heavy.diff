@@ -1,0 +1,52 @@
+diff --git a/bench-fixtures/java-heavy/src/main/java/Main.java b/bench-fixtures/java-heavy/src/main/java/Main.java
+--- a/bench-fixtures/java-heavy/src/main/java/Main.java
++++ b/bench-fixtures/java-heavy/src/main/java/Main.java
+@@ -4 +4,2 @@
+-        return 0;
++        int v = 0;
++        return v;
+@@ -8 +9,3 @@
+-        return m00() + 1;
++        int v = m00();
++        int inc = 1;
++        return v + inc;
+@@ -12 +15,3 @@
+-        return m01() + 1;
++        int v = m01();
++        int inc = 1;
++        return v + inc;
+@@ -16 +21,3 @@
+-        return m02() + 1;
++        int v = m02();
++        int inc = 1;
++        return v + inc;
+@@ -20 +27,3 @@
+-        return m03() + 1;
++        int v = m03();
++        int inc = 1;
++        return v + inc;
+@@ -24 +33,3 @@
+-        return m04() + 1;
++        int v = m04();
++        int inc = 1;
++        return v + inc;
+@@ -28 +39,3 @@
+-        return m05() + 1;
++        int v = m05();
++        int inc = 1;
++        return v + inc;
+@@ -32 +45,3 @@
+-        return m06() + 1;
++        int v = m06();
++        int inc = 1;
++        return v + inc;
+@@ -36 +51,3 @@
+-        return m07() + 1;
++        int v = m07();
++        int inc = 1;
++        return v + inc;
+@@ -40 +57,3 @@
+-        return m08() + 1;
++        int v = m08();
++        int inc = 1;
++        return v + inc;
