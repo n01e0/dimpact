@@ -122,6 +122,15 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 - Python LSP サーバー選択:
   - 自動検出順: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
   - 明示指定: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
+- real-LSP サーバー導入クイック手順（ローカル）:
+  - TypeScript/JavaScript: `npm install -g typescript typescript-language-server`
+  - Python（pyright）: `npm install -g pyright`
+  - Go: `go install golang.org/x/tools/gopls@latest`
+  - Ruby: `gem install ruby-lsp --no-document`
+  - Java（`jdtls`）: `jdtls` を導入して `PATH` に追加（詳細は下記 CI 設定を参照）
+- real-LSP サーバー導入（CI）:
+  - `nightly-strict-lsp.yml` で TS/JS/Python/Go/Java/Ruby の server を導入後に `engine_lsp` strict E2E を実行
+  - `bench.yml` で strict-LSP ベンチの各言語ジョブごとに server を導入
 
 ## 既知の制約
 - Python real-LSP の strict E2E は環境依存のため、best-effort 運用です。

@@ -106,6 +106,15 @@ LSP strict E2E tests
 - Python LSP server selection:
   - auto-detect order: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
   - override with: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
+- Real-LSP server install quickstart (local):
+  - TypeScript/JavaScript: `npm install -g typescript typescript-language-server`
+  - Python (pyright): `npm install -g pyright`
+  - Go: `go install golang.org/x/tools/gopls@latest`
+  - Ruby: `gem install ruby-lsp --no-document`
+  - Java (`jdtls`): install `jdtls` and add it to `PATH` (see CI workflow snippet below)
+- Real-LSP server setup in CI:
+  - `nightly-strict-lsp.yml` installs TS/JS/Python/Go/Java/Ruby servers before `engine_lsp` strict E2E
+  - `bench.yml` installs per-language servers in each strict-LSP benchmark job
 
 Known limitations
 - Python real-LSP strict E2E is best-effort and environment-dependent.
