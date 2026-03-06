@@ -89,6 +89,13 @@ LSP strict E2E tests
   - auto-detect order: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
   - override with: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
 
+Known limitations
+- Python real-LSP strict E2E is best-effort and environment-dependent.
+  - In environments where the server is unavailable or returns no usable graph/callee info, tests intentionally skip instead of failing.
+- Python call extraction currently focuses on core call forms (`foo()`, `obj.m()`, `self.m()`).
+  - Highly dynamic constructs (for example runtime-resolved calls) are outside current guarantees.
+- Strict mode requires capability support per phase/direction; otherwise it returns explicit strict errors with language/direction/capability hints.
+
 Usage Examples
 - Callers from a diff (JSON with edges):
   - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges -f json`
