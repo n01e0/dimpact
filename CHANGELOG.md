@@ -2,22 +2,24 @@
 
 ## 0.4.0 - draft
 
-### Added
-- Python non-LSP analyzer coverage was completed for symbols, unresolved refs/imports, and explicit `--lang python` dispatch.
-- Python fixture-backed CLI integration tests were added for both `changed` and `impact` flows.
-- Auto engine policy option `--auto-policy compat|strict-if-available` was introduced for `--engine auto`.
-- Policy-difference benchmark mode was added to compare TS fixed vs Auto strict-if-available (`--compare-auto-strict-if-available`).
+### Major changes
+- Completed Python non-LSP analyzer coverage for symbols, unresolved refs/imports, and explicit `--lang python` dispatch.
+- Added Python fixture-backed CLI integration tests for both `changed` and `impact` flows.
+- Introduced Auto policy option `--auto-policy compat|strict-if-available` for `--engine auto`.
+- Added policy-difference benchmark mode to compare TS fixed vs Auto strict-if-available (`--compare-auto-strict-if-available`).
 
-### Changed
-- Auto strict-if-available now prefers LSP path while preserving non-strict TS fallback behavior when capabilities/session are insufficient.
-- Capability-shortage diagnostics were reorganized by policy, with clearer strict errors and fallback reason logs.
-- README / README_ja now document Auto policy operation (CLI/env priority and practical commands).
-
-### Verified
-- Regression gates for release prep were executed and passed:
+### Operational changes
+- Auto strict-if-available now prefers the LSP path while preserving fallback-safe non-strict behavior when capabilities/session are insufficient.
+- Capability-shortage diagnostics were reorganized by policy, with clearer strict errors and fallback-reason logs.
+- README / README_ja now document Auto policy operations (CLI/env priority and practical commands).
+- Release-prep regression gates were executed and passed:
   - `cargo test -q --test engine_lsp`
   - `cargo test -q`
   - `cargo clippy -q --all-targets -- -D warnings`
+
+### Notes
+- Default Auto behavior remains backward-compatible (`compat`).
+- `strict-if-available` is preference-based and may fall back to TS depending on server/capability/session availability.
 
 ## 0.3.0 - 2026-03-06
 
