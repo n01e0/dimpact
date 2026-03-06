@@ -117,6 +117,8 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
         let offs = line_offsets(source);
         let mut out = Vec::new();
         let mut seen: HashSet<(u32, String, Option<String>, bool)> = HashSet::new();
+        let imports = self.imports_in_file(path, source);
+        let import_aliases: HashSet<String> = imports.keys().cloned().collect();
 
         for caps in self.runner.run_captures(source, &self.queries.calls) {
             let Some(name_cap) = caps.iter().find(|c| c.name == "name") else {
@@ -139,7 +141,12 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 byte_to_line(&offs, name_cap.start)
             };
 
-            let is_method = qual.is_some();
+            let is_method = if let Some(q) = qual.as_deref() {
+                let first = q.split('.').next().unwrap_or("");
+                !import_aliases.contains(first)
+            } else {
+                false
+            };
             let key = (ln, name.to_string(), qual.clone(), is_method);
             if !seen.insert(key) {
                 continue;
@@ -367,6 +374,26 @@ def run(x):
     }
 
     #[test]
+    fn unresolved_refs_marks_import_alias_calls_as_non_method() {
+        let src = r#"import importlib
+from pkg import mod as local_mod
+
+def run():
+    importlib.import_module('x')
+    local_mod.run()
+"#;
+        let ana = SpecPyAnalyzer::new();
+        let refs = ana.unresolved_refs("pkg/main.py", src);
+
+        assert!(refs.iter().any(|r| {
+            r.name == "import_module" && r.qualifier.as_deref() == Some("importlib") && !r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "run" && r.qualifier.as_deref() == Some("local_mod") && !r.is_method
+        }));
+    }
+
+    #[test]
     fn imports_extract_alias_from_and_relative_paths() {
         let src = r#"import os
 import util.helpers as uh
@@ -442,14 +469,14 @@ from pkg.star import *
 
         let refs = ana.unresolved_refs("pkg/sub/main.py", src);
         assert!(refs.iter().any(|r| {
-            r.name == "import_module" && r.qualifier.as_deref() == Some("importlib") && r.is_method
+            r.name == "import_module" && r.qualifier.as_deref() == Some("importlib") && !r.is_method
         }));
         assert!(
             refs.iter()
                 .any(|r| r.name == "imod" && r.qualifier.is_none() && !r.is_method)
         );
         assert!(refs.iter().any(|r| {
-            r.name == "load" && r.qualifier.as_deref() == Some("local_loader") && r.is_method
+            r.name == "load" && r.qualifier.as_deref() == Some("local_loader") && !r.is_method
         }));
         assert!(refs.iter().any(|r| {
             r.name == "handle" && r.qualifier.as_deref() == Some("handler") && r.is_method
