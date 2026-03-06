@@ -1003,9 +1003,67 @@ fn lsp_engine_strict_mock_java_both_fixture_runs() {
     let impacted1 = impacted_name_set(&out1);
     let impacted2 = impacted_name_set(&out2);
 
+    let changed_ids1: Vec<String> = out1
+        .changed_symbols
+        .iter()
+        .map(|s| s.id.0.clone())
+        .collect();
+    let changed_ids2: Vec<String> = out2
+        .changed_symbols
+        .iter()
+        .map(|s| s.id.0.clone())
+        .collect();
+    let impacted_ids1: Vec<String> = out1
+        .impacted_symbols
+        .iter()
+        .map(|s| s.id.0.clone())
+        .collect();
+    let impacted_ids2: Vec<String> = out2
+        .impacted_symbols
+        .iter()
+        .map(|s| s.id.0.clone())
+        .collect();
+
+    let mut changed_ids1_sorted = changed_ids1.clone();
+    changed_ids1_sorted.sort();
+    changed_ids1_sorted.dedup();
+    let mut changed_ids2_sorted = changed_ids2.clone();
+    changed_ids2_sorted.sort();
+    changed_ids2_sorted.dedup();
+    let mut impacted_ids1_sorted = impacted_ids1.clone();
+    impacted_ids1_sorted.sort();
+    impacted_ids1_sorted.dedup();
+    let mut impacted_ids2_sorted = impacted_ids2.clone();
+    impacted_ids2_sorted.sort();
+    impacted_ids2_sorted.dedup();
+
     assert_eq!(changed1, BTreeSet::from(["foo".to_string()]));
     assert_eq!(changed1, changed2, "changed_symbols should be stable");
     assert_eq!(impacted1, impacted2, "impacted_symbols should be stable");
+    assert_eq!(
+        changed_ids1, changed_ids2,
+        "changed_symbols order should be stable"
+    );
+    assert_eq!(
+        impacted_ids1, impacted_ids2,
+        "impacted_symbols order should be stable"
+    );
+    assert_eq!(
+        changed_ids1, changed_ids1_sorted,
+        "changed_symbols should be sorted/deduped"
+    );
+    assert_eq!(
+        changed_ids2, changed_ids2_sorted,
+        "changed_symbols should be sorted/deduped"
+    );
+    assert_eq!(
+        impacted_ids1, impacted_ids1_sorted,
+        "impacted_symbols should be sorted/deduped"
+    );
+    assert_eq!(
+        impacted_ids2, impacted_ids2_sorted,
+        "impacted_symbols should be sorted/deduped"
+    );
 }
 
 #[test]
