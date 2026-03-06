@@ -488,4 +488,50 @@ public class Main {
             r.name == "compute" && r.qualifier.as_deref() == Some("Outer.Inner") && !r.is_method
         }));
     }
+
+    #[test]
+    fn java_hard_case_fixture_overload_static_import_nested() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/java/analyzer_hard_cases.java"
+        ));
+        let ana = SpecJavaAnalyzer::new();
+
+        let syms = ana.symbols_in_file("demo/Parser.java", src);
+        let parse_count = syms
+            .iter()
+            .filter(|s| s.name == "parse" && matches!(s.kind, SymbolKind::Method))
+            .count();
+        assert_eq!(parse_count, 2, "expected overloaded parse methods");
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "run" && matches!(s.kind, SymbolKind::Method))
+        );
+
+        let refs = ana.unresolved_refs("demo/Parser.java", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "compute" && r.qualifier.as_deref() == Some("Outer.Inner") && !r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "parseInt" && r.qualifier.as_deref() == Some("Integer") && !r.is_method
+        }));
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "emptyList" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(
+            refs.iter()
+                .any(|r| { r.name == "requireNonNull" && r.qualifier.is_none() && !r.is_method })
+        );
+
+        let imports = ana.imports_in_file("demo/Parser.java", src);
+        assert_eq!(
+            imports.get("emptyList").map(String::as_str),
+            Some("java::util::Collections::emptyList")
+        );
+        assert_eq!(
+            imports.get("requireNonNull").map(String::as_str),
+            Some("java::util::Objects::requireNonNull")
+        );
+    }
 }
