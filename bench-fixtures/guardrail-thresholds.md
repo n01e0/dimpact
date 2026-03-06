@@ -44,3 +44,29 @@ scripts/bench-impact-engines.sh \
   --min-lsp-changed 7 \
   --min-lsp-impacted 15
 ```
+
+## Threshold update policy (BJ40-4)
+
+### Review timing
+- Review thresholds when either condition is met:
+  - every 2 weeks, or
+  - after 20 additional successful bench runs for the target language/fixture.
+
+### Raise policy (stricter)
+- Raise `min-lsp-changed` / `min-lsp-impacted` only when all of the following hold:
+  - at least 20 recent successful runs are available,
+  - the 10th percentile (p10) for each metric is greater than current threshold + 2,
+  - no unexplained dip/regression is observed in the latest 10 successful runs.
+- Raise in small steps (`+1` or `+2` max per update) to avoid sudden CI instability.
+
+### Lower policy (more relaxed)
+- Lower thresholds only when all of the following hold:
+  - guardrail failures occur in 3 or more recent runs,
+  - investigation indicates environment/tooling noise (not product regression),
+  - rerun with same fixture confirms expected changed/impacted shape is preserved.
+- Lower in small steps (`-1` or `-2` max per update).
+
+### Safety floor
+- Never lower below these bootstrap floors:
+  - Go: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
+  - Java: `min-lsp-changed >= 5`, `min-lsp-impacted >= 10`
