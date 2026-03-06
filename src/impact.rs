@@ -263,27 +263,36 @@ pub(crate) fn resolve_references(
                         crate::ir::SymbolKind::Function | crate::ir::SymbolKind::Method
                     )
                 })
-                .max_by_key(|to_sym| {
-                    let mut best = score_candidate(
-                        &r.file,
-                        qualifier,
-                        imported_prefix.as_deref(),
-                        to_sym,
-                        r.is_method,
-                    );
-                    for gp in &glob_prefixes {
-                        let s = score_candidate(
+                .max_by(|a, b| {
+                    let score_for = |to_sym: &&crate::ir::Symbol| {
+                        let mut best = score_candidate(
                             &r.file,
                             qualifier,
-                            Some(gp.as_str()),
+                            imported_prefix.as_deref(),
                             to_sym,
                             r.is_method,
                         );
-                        if s > best {
-                            best = s;
+                        for gp in &glob_prefixes {
+                            let s = score_candidate(
+                                &r.file,
+                                qualifier,
+                                Some(gp.as_str()),
+                                to_sym,
+                                r.is_method,
+                            );
+                            if s > best {
+                                best = s;
+                            }
                         }
-                    }
-                    best
+                        best
+                    };
+                    let sa = score_for(a);
+                    let sb = score_for(b);
+                    sa.cmp(&sb)
+                        // tie-break: prefer earlier declaration line to reduce
+                        // overload-related misses (stable + deterministic)
+                        .then_with(|| b.range.start_line.cmp(&a.range.start_line))
+                        .then_with(|| a.id.0.cmp(&b.id.0))
                 });
         }
 
@@ -320,27 +329,34 @@ pub(crate) fn resolve_references(
                     })
                     .collect();
                 if !cands.is_empty() {
-                    best = cands.into_iter().max_by_key(|to_sym| {
-                        let mut score = score_candidate(
-                            &r.file,
-                            qualifier,
-                            imported_prefix.as_deref(),
-                            to_sym,
-                            r.is_method,
-                        );
-                        for gp in &glob_prefixes {
-                            let s = score_candidate(
+                    best = cands.into_iter().max_by(|a, b| {
+                        let score_for = |to_sym: &&crate::ir::Symbol| {
+                            let mut score = score_candidate(
                                 &r.file,
                                 qualifier,
-                                Some(gp.as_str()),
+                                imported_prefix.as_deref(),
                                 to_sym,
                                 r.is_method,
                             );
-                            if s > score {
-                                score = s;
+                            for gp in &glob_prefixes {
+                                let s = score_candidate(
+                                    &r.file,
+                                    qualifier,
+                                    Some(gp.as_str()),
+                                    to_sym,
+                                    r.is_method,
+                                );
+                                if s > score {
+                                    score = s;
+                                }
                             }
-                        }
-                        score
+                            score
+                        };
+                        let sa = score_for(a);
+                        let sb = score_for(b);
+                        sa.cmp(&sb)
+                            .then_with(|| b.range.start_line.cmp(&a.range.start_line))
+                            .then_with(|| a.id.0.cmp(&b.id.0))
                     });
                 }
             }
@@ -424,6 +440,8 @@ fn file_matches_module_path(file: &str, module_path: &str) -> bool {
         || file_norm.ends_with(&(base.clone() + ".ts"))
         || file_norm.ends_with(&(base.clone() + ".tsx"))
         || file_norm.ends_with(&(base.clone() + ".py"))
+        || file_norm.ends_with(&(base.clone() + ".go"))
+        || file_norm.ends_with(&(base.clone() + ".java"))
         || file_norm.ends_with(&(base.clone() + "/index.js"))
         || file_norm.ends_with(&(base.clone() + "/index.ts"))
         || file_norm.ends_with(&(base.clone() + "/index.tsx"))
@@ -480,6 +498,8 @@ pub fn module_path_for_file(file: &str) -> String {
         || s.ends_with(".ts")
         || s.ends_with(".tsx")
         || s.ends_with(".py")
+        || s.ends_with(".go")
+        || s.ends_with(".java")
     {
         let no_ext = s
             .trim_end_matches(".rs")
@@ -487,7 +507,9 @@ pub fn module_path_for_file(file: &str) -> String {
             .trim_end_matches(".js")
             .trim_end_matches(".ts")
             .trim_end_matches(".tsx")
-            .trim_end_matches(".py");
+            .trim_end_matches(".py")
+            .trim_end_matches(".go")
+            .trim_end_matches(".java");
         return no_ext.replace('/', "::");
     }
     s.replace('/', "::")
@@ -741,5 +763,23 @@ fn foo() { bar(); }
             py_fn_score > rust_fn_score,
             "python function fallback should be preferred"
         );
+    }
+
+    #[test]
+    fn file_matches_module_path_supports_java_files() {
+        assert!(file_matches_module_path(
+            "src/main/java/demo/Outer.java",
+            "demo::Outer"
+        ));
+        assert!(file_matches_module_path("demo/Ops.java", "demo::Ops"));
+    }
+
+    #[test]
+    fn module_path_for_file_strips_go_and_java_extensions() {
+        assert_eq!(
+            module_path_for_file("pkg/service/main.go"),
+            "pkg::service::main"
+        );
+        assert_eq!(module_path_for_file("demo/Ops.java"), "demo::Ops");
     }
 }
