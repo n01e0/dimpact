@@ -1333,6 +1333,160 @@ fn lsp_engine_strict_python_callers_chain_e2e_when_available() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_python_callees_chain_e2e_when_available() {
+    if !should_run_python_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_python_lsp_server() {
+        eprintln!(
+            "skip: python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)"
+        );
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_python_callees_chain_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict python changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict python callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict python callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict python LSP callees result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: python LSP did not report callees in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_python_both_chain_e2e_when_available() {
+    if !should_run_python_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_python_lsp_server() {
+        eprintln!(
+            "skip: python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)"
+        );
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_python_callees_chain_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict python changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict python both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict python both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict python LSP both result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: python LSP did not report both-direction impacts in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_callers_chain_is_stable_when_available() {
     if !should_run_strict_lsp_e2e() {
         eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
