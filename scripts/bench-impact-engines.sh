@@ -257,19 +257,45 @@ if [[ -n "$SAVE_LSP_JSON" ]]; then
   cp "$LSP_JSON" "$SAVE_LSP_JSON"
 fi
 
+THRESHOLD_FAILURES=()
+
 check_min() {
   local name="$1" actual="$2" minv="$3"
-  if [[ -n "$minv" && "$actual" -lt "$minv" ]]; then
-    echo "THRESHOLD FAILED: $name actual=$actual min=$minv" >&2
-    return 1
+  if [[ -z "$minv" ]]; then
+    return 0
+  fi
+  if [[ "$actual" -lt "$minv" ]]; then
+    THRESHOLD_FAILURES+=("$name actual=$actual min=$minv")
+    echo "[threshold] FAIL $name actual=$actual min=$minv"
+  else
+    echo "[threshold] PASS $name actual=$actual min=$minv"
   fi
   return 0
 }
+
+echo
+if [[ -n "$MIN_TS_CHANGED$MIN_TS_IMPACTED$MIN_LSP_CHANGED$MIN_LSP_IMPACTED" ]]; then
+  echo "[threshold-check]"
+fi
 
 check_min "ts.changed" "$TS_CHANGED" "$MIN_TS_CHANGED"
 check_min "ts.impacted" "$TS_IMPACTED" "$MIN_TS_IMPACTED"
 check_min "lsp.changed" "$LSP_CHANGED" "$MIN_LSP_CHANGED"
 check_min "lsp.impacted" "$LSP_IMPACTED" "$MIN_LSP_IMPACTED"
+
+if [[ "${#THRESHOLD_FAILURES[@]}" -gt 0 ]]; then
+  echo
+  echo "[threshold-check] RESULT=FAIL count=${#THRESHOLD_FAILURES[@]}"
+  for f in "${THRESHOLD_FAILURES[@]}"; do
+    echo "  - $f"
+    echo "::error::THRESHOLD FAILED: $f"
+  done
+  exit 1
+fi
+
+if [[ -n "$MIN_TS_CHANGED$MIN_TS_IMPACTED$MIN_LSP_CHANGED$MIN_LSP_IMPACTED" ]]; then
+  echo "[threshold-check] RESULT=PASS"
+fi
 
 if [[ "$RPC_COUNTS" -eq 1 ]]; then
   echo
