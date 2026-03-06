@@ -6,6 +6,7 @@ on:
     paths:
       - "src/engine/**"
       - "scripts/bench-impact-engines.sh"
+      - "bench-fixtures/**"
       - ".github/workflows/bench.yml"
 
 permissions:
@@ -217,4 +218,71 @@ jobs:
             bench-java-report.txt
             bench-java-ts.json
             bench-java-lsp.json
+          if-no-files-found: warn
+
+  bench-python-strict-lsp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pyright-langserver
+        run: |
+          npm install -g pyright
+          pyright-langserver --help >/dev/null
+
+      - name: Build release binary
+        run: cargo build --release -q
+
+      - name: Run Python strict-LSP benchmark
+        timeout-minutes: 12
+        env:
+          DIMPACT_PYTHON_LSP: pyright
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RUNS=1
+          else
+            RUNS=2
+          fi
+
+          echo "runs=$RUNS lang=python fixture=bench-fixtures/python-heavy.diff" > bench-python-report.txt
+          timeout 10m scripts/bench-impact-engines.sh \
+            --diff-file bench-fixtures/python-heavy.diff \
+            --runs "$RUNS" \
+            --direction callers \
+            --lang python \
+            --min-lsp-changed 3 \
+            --min-lsp-impacted 5 \
+            --save-ts-json bench-python-ts.json \
+            --save-lsp-json bench-python-lsp.json \
+            | tee -a bench-python-report.txt
+
+      - name: Publish Python benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## Python strict-LSP benchmark"
+            echo
+            if [ -f bench-python-report.txt ]; then
+              sed 's/^/`/;s/$/`/' bench-python-report.txt
+            else
+              echo "python benchmark report missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Python benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-python-strict-lsp
+          path: |
+            bench-python-report.txt
+            bench-python-ts.json
+            bench-python-lsp.json
           if-no-files-found: warn

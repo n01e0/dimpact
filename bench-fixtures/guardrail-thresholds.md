@@ -45,6 +45,28 @@ scripts/bench-impact-engines.sh \
   --min-lsp-impacted 15
 ```
 
+## Python (NX8-7)
+- target fixture: `bench-fixtures/python-heavy.diff`
+- initial (relaxed) strict-LSP guardrail:
+  - `--min-lsp-changed 3`
+  - `--min-lsp-impacted 5`
+
+### Rationale
+- Python strict-LSP behavior is environment-dependent and can vary by server implementation/version, so bootstrap thresholds are intentionally conservative.
+- Initial values still catch major regressions while reducing false positives during CI rollout.
+- Thresholds should be tightened after enough successful CI history is collected.
+
+### Repro command template
+```bash
+scripts/bench-impact-engines.sh \
+  --diff-file bench-fixtures/python-heavy.diff \
+  --runs 1 \
+  --direction callers \
+  --lang python \
+  --min-lsp-changed 3 \
+  --min-lsp-impacted 5
+```
+
 ## Threshold update policy (BJ40-4)
 
 ### Review timing
@@ -70,3 +92,4 @@ scripts/bench-impact-engines.sh \
 - Never lower below these bootstrap floors:
   - Go: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
   - Java: `min-lsp-changed >= 5`, `min-lsp-impacted >= 10`
+  - Python: `min-lsp-changed >= 2`, `min-lsp-impacted >= 4`

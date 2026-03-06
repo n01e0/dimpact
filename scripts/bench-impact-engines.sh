@@ -17,6 +17,7 @@ set -euo pipefail
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 1 --min-lsp-changed 40 --min-lsp-impacted 18
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java
+#   scripts/bench-impact-engines.sh --diff-file bench-fixtures/python-heavy.diff --runs 1 --direction callers --lang python
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --save-ts-json /tmp/go-ts.json --save-lsp-json /tmp/go-lsp.json
 #   scripts/bench-impact-engines.sh --summary-ts-json /tmp/ts.json --summary-lsp-json /tmp/lsp.json
 
