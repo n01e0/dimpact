@@ -84,7 +84,10 @@ pub fn make_engine_with_auto_policy(
                 log::info!(
                     "engine: kind=Auto policy=strict-if-available selected=LSP(prefer) fallback=TS"
                 );
-                Box::new(self::lsp::LspEngine::new(lsp_cfg))
+                Box::new(self::lsp::LspEngine::new_with_auto_policy(
+                    lsp_cfg,
+                    Some(AutoPolicy::StrictIfAvailable),
+                ))
             }
         },
         EngineKind::Ts => Box::new(self::ts::TsEngine),
