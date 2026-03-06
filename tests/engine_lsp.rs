@@ -927,6 +927,140 @@ fn lsp_engine_strict_mock_go_both_fixture_runs() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_mock_go_callees_fixture_with_refs_only_caps() {
+    let (_tmp, repo) = setup_repo_go_callees_chain_fixture();
+
+    let caps = CapsHint {
+        document_symbol: true,
+        workspace_symbol: true,
+        call_hierarchy: false,
+        references: true,
+        definition: true,
+    };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: Some(caps),
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+    let changed = vec![dimpact::Symbol {
+        id: dimpact::SymbolId::new("go", "main.go", &dimpact::SymbolKind::Function, "b", 5),
+        name: "b".to_string(),
+        kind: dimpact::SymbolKind::Function,
+        file: "main.go".to_string(),
+        range: dimpact::TextRange {
+            start_line: 5,
+            end_line: 9,
+        },
+        language: "go".to_string(),
+    }];
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let out1 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    let out2 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    let changed1: BTreeSet<String> = out1
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let changed2: BTreeSet<String> = out2
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+
+    assert_eq!(changed1, BTreeSet::from(["b".to_string()]));
+    assert_eq!(changed1, changed2, "changed_symbols should be stable");
+    assert_eq!(
+        impacted_name_set(&out1),
+        impacted_name_set(&out2),
+        "impacted_symbols should be stable"
+    );
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_mock_go_both_fixture_with_refs_only_caps() {
+    let (_tmp, repo) = setup_repo_go_both_chain_fixture();
+
+    let caps = CapsHint {
+        document_symbol: true,
+        workspace_symbol: true,
+        call_hierarchy: false,
+        references: true,
+        definition: true,
+    };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: Some(caps),
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+    let changed = vec![dimpact::Symbol {
+        id: dimpact::SymbolId::new("go", "main.go", &dimpact::SymbolKind::Function, "foo", 5),
+        name: "foo".to_string(),
+        kind: dimpact::SymbolKind::Function,
+        file: "main.go".to_string(),
+        range: dimpact::TextRange {
+            start_line: 5,
+            end_line: 9,
+        },
+        language: "go".to_string(),
+    }];
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let out1 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    let out2 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    let changed1: BTreeSet<String> = out1
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let changed2: BTreeSet<String> = out2
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+
+    assert_eq!(changed1, BTreeSet::from(["foo".to_string()]));
+    assert_eq!(changed1, changed2, "changed_symbols should be stable");
+    assert_eq!(
+        impacted_name_set(&out1),
+        impacted_name_set(&out2),
+        "impacted_symbols should be stable"
+    );
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_mock_python_callers_fixture_runs() {
     let (_tmp, repo) = setup_repo_python_callers_chain_fixture();
 
