@@ -105,6 +105,13 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
   - 自動検出順: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
   - 明示指定: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
 
+## 既知の制約
+- Python real-LSP の strict E2E は環境依存のため、best-effort 運用です。
+  - サーバー未導入、または callee/graph 情報が取得できない環境では、失敗ではなく skip になります。
+- Python の call 抽出は現在、主要な呼び出し形（`foo()` / `obj.m()` / `self.m()`）を中心に対応しています。
+  - 実行時解決が必要な高動的ケースは、現時点では保証対象外です。
+- strict モードでは、phase/方向ごとの capability が不足すると、言語/方向/capability ヒント付きの明示エラーを返します。
+
 ## 使用例
 ```bash
 # 呼び出し元チェーンをエッジ付き JSON で出力
