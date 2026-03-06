@@ -28,6 +28,15 @@ jobs:
           key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install TypeScript/JavaScript language server
+        run: |
+          npm install -g typescript typescript-language-server
+          typescript-language-server --help >/dev/null
+
       - name: Run strict real-LSP engine_lsp suite (env-gated)
         env:
           DIMPACT_E2E_STRICT_LSP: "1"
