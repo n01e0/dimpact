@@ -52,7 +52,7 @@ pub fn make_engine(kind: EngineKind, cfg: EngineConfig) -> Box<dyn AnalysisEngin
         }
         EngineKind::Ts => Box::new(self::ts::TsEngine),
         EngineKind::Lsp => {
-            log::warn!("engine: kind=LSP (experimental) strict={}", cfg.lsp_strict);
+            log::info!("engine: kind=LSP (GA) strict={}", cfg.lsp_strict);
             Box::new(self::lsp::LspEngine::new(cfg))
         }
     }
