@@ -45,11 +45,48 @@
 
 - **High**: latest/snapshot依存、retryなし、全言語一括実行、timeout未設定
 - **Medium**: PATH反映タイミング依存、`--help`止まりの起動確認
-- **Low**: ログ粒度不足（現状でも artifact はあるが、言語別前提の切り分けには不足）
+- **Low**: startup の handshake 実検証不足（`--help` ベースの health-check だけでは取り切れないケース）
+
+## 5) nightly 再現手順（ALL57-4）
+
+### GitHub Actions で手動再実行
+
+1. Actions で `Nightly Strict real-LSP E2E` を `workflow_dispatch` 実行
+2. 実行後、artifact `nightly-strict-lsp-execution-logs` を取得
+3. 次のログを優先確認
+   - `install-*.log`（server install/health-check）
+   - `preflight.log` / `engine-lsp-strict-preflight.log`（skip-safe 判定理由）
+   - `engine-lsp-strict-e2e.log`（strict E2E 本体）
+   - `run-graduation-check.log` / `lsp-graduation-check.log`（graduation check）
+
+### ローカルでの最小再現（workflow相当）
+
+```bash
+# repo root
+npm install -g typescript typescript-language-server pyright
+pyright-langserver --help >/dev/null
+typescript-language-server --help >/dev/null
+
+go install golang.org/x/tools/gopls@latest
+gopls version >/dev/null
+
+# jdtls/ruby-lsp は環境依存のため、導入済みであれば同様に --help を確認
+
+DIMPACT_E2E_STRICT_LSP=1 \
+DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 \
+DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 \
+DIMPACT_E2E_STRICT_LSP_PYTHON=1 \
+cargo test -q --test engine_lsp
+```
+
+### 切り分けのコツ
+
+- install 失敗: `install-*.log` の `::error::` 行を先頭に確認
+- skip-safe 判定: `engine-lsp-strict-preflight.log` で対象言語の `enabled=0 reason=...` を確認
+- strict 本体失敗: `engine-lsp-strict-e2e.log` の末尾 + `$GITHUB_STEP_SUMMARY` を併読
 
 ---
 
-次タスク対応先:
-- ALL57-2: install/health-check の明示化（失敗理由の可視化）
-- ALL57-3: strict E2E 前 preflight（skip-safe + reason）
-- ALL57-4: nightly ログ集約と再現手順ドキュメント化
+フォローアップ候補:
+- preflight に startup handshake（initialize）検証を追加
+- 言語別 timeout と retry 方針の細分化

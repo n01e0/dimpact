@@ -13,6 +13,7 @@ concurrency:
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/target
   CARGO_TERM_COLOR: always
+  NIGHTLY_LOG_DIR: ${{ github.workspace }}/nightly-logs
 
 jobs:
   strict_real_lsp_e2e:
@@ -20,6 +21,11 @@ jobs:
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Prepare nightly log directory
+        run: |
+          set -euo pipefail
+          mkdir -p "$NIGHTLY_LOG_DIR"
 
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
@@ -35,6 +41,8 @@ jobs:
       - name: Install + health-check TypeScript/JavaScript language server
         run: |
           set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/install-ts-js.log"
+          exec > >(tee -a "$LOG") 2>&1
           echo "[ts/js] node=$(node -v) npm=$(npm -v)"
 
           if ! npm install -g typescript typescript-language-server; then
@@ -58,6 +66,8 @@ jobs:
       - name: Install + health-check Python language server
         run: |
           set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/install-python.log"
+          exec > >(tee -a "$LOG") 2>&1
           echo "[python] node=$(node -v) npm=$(npm -v)"
 
           if ! npm install -g pyright; then
@@ -85,6 +95,8 @@ jobs:
       - name: Install + health-check Go language server
         run: |
           set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/install-go.log"
+          exec > >(tee -a "$LOG") 2>&1
           echo "[go] go=$(go version)"
 
           if ! go install golang.org/x/tools/gopls@latest; then
@@ -118,6 +130,8 @@ jobs:
       - name: Install + health-check Java language server
         run: |
           set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/install-java.log"
+          exec > >(tee -a "$LOG") 2>&1
           echo "[java] java=$(java -version 2>&1 | head -n 1)"
 
           mkdir -p "$HOME/.local/jdtls" "$HOME/.local/bin"
@@ -165,6 +179,8 @@ jobs:
       - name: Install + health-check Ruby language server
         run: |
           set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/install-ruby.log"
+          exec > >(tee -a "$LOG") 2>&1
           echo "[ruby] ruby=$(ruby -v) gem=$(gem --version)"
 
           if ! gem install ruby-lsp --no-document; then
@@ -188,8 +204,10 @@ jobs:
       - name: Preflight strict real-LSP targets (skip-safe)
         run: |
           set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/preflight.log"
+          exec > >(tee -a "$LOG") 2>&1
 
-          PRE_LOG="engine-lsp-strict-preflight.log"
+          PRE_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-preflight.log"
           : > "$PRE_LOG"
 
           set_gate() {
@@ -289,70 +307,77 @@ jobs:
 
       - name: Run strict real-LSP engine_lsp suite (env-gated)
         run: |
-          set -o pipefail
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/run-engine-lsp-strict.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          STRICT_E2E_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-e2e.log"
           echo "::group::cargo test -q --test engine_lsp (strict real-LSP, env-gated)"
-          cargo test -q --test engine_lsp 2>&1 | tee engine-lsp-strict-e2e.log
+          set +e
+          cargo test -q --test engine_lsp 2>&1 | tee "$STRICT_E2E_LOG"
           status=${PIPESTATUS[0]}
+          set -e
           echo "::endgroup::"
           exit $status
 
       - name: Summarize strict E2E failure logs
         if: failure()
         run: |
+          STRICT_E2E_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-e2e.log"
           {
             echo "## strict real-LSP engine_lsp failure summary"
-            if [ -f engine-lsp-strict-e2e.log ]; then
+            if [ -f "$STRICT_E2E_LOG" ]; then
               echo
               echo "### engine-lsp-strict-e2e.log (tail -n 200)"
               echo '```'
-              tail -n 200 engine-lsp-strict-e2e.log
+              tail -n 200 "$STRICT_E2E_LOG"
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload strict E2E log artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-strict-lsp-logs
-          path: |
-            engine-lsp-strict-preflight.log
-            engine-lsp-strict-e2e.log
-          if-no-files-found: warn
 
       - name: Run LSP graduation auto-check script
         if: always()
         run: |
-          set -o pipefail
-          scripts/verify-lsp-graduation.sh --skip-regression 2>&1 | tee lsp-graduation-check.log
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/run-graduation-check.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          GRAD_LOG="$NIGHTLY_LOG_DIR/lsp-graduation-check.log"
+          set +e
+          scripts/verify-lsp-graduation.sh --skip-regression 2>&1 | tee "$GRAD_LOG"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit $status
 
       - name: Publish LSP graduation check summary
         if: always()
         run: |
+          GRAD_LOG="$NIGHTLY_LOG_DIR/lsp-graduation-check.log"
           {
             echo "## LSP graduation auto-check summary"
-            if [ -f lsp-graduation-check.log ]; then
+            if [ -f "$GRAD_LOG" ]; then
               echo
               echo "### Result"
-              if grep -E '^PASS=[0-9]+ FAIL=[0-9]+' lsp-graduation-check.log >/dev/null; then
-                grep -E '^PASS=[0-9]+ FAIL=[0-9]+' lsp-graduation-check.log
+              if grep -E '^PASS=[0-9]+ FAIL=[0-9]+' "$GRAD_LOG" >/dev/null; then
+                grep -E '^PASS=[0-9]+ FAIL=[0-9]+' "$GRAD_LOG"
               else
                 echo "PASS/FAIL summary line not found"
               fi
               echo
               echo "### Full check log (tail -n 200)"
               echo '```'
-              tail -n 200 lsp-graduation-check.log
+              tail -n 200 "$GRAD_LOG"
               echo '```'
             else
               echo "graduation check log missing"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload LSP graduation check artifact
+      - name: Upload nightly execution log bundle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-lsp-graduation-check
-          path: lsp-graduation-check.log
+          name: nightly-strict-lsp-execution-logs
+          path: ${{ env.NIGHTLY_LOG_DIR }}/**
           if-no-files-found: warn
