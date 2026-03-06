@@ -41,6 +41,8 @@ enum LangOpt {
     Javascript,
     Typescript,
     Tsx,
+    Go,
+    Java,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -629,6 +631,8 @@ fn run_changed(
         LangOpt::Javascript => LanguageMode::Javascript,
         LangOpt::Typescript => LanguageMode::Typescript,
         LangOpt::Tsx => LanguageMode::Tsx,
+        LangOpt::Go => LanguageMode::Go,
+        LangOpt::Java => LanguageMode::Java,
     };
     let ekind = match engine_opt {
         EngineOpt::Auto => EngineKind::Auto,
@@ -738,6 +742,8 @@ fn run_impact(
             LangOpt::Javascript => LanguageMode::Javascript,
             LangOpt::Typescript => LanguageMode::Typescript,
             LangOpt::Tsx => LanguageMode::Tsx,
+            LangOpt::Go => LanguageMode::Go,
+            LangOpt::Java => LanguageMode::Java,
         }
     };
     let direction = match dir_opt {
@@ -1046,6 +1052,8 @@ fn lang_mode_from_str(s: &str) -> Option<LanguageMode> {
         "javascript" | "js" => Some(LanguageMode::Javascript),
         "typescript" | "ts" => Some(LanguageMode::Typescript),
         "tsx" => Some(LanguageMode::Tsx),
+        "go" | "golang" => Some(LanguageMode::Go),
+        "java" => Some(LanguageMode::Java),
         // Python seeds are currently routed through Auto mode until a dedicated
         // LanguageMode::Python is introduced.
         "python" | "py" => Some(LanguageMode::Auto),
@@ -1078,6 +1086,8 @@ fn run_id(
             LangOpt::Javascript => dimpact::LanguageKind::Javascript,
             LangOpt::Typescript => dimpact::LanguageKind::Typescript,
             LangOpt::Tsx => dimpact::LanguageKind::Tsx,
+            LangOpt::Go => dimpact::LanguageKind::Go,
+            LangOpt::Java => dimpact::LanguageKind::Java,
         };
         let Some(analyzer) = dimpact::languages::analyzer_for_path(fp, lkind) else {
             continue;
@@ -1176,12 +1186,14 @@ fn collect_candidate_files(path: Option<&str>, lang_opt: LangOpt) -> anyhow::Res
     // Workspace scan by extensions
     let mut out = Vec::new();
     let exts = match lang_opt {
-        LangOpt::Auto => vec!["rs", "rb", "js", "ts", "tsx", "py"],
+        LangOpt::Auto => vec!["rs", "rb", "js", "ts", "tsx", "py", "go", "java"],
         LangOpt::Rust => vec!["rs"],
         LangOpt::Ruby => vec!["rb"],
         LangOpt::Javascript => vec!["js"],
         LangOpt::Typescript => vec!["ts"],
         LangOpt::Tsx => vec!["tsx"],
+        LangOpt::Go => vec!["go"],
+        LangOpt::Java => vec!["java"],
     };
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     scan_dir(&root, &exts, &mut out)?;
@@ -1257,6 +1269,8 @@ fn impact_from_diff(args: Args, files: Vec<dimpact::FileChanges>) -> anyhow::Res
         LangOpt::Javascript => LanguageMode::Javascript,
         LangOpt::Typescript => LanguageMode::Typescript,
         LangOpt::Tsx => LanguageMode::Tsx,
+        LangOpt::Go => LanguageMode::Go,
+        LangOpt::Java => LanguageMode::Java,
     };
     let direction = match args.direction {
         DirectionOpt::Callers => ImpactDirection::Callers,
@@ -1316,5 +1330,29 @@ mod tests {
     fn lang_mode_from_str_accepts_python_aliases() {
         assert_eq!(lang_mode_from_str("python"), Some(LanguageMode::Auto));
         assert_eq!(lang_mode_from_str("Py"), Some(LanguageMode::Auto));
+    }
+
+    #[test]
+    fn lang_mode_from_str_accepts_go_java_aliases() {
+        assert_eq!(lang_mode_from_str("go"), Some(LanguageMode::Go));
+        assert_eq!(lang_mode_from_str("golang"), Some(LanguageMode::Go));
+        assert_eq!(lang_mode_from_str("java"), Some(LanguageMode::Java));
+    }
+
+    #[test]
+    fn cli_lang_value_enum_accepts_go_java() {
+        let a = Args::try_parse_from(["dimpact", "changed", "--lang", "go"])
+            .expect("go should be accepted by --lang");
+        match a.cmd {
+            Some(Command::Changed { lang, .. }) => assert!(matches!(lang, LangOpt::Go)),
+            _ => panic!("expected changed subcommand"),
+        }
+
+        let b = Args::try_parse_from(["dimpact", "impact", "--lang", "java"])
+            .expect("java should be accepted by --lang");
+        match b.cmd {
+            Some(Command::Impact { lang, .. }) => assert!(matches!(lang, LangOpt::Java)),
+            _ => panic!("expected impact subcommand"),
+        }
     }
 }
