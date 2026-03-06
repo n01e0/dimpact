@@ -23,3 +23,24 @@ scripts/bench-impact-engines.sh \
   --min-lsp-changed 6 \
   --min-lsp-impacted 15
 ```
+
+## Java (BJ40-2)
+- target fixture: `bench-fixtures/java-heavy.diff`
+- initial (relaxed) strict-LSP guardrail:
+  - `--min-lsp-changed 7`
+  - `--min-lsp-impacted 15`
+
+### Rationale
+- Local fixture measurement currently reports changed/impacted counts above these values, so this catches large regressions while keeping early CI rollout tolerant.
+- The threshold is intentionally conservative and should be tuned upward after stable CI trend data is collected.
+
+### Repro command template
+```bash
+scripts/bench-impact-engines.sh \
+  --diff-file bench-fixtures/java-heavy.diff \
+  --runs 1 \
+  --direction callers \
+  --lang java \
+  --min-lsp-changed 7 \
+  --min-lsp-impacted 15
+```
