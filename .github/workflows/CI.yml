@@ -30,8 +30,46 @@ jobs:
           restore-keys: ${{ runner.os }}
       - name: Install cargo-make
         run: cargo install cargo-make
-      - name: Run CI
-        run: cargo check --all-targets && cargo clippy
+      - name: Run cargo check --all-targets
+        run: |
+          set -o pipefail
+          echo "::group::cargo check --all-targets"
+          cargo check --all-targets 2>&1 | tee cargo-check.log
+          status=${PIPESTATUS[0]}
+          echo "::endgroup::"
+          exit $status
+      - name: Run cargo clippy
+        run: |
+          set -o pipefail
+          echo "::group::cargo clippy"
+          cargo clippy 2>&1 | tee cargo-clippy.log
+          status=${PIPESTATUS[0]}
+          echo "::endgroup::"
+          exit $status
+      - name: Summarize check/clippy failure logs
+        if: failure()
+        run: |
+          {
+            echo "## check/clippy failure summary"
+            for f in cargo-check.log cargo-clippy.log; do
+              if [ -f "$f" ]; then
+                echo
+                echo "### $f (tail -n 120)"
+                echo '```'
+                tail -n 120 "$f"
+                echo '```'
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload check/clippy logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-check-logs
+          path: |
+            cargo-check.log
+            cargo-clippy.log
+          if-no-files-found: warn
   test:
     runs-on: ubuntu-latest
     container: ghcr.io/n01e0/dimpact-ci:latest
@@ -43,8 +81,34 @@ jobs:
           path: ~/.cargo
           key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}
-      - name: Run cargo test
-        run: cargo test -q
+      - name: Run cargo test -q
+        run: |
+          set -o pipefail
+          echo "::group::cargo test -q"
+          cargo test -q 2>&1 | tee cargo-test.log
+          status=${PIPESTATUS[0]}
+          echo "::endgroup::"
+          exit $status
+      - name: Summarize cargo test failure logs
+        if: failure()
+        run: |
+          {
+            echo "## cargo test failure summary"
+            if [ -f cargo-test.log ]; then
+              echo
+              echo "### cargo-test.log (tail -n 200)"
+              echo '```'
+              tail -n 200 cargo-test.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload cargo test logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-test-logs
+          path: cargo-test.log
+          if-no-files-found: warn
 
   engine_lsp_regression:
     runs-on: ubuntu-latest
