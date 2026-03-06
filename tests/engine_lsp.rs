@@ -739,6 +739,75 @@ fn lsp_engine_strict_mock_python_callees_fixture_runs() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_mock_python_both_fixture_runs() {
+    let (_tmp, repo) = setup_repo_python_both_chain_fixture();
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("main.py"));
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+    let changed = vec![dimpact::Symbol {
+        id: dimpact::SymbolId::new(
+            "python",
+            "main.py",
+            &dimpact::SymbolKind::Function,
+            "foo",
+            4,
+        ),
+        name: "foo".to_string(),
+        kind: dimpact::SymbolKind::Function,
+        file: "main.py".to_string(),
+        range: dimpact::TextRange {
+            start_line: 4,
+            end_line: 6,
+        },
+        language: "python".to_string(),
+    }];
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let out1 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    let out2 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    let changed1: BTreeSet<String> = out1
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let changed2: BTreeSet<String> = out2
+        .changed_symbols
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    let impacted1 = impacted_name_set(&out1);
+    let impacted2 = impacted_name_set(&out2);
+
+    assert_eq!(changed1, changed2, "changed_symbols should be stable");
+    assert_eq!(impacted1, impacted2, "impacted_symbols should be stable");
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_mock_ruby_both_chain() {
     let (_tmp, repo) = setup_repo_ruby_both_chain_fixture();
 
