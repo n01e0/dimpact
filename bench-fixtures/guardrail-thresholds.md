@@ -1,19 +1,63 @@
-# Go/Java bench guardrail thresholds (initial)
+# Strict-LSP bench guardrail thresholds
 
-This note records initial `min-changed` / `min-impacted` values for strict-LSP bench guardrails.
+This note records `min-lsp-changed` / `min-lsp-impacted` guardrails and latest remeasurement snapshot.
 
-## Go (BJ40-1)
-- target fixture: `bench-fixtures/go-heavy.diff`
-- initial (relaxed) strict-LSP guardrail:
-  - `--min-lsp-changed 6`
-  - `--min-lsp-impacted 15`
+## ALL58-1 remeasurement snapshot
 
-### Rationale
-- The fixture is intentionally heavy and currently produces larger counts on TS fallback/local runs.
-- Initial values are set conservatively (relaxed) to catch major regressions while avoiding over-tight CI failures in early rollout.
-- These are bootstrap values and should be raised after CI trend data stabilizes.
+- primary source: GitHub Actions `bench.yml` run `22776479200` (workflow_dispatch)
+- fallback source: local rerun only for Python (CI python install check currently fails before benchmark execution)
 
-### Repro command template
+| Language | Fixture | Current guardrail | Remeasured changed/impacted | Status | Source |
+|---|---|---:|---:|---|---|
+| TypeScript | `bench-fixtures/ts-heavy.diff` | `6 / 15` | `0 / 0` | FAIL (below guardrail) | CI run `22776479200` (`bench-typescript-strict-lsp`) |
+| JavaScript | `bench-fixtures/js-heavy.diff` | `6 / 15` | `0 / 0` | FAIL (below guardrail) | CI run `22776479200` (`bench-javascript-strict-lsp`) |
+| Ruby | `bench-fixtures/ruby-heavy.diff` | `3 / 5` | `N/A` | BLOCKED (`lsp initialize timeout or invalid response`) | CI run `22776479200` (`bench-ruby-strict-lsp`) |
+| Go | `bench-fixtures/go-heavy.diff` | `6 / 15` | `10 / 31` | PASS | CI run `22776479200` (`bench-go-strict-lsp`) |
+| Java | `bench-fixtures/java-heavy.diff` | `7 / 15` | `N/A` | BLOCKED (`lsp initialize timeout or invalid response`) | CI run `22776479200` (`bench-java-strict-lsp`) |
+| Python | `bench-fixtures/python-heavy.diff` | `3 / 5` | `10 / 31` | PASS (fallback local measurement) | local rerun (`scripts/bench-impact-engines.sh --lang python`) |
+
+### Notes from this snapshot
+- Go/Python are currently above guardrails with margin.
+- TypeScript/JavaScript currently report `0/0` on strict-LSP in CI and fail guardrails.
+- Java/Ruby strict-LSP currently timed out during initialize in this snapshot, so no counts were produced.
+- Python CI job did not reach benchmark execution because `pyright-langserver --help` exits non-zero in current environment; local rerun was used to keep a current measurement.
+
+## Repro command templates
+
+### TypeScript
+```bash
+scripts/bench-impact-engines.sh \
+  --diff-file bench-fixtures/ts-heavy.diff \
+  --runs 1 \
+  --direction callers \
+  --lang typescript \
+  --min-lsp-changed 6 \
+  --min-lsp-impacted 15
+```
+
+### JavaScript
+```bash
+scripts/bench-impact-engines.sh \
+  --diff-file bench-fixtures/js-heavy.diff \
+  --runs 1 \
+  --direction callers \
+  --lang javascript \
+  --min-lsp-changed 6 \
+  --min-lsp-impacted 15
+```
+
+### Ruby
+```bash
+scripts/bench-impact-engines.sh \
+  --diff-file bench-fixtures/ruby-heavy.diff \
+  --runs 1 \
+  --direction callers \
+  --lang ruby \
+  --min-lsp-changed 3 \
+  --min-lsp-impacted 5
+```
+
+### Go
 ```bash
 scripts/bench-impact-engines.sh \
   --diff-file bench-fixtures/go-heavy.diff \
@@ -24,17 +68,7 @@ scripts/bench-impact-engines.sh \
   --min-lsp-impacted 15
 ```
 
-## Java (BJ40-2)
-- target fixture: `bench-fixtures/java-heavy.diff`
-- initial (relaxed) strict-LSP guardrail:
-  - `--min-lsp-changed 7`
-  - `--min-lsp-impacted 15`
-
-### Rationale
-- Local fixture measurement currently reports changed/impacted counts above these values, so this catches large regressions while keeping early CI rollout tolerant.
-- The threshold is intentionally conservative and should be tuned upward after stable CI trend data is collected.
-
-### Repro command template
+### Java
 ```bash
 scripts/bench-impact-engines.sh \
   --diff-file bench-fixtures/java-heavy.diff \
@@ -45,18 +79,7 @@ scripts/bench-impact-engines.sh \
   --min-lsp-impacted 15
 ```
 
-## Python (NX8-7)
-- target fixture: `bench-fixtures/python-heavy.diff`
-- initial (relaxed) strict-LSP guardrail:
-  - `--min-lsp-changed 3`
-  - `--min-lsp-impacted 5`
-
-### Rationale
-- Python strict-LSP behavior is environment-dependent and can vary by server implementation/version, so bootstrap thresholds are intentionally conservative.
-- Initial values still catch major regressions while reducing false positives during CI rollout.
-- Thresholds should be tightened after enough successful CI history is collected.
-
-### Repro command template
+### Python
 ```bash
 scripts/bench-impact-engines.sh \
   --diff-file bench-fixtures/python-heavy.diff \
@@ -67,7 +90,7 @@ scripts/bench-impact-engines.sh \
   --min-lsp-impacted 5
 ```
 
-## Threshold update policy (BJ40-4)
+## Threshold update policy
 
 ### Review timing
 - Review thresholds when either condition is met:
@@ -90,6 +113,9 @@ scripts/bench-impact-engines.sh \
 
 ### Safety floor
 - Never lower below these bootstrap floors:
+  - TypeScript: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
+  - JavaScript: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
+  - Ruby: `min-lsp-changed >= 2`, `min-lsp-impacted >= 4`
   - Go: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
   - Java: `min-lsp-changed >= 5`, `min-lsp-impacted >= 10`
   - Python: `min-lsp-changed >= 2`, `min-lsp-impacted >= 4`
