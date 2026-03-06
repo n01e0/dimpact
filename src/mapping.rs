@@ -221,7 +221,12 @@ diff --git a/b.rs b/b.rs
                 .iter()
                 .any(|p| p.ends_with("Main.java"))
         );
-        assert!(out_go.changed_symbols.is_empty());
+        assert!(
+            out_go
+                .changed_symbols
+                .iter()
+                .any(|s| s.file.ends_with("main.go"))
+        );
         assert!(out_java.changed_symbols.is_empty());
     }
 }
