@@ -290,4 +290,36 @@ def foo():
             .expect("name capture");
         assert_eq!(&src[name_cap.start..name_cap.end], "bar");
     }
+
+    #[test]
+    fn python_spec_receiver_call_matches() {
+        let spec = load_python_spec();
+        let compiled = compile_queries_python(&spec).unwrap();
+        let src = r#"class C:
+    def m(self):
+        pass
+
+def foo(self, obj):
+    self.m()
+    obj.m()
+"#;
+        let qr = QueryRunner::new_python();
+        let calls = qr.run_captures(src, &compiled.calls);
+        assert!(!calls.is_empty(), "should match python receiver calls");
+
+        let mut names = Vec::new();
+        let mut quals = Vec::new();
+        for caps in &calls {
+            if let Some(name_cap) = caps.iter().find(|c| c.name == "name") {
+                names.push(src[name_cap.start..name_cap.end].to_string());
+            }
+            if let Some(qual_cap) = caps.iter().find(|c| c.name == "qual") {
+                quals.push(src[qual_cap.start..qual_cap.end].to_string());
+            }
+        }
+
+        assert!(names.iter().any(|n| n == "m"));
+        assert!(quals.iter().any(|q| q == "self"));
+        assert!(quals.iter().any(|q| q == "obj"));
+    }
 }
