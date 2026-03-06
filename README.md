@@ -84,6 +84,16 @@ LSP strict E2E tests
 - Strict LSP E2E tests are opt-in (to avoid flaky CI environments without language servers).
 - Rust strict E2E (requires `rust-analyzer`):
   - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+- strict real-LSP target languages: **TypeScript / JavaScript / Ruby / Go / Java / Python**
+- TypeScript strict E2E (requires `typescript-language-server`):
+  - `DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` also enables TypeScript strict E2E tests.
+- JavaScript strict E2E (requires `typescript-language-server`):
+  - `DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` also enables JavaScript strict E2E tests.
+- Ruby strict E2E (requires `ruby-lsp`):
+  - `DIMPACT_E2E_STRICT_LSP_RUBY=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` also enables Ruby strict E2E tests.
 - Go strict E2E (requires `gopls`):
   - `DIMPACT_E2E_STRICT_LSP_GO=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` also enables Go strict E2E tests.
