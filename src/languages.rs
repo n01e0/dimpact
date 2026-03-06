@@ -76,4 +76,20 @@ mod tests {
         assert!(analyzer_for_path("main.any", LanguageKind::Go).is_none());
         assert!(analyzer_for_path("main.any", LanguageKind::Java).is_none());
     }
+
+    #[test]
+    fn analyzer_for_path_existing_languages_unchanged() {
+        assert!(analyzer_for_path("src/lib.rs", LanguageKind::Auto).is_some());
+        assert!(analyzer_for_path("app/main.rb", LanguageKind::Auto).is_some());
+        assert!(analyzer_for_path("web/main.js", LanguageKind::Auto).is_some());
+        assert!(analyzer_for_path("web/main.ts", LanguageKind::Auto).is_some());
+        assert!(analyzer_for_path("web/main.tsx", LanguageKind::Auto).is_some());
+
+        // Explicit language modes should keep previous behavior independent of extension.
+        assert!(analyzer_for_path("x.any", LanguageKind::Rust).is_some());
+        assert!(analyzer_for_path("x.any", LanguageKind::Ruby).is_some());
+        assert!(analyzer_for_path("x.any", LanguageKind::Javascript).is_some());
+        assert!(analyzer_for_path("x.any", LanguageKind::Typescript).is_some());
+        assert!(analyzer_for_path("x.any", LanguageKind::Tsx).is_some());
+    }
 }
