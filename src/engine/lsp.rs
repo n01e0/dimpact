@@ -447,8 +447,36 @@ impl LspSession {
     }
 
     /// Best-effort capability probe to validate server actually handles methods.
-    /// For now, this only operates in mock mode by reflecting mock_caps; real server probing is TODO.
     pub fn probe_update(&mut self) {
+        if !self._cfg.mock {
+            // Real-server path: if session transport is unavailable (or process already exited),
+            // force capabilities to empty so strategy selection deterministically falls back.
+            let process_exited = self
+                .child
+                .as_mut()
+                .and_then(|c| c.try_wait().ok().flatten())
+                .is_some();
+            if process_exited || self.stdin.is_none() || self.stdout.is_none() {
+                self.capabilities = CapabilityMatrix::default();
+                return;
+            }
+
+            // Probe a real request that does not require an opened document.
+            // If this fails despite advertised workspace symbol capability,
+            // conservatively disable that capability.
+            if self.capabilities.workspace_symbol
+                && self
+                    .request(
+                        "workspace/symbol",
+                        json!({ "query": "__dimpact_probe__" }),
+                        400,
+                    )
+                    .is_err()
+            {
+                self.capabilities.workspace_symbol = false;
+            }
+        }
+
         if let Some(h) = self._cfg.mock_caps {
             self.capabilities.call_hierarchy &= h.call_hierarchy;
             self.capabilities.references &= h.references;
@@ -2676,6 +2704,67 @@ mod tests {
         let sess = LspSession::new(crate::mapping::LanguageMode::Rust, cfg).expect("mock ok");
         assert!(sess.capabilities.document_symbol);
         assert!(sess.capabilities.call_hierarchy);
+    }
+
+    #[test]
+    fn probe_update_non_mock_without_io_disables_caps() {
+        let mut sess = LspSession {
+            _cfg: LspConfig {
+                strict: true,
+                dump_capabilities: false,
+                mock: false,
+                mock_caps: None,
+            },
+            capabilities: CapabilityMatrix {
+                call_hierarchy: true,
+                references: true,
+                definition: true,
+                document_symbol: true,
+                workspace_symbol: true,
+            },
+            child: None,
+            stdin: None,
+            stdout: None,
+            next_id: std::sync::atomic::AtomicU64::new(1),
+            doc_symbol_cache: std::collections::HashMap::new(),
+            prepare_call_hierarchy_cache: std::collections::HashMap::new(),
+            definition_cache: std::collections::HashMap::new(),
+            references_cache: std::collections::HashMap::new(),
+            incoming_calls_cache: std::collections::HashMap::new(),
+            outgoing_calls_cache: std::collections::HashMap::new(),
+            opened_docs: std::collections::HashSet::new(),
+        };
+
+        sess.probe_update();
+        assert!(!sess.capabilities.call_hierarchy);
+        assert!(!sess.capabilities.references);
+        assert!(!sess.capabilities.definition);
+        assert!(!sess.capabilities.document_symbol);
+        assert!(!sess.capabilities.workspace_symbol);
+    }
+
+    #[test]
+    fn probe_update_mock_caps_filter_still_applies() {
+        let cfg = LspConfig {
+            strict: true,
+            dump_capabilities: false,
+            mock: true,
+            mock_caps: Some(crate::engine::CapsHint {
+                call_hierarchy: false,
+                references: true,
+                definition: false,
+                document_symbol: true,
+                workspace_symbol: false,
+            }),
+        };
+        let mut sess = LspSession::new(crate::mapping::LanguageMode::Rust, cfg).expect("mock ok");
+        sess.probe_update();
+
+        assert!(!sess.capabilities.call_hierarchy);
+        assert!(sess.capabilities.references);
+        assert!(!sess.capabilities.definition);
+        assert!(sess.capabilities.document_symbol);
+        assert!(!sess.capabilities.workspace_symbol);
     }
 
     #[test]
