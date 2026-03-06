@@ -32,6 +32,20 @@ jobs:
         run: cargo install cargo-make
       - name: Run CI
         run: cargo check --all-targets && cargo clippy
+  test:
+    runs-on: ubuntu-latest
+    container: ghcr.io/n01e0/dimpact-ci:latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache CARGO_HOME
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}
+      - name: Run cargo test
+        run: cargo test -q
+
   image_build:
     runs-on: ubuntu-latest
     steps:
