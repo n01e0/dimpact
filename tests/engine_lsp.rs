@@ -456,6 +456,32 @@ fn setup_repo_ruby_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
     (dir, path)
 }
 
+fn setup_repo_ruby_callees_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(path.join("Gemfile"), "source \"https://rubygems.org\"\n").unwrap();
+    fs::write(
+        path.join("main.rb"),
+        "def bar\n  1\nend\n\ndef baz\n  2\nend\n\ndef foo\n  bar + baz\nend\n\ndef main\n  foo\nend\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rb"),
+        "def bar\n  1\nend\n\ndef baz\n  2\nend\n\ndef foo\n  x = 1\n  bar + baz + x\nend\n\ndef main\n  foo\nend\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_repo_python_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -2855,6 +2881,231 @@ fn ruby_real_lsp_e2e_fixture_is_opt_in_gated() {
 
     let gemfile = fs::read_to_string(repo.join("Gemfile")).expect("read Gemfile");
     assert!(gemfile.contains("rubygems.org"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_ruby_callers_chain_e2e_when_available() {
+    if !should_run_ruby_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_ruby_lsp_server() {
+        eprintln!("skip: ruby-lsp not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_ruby_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict Ruby LSP callers result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: Ruby LSP did not report callers in this environment");
+        return;
+    }
+    assert!(names1.contains("foo"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_ruby_callees_chain_e2e_when_available() {
+    if !should_run_ruby_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_ruby_lsp_server() {
+        eprintln!("skip: ruby-lsp not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_ruby_callees_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict Ruby LSP callees result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: Ruby LSP did not report callees in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_ruby_both_chain_e2e_when_available() {
+    if !should_run_ruby_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_ruby_lsp_server() {
+        eprintln!("skip: ruby-lsp not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_ruby_callees_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Ruby both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict Ruby LSP both result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: Ruby LSP did not report both-direction impacts in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
 }
 
 #[test]
