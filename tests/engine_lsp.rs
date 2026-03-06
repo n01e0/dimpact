@@ -330,9 +330,13 @@ fn lsp_engine_strict_errors_when_caps_missing() {
     std::env::set_current_dir(&repo).unwrap();
     let err = engine
         .changed_symbols(&files, dimpact::LanguageMode::Rust)
-        .err();
+        .expect_err("strict + no symbol caps should error");
     std::env::set_current_dir(cwd).unwrap();
-    assert!(err.is_some(), "strict + no caps should error");
+
+    let msg = err.to_string();
+    assert!(msg.contains("changed_symbols capability missing"));
+    assert!(msg.contains("language=Rust"));
+    assert!(msg.contains("required=document_symbol or workspace_symbol"));
 }
 
 #[test]
@@ -369,9 +373,65 @@ fn lsp_engine_strict_impact_errors_when_caps_missing() {
     std::env::set_current_dir(&repo).unwrap();
     let err = engine
         .impact(&files, dimpact::LanguageMode::Rust, &opts)
-        .err();
+        .expect_err("strict + no impact caps should error");
     std::env::set_current_dir(cwd).unwrap();
-    assert!(err.is_some(), "strict + no impact caps should error");
+
+    let msg = err.to_string();
+    assert!(msg.contains("impact capability missing"));
+    assert!(msg.contains("language=Rust"));
+    assert!(msg.contains("direction=Callers"));
+    assert!(msg.contains("required=call_hierarchy or (references/definition)"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_impact_from_symbols_errors_when_caps_missing() {
+    let (_tmp, repo) = setup_repo_basic();
+
+    let caps = CapsHint {
+        document_symbol: true,
+        workspace_symbol: true,
+        call_hierarchy: false,
+        references: false,
+        definition: false,
+    };
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: Some(caps),
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let changed = vec![dimpact::Symbol {
+        id: dimpact::SymbolId::new("rust", "main.rs", &dimpact::SymbolKind::Function, "bar", 1),
+        name: "bar".to_string(),
+        kind: dimpact::SymbolKind::Function,
+        file: "main.rs".to_string(),
+        range: dimpact::TextRange {
+            start_line: 1,
+            end_line: 1,
+        },
+        language: "rust".to_string(),
+    }];
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(3),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let err = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Rust, &opts)
+        .expect_err("strict + no impact_from_symbols caps should error");
+    std::env::set_current_dir(cwd).unwrap();
+
+    let msg = err.to_string();
+    assert!(msg.contains("impact_from_symbols capability missing"));
+    assert!(msg.contains("language=Rust"));
+    assert!(msg.contains("direction=Callees"));
+    assert!(msg.contains("required=call_hierarchy or (definition/references)"));
 }
 
 #[test]

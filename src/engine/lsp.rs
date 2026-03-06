@@ -103,6 +103,50 @@ fn did_open_language_id_for_path(path: &str, lang: LanguageMode) -> Option<&'sta
     profile_for_path_or_mode(path, lang).map(|p| p.lsp_language_id)
 }
 
+fn capability_snapshot(c: &CapabilityMatrix) -> String {
+    format!(
+        "call_hierarchy={}, references={}, definition={}, document_symbol={}, workspace_symbol={}",
+        c.call_hierarchy, c.references, c.definition, c.document_symbol, c.workspace_symbol
+    )
+}
+
+fn required_impact_capability_hint(direction: crate::impact::ImpactDirection) -> &'static str {
+    match direction {
+        crate::impact::ImpactDirection::Callers => "call_hierarchy or (references/definition)",
+        crate::impact::ImpactDirection::Callees => "call_hierarchy or (definition/references)",
+        crate::impact::ImpactDirection::Both => "call_hierarchy or (references/definition)",
+    }
+}
+
+fn strict_changed_capability_error(lang: LanguageMode, caps: &CapabilityMatrix) -> anyhow::Error {
+    anyhow::anyhow!(
+        "lsp strict changed_symbols capability missing: language={:?}, required=document_symbol or workspace_symbol, capabilities=[{}]",
+        lang,
+        capability_snapshot(caps)
+    )
+}
+
+fn strict_impact_capability_error(
+    lang: LanguageMode,
+    direction: crate::impact::ImpactDirection,
+    caps: &CapabilityMatrix,
+    from_symbols: bool,
+) -> anyhow::Error {
+    let phase = if from_symbols {
+        "impact_from_symbols"
+    } else {
+        "impact"
+    };
+    anyhow::anyhow!(
+        "lsp strict {} capability missing: language={:?}, direction={:?}, required={}, capabilities=[{}]",
+        phase,
+        lang,
+        direction,
+        required_impact_capability_hint(direction),
+        capability_snapshot(caps)
+    )
+}
+
 fn command_exists(exe: &str, probe_args: &[&str]) -> bool {
     std::process::Command::new(exe)
         .args(probe_args)
@@ -825,7 +869,7 @@ impl super::AnalysisEngine for LspEngine {
                     }
                     ChangedStrategy::TsFallback => {
                         if self.cfg.lsp_strict {
-                            anyhow::bail!("lsp: no suitable symbol capability; strict mode")
+                            Err(strict_changed_capability_error(lang, &_sess.capabilities))
                         } else {
                             self.fallback.changed_symbols(diffs, lang)
                         }
@@ -1075,7 +1119,12 @@ impl super::AnalysisEngine for LspEngine {
                         opts,
                     )
                 } else if self.cfg.lsp_strict {
-                    anyhow::bail!("lsp: no suitable impact capability; strict mode")
+                    Err(strict_impact_capability_error(
+                        lang,
+                        opts.direction,
+                        &_sess.capabilities,
+                        false,
+                    ))
                 } else {
                     self.fallback.impact(diffs, lang, opts)
                 }
@@ -1153,7 +1202,12 @@ impl super::AnalysisEngine for LspEngine {
         } else if sess.capabilities.references || sess.capabilities.definition {
             lsp_impact_references_definition(&mut sess, changed.to_vec(), opts)
         } else if self.cfg.lsp_strict {
-            anyhow::bail!("lsp: no suitable capabilities for impact_from_symbols")
+            Err(strict_impact_capability_error(
+                lang,
+                opts.direction,
+                &sess.capabilities,
+                true,
+            ))
         } else {
             self.fallback.impact_from_symbols(changed, lang, opts)
         }
