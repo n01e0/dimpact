@@ -100,6 +100,7 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 - strict LSP の E2E テストは、言語サーバー未導入環境での CI ぶれ回避のため opt-in です。
 - Rust strict E2E（`rust-analyzer` が必要）:
   - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+- strict real-LSP の対象言語: **TypeScript / JavaScript / Ruby / Go / Java / Python**
 - Go strict E2E（`gopls` が必要）:
   - `DIMPACT_E2E_STRICT_LSP_GO=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` でも Go strict E2E が有効になります。
