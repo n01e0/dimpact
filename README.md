@@ -125,7 +125,9 @@ Usage Examples
   - fixed diff file: `scripts/bench-impact-engines.sh --diff-file /tmp/dimpact.diff --runs 3 --lang rust`
   - include LSP RPC method counts: `scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts`
   - optional minimum guards (fail on low counts): `scripts/bench-impact-engines.sh --base origin/main --runs 1 --min-lsp-changed 40 --min-lsp-impacted 15`
-  - CI workflow: `Benchmark Impact Engines` (manual + PR on engine/script changes)
+  - Go strict-LSP bench (requires `gopls`): `scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go --min-lsp-changed 6 --min-lsp-impacted 15`
+  - Java strict-LSP bench (requires `jdtls`): `scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java --min-lsp-changed 7 --min-lsp-impacted 15`
+  - CI workflow: `Benchmark Impact Engines` (includes rust + Go + Java strict-LSP jobs)
 - Seed via Symbol IDs (no diff needed):
   - `dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json`
 - Seed via JSON file:
