@@ -117,6 +117,12 @@ fn setup_repo_python_callers_chain_fixture() -> (TempDir, std::path::PathBuf) {
     setup_repo_single_file("main.py", initial, updated)
 }
 
+fn setup_repo_python_callees_chain_fixture() -> (TempDir, std::path::PathBuf) {
+    let initial = "def bar():\n    return 1\n\ndef baz():\n    return 2\n\ndef foo():\n    return bar() + baz()\n\ndef main():\n    return foo()\n";
+    let updated = "def bar():\n    return 1\n\ndef baz():\n    return 2\n\ndef foo():\n    x = 1\n    return bar() + baz() + x\n\ndef main():\n    return foo()\n";
+    setup_repo_single_file("main.py", initial, updated)
+}
+
 #[test]
 #[serial]
 fn lsp_engine_falls_back_changed() {
@@ -670,6 +676,65 @@ fn lsp_engine_strict_mock_python_callers_fixture_runs() {
 
     assert_eq!(changed1, expected_changed);
     assert_eq!(impacted1, expected_impacted);
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_mock_python_callees_fixture_runs() {
+    let (_tmp, repo) = setup_repo_python_callees_chain_fixture();
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("main.py"));
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: true,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+    let changed = vec![dimpact::Symbol {
+        id: dimpact::SymbolId::new(
+            "python",
+            "main.py",
+            &dimpact::SymbolKind::Function,
+            "foo",
+            7,
+        ),
+        name: "foo".to_string(),
+        kind: dimpact::SymbolKind::Function,
+        file: "main.py".to_string(),
+        range: dimpact::TextRange {
+            start_line: 7,
+            end_line: 9,
+        },
+        language: "python".to_string(),
+    }];
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let out1 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    let out2 = engine
+        .impact_from_symbols(&changed, dimpact::LanguageMode::Auto, &opts)
+        .unwrap();
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert_eq!(
+        impacted_name_set(&out1),
+        impacted_name_set(&out2),
+        "strict mock callees fixture should be stable"
+    );
 }
 
 #[test]
