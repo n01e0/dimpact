@@ -185,7 +185,7 @@ diff --git a/b.rs b/b.rs
         fs::write(dir.path().join("main.go"), "package main\nfunc main() {}\n").unwrap();
         fs::write(
             dir.path().join("Main.java"),
-            "class Main { static void main(String[] args) {} }\n",
+            "class Main {\n    static void main(String[] args) {\n    }\n}\n",
         )
         .unwrap();
 
@@ -200,9 +200,12 @@ diff --git a/b.rs b/b.rs
         let java_diff = r#"diff --git a/Main.java b/Main.java
 --- a/Main.java
 +++ b/Main.java
-@@ -1 +1,2 @@
- class Main { static void main(String[] args) {} }
-+// changed
+@@ -1,4 +1,5 @@
+ class Main {
+     static void main(String[] args) {
++        // changed
+     }
+ }
 "#;
 
         let parsed_go = parse_unified_diff(go_diff).unwrap();
@@ -227,6 +230,11 @@ diff --git a/b.rs b/b.rs
                 .iter()
                 .any(|s| s.file.ends_with("main.go"))
         );
-        assert!(out_java.changed_symbols.is_empty());
+        assert!(
+            out_java
+                .changed_symbols
+                .iter()
+                .any(|s| s.file.ends_with("Main.java"))
+        );
     }
 }
