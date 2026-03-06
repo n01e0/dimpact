@@ -185,21 +185,109 @@ jobs:
           fi
           echo "[ruby] health-check=ok"
 
-      - name: Language server availability summary
+      - name: Preflight strict real-LSP targets (skip-safe)
         run: |
           set -euo pipefail
-          for cmd in typescript-language-server pyright-langserver gopls jdtls ruby-lsp; do
-            if command -v "$cmd" >/dev/null 2>&1; then
-              echo "[health-summary] $cmd path=$(command -v "$cmd")"
-            else
-              echo "::error::[health-summary] missing command: $cmd"
-              exit 1
+
+          PRE_LOG="engine-lsp-strict-preflight.log"
+          : > "$PRE_LOG"
+
+          set_gate() {
+            local key="$1" enabled="$2" reason="$3"
+            printf -v "$key" '%s' "$enabled"
+            export "$key"
+            echo "${key}=${enabled}" >> "$GITHUB_ENV"
+            echo "${key}=${enabled} reason=${reason}" >> "$PRE_LOG"
+          }
+
+          has_cmd() {
+            command -v "$1" >/dev/null 2>&1
+          }
+
+          if has_cmd rust-analyzer; then
+            set_gate "DIMPACT_E2E_STRICT_LSP" "1" "rust-analyzer available"
+            rust_reason="rust-analyzer available"
+          else
+            set_gate "DIMPACT_E2E_STRICT_LSP" "0" "rust-analyzer missing (skip-safe)"
+            rust_reason="rust-analyzer missing (skip-safe)"
+          fi
+
+          if has_cmd typescript-language-server; then
+            set_gate "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "1" "typescript-language-server available"
+            set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "1" "typescript-language-server available (shared with TS)"
+            ts_reason="typescript-language-server available"
+            js_reason="typescript-language-server available (shared with TS)"
+          else
+            set_gate "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "0" "typescript-language-server missing (skip-safe)"
+            set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "0" "typescript-language-server missing (skip-safe)"
+            ts_reason="typescript-language-server missing (skip-safe)"
+            js_reason="typescript-language-server missing (skip-safe)"
+          fi
+
+          if has_cmd gopls; then
+            set_gate "DIMPACT_E2E_STRICT_LSP_GO" "1" "gopls available"
+            go_reason="gopls available"
+          else
+            set_gate "DIMPACT_E2E_STRICT_LSP_GO" "0" "gopls missing (skip-safe)"
+            go_reason="gopls missing (skip-safe)"
+          fi
+
+          if has_cmd jdtls; then
+            set_gate "DIMPACT_E2E_STRICT_LSP_JAVA" "1" "jdtls available"
+            java_reason="jdtls available"
+          else
+            set_gate "DIMPACT_E2E_STRICT_LSP_JAVA" "0" "jdtls missing (skip-safe)"
+            java_reason="jdtls missing (skip-safe)"
+          fi
+
+          if has_cmd ruby-lsp; then
+            set_gate "DIMPACT_E2E_STRICT_LSP_RUBY" "1" "ruby-lsp available"
+            ruby_reason="ruby-lsp available"
+          else
+            set_gate "DIMPACT_E2E_STRICT_LSP_RUBY" "0" "ruby-lsp missing (skip-safe)"
+            ruby_reason="ruby-lsp missing (skip-safe)"
+          fi
+
+          python_server=""
+          python_reason="python LSP server missing (pyright-langserver/basedpyright-langserver/pylsp) (skip-safe)"
+          if has_cmd pyright-langserver; then
+            python_server="pyright"
+            python_reason="pyright-langserver available"
+          elif has_cmd basedpyright-langserver; then
+            python_server="basedpyright"
+            python_reason="basedpyright-langserver available"
+          elif has_cmd pylsp; then
+            python_server="pylsp"
+            python_reason="pylsp available"
+          fi
+
+          if [ -n "$python_server" ]; then
+            set_gate "DIMPACT_E2E_STRICT_LSP_PYTHON" "1" "$python_reason"
+            echo "DIMPACT_PYTHON_LSP=$python_server" >> "$GITHUB_ENV"
+            echo "DIMPACT_PYTHON_LSP=$python_server reason=selected by preflight" >> "$PRE_LOG"
+          else
+            set_gate "DIMPACT_E2E_STRICT_LSP_PYTHON" "0" "$python_reason"
+          fi
+
+          {
+            echo "## strict real-LSP preflight"
+            echo
+            echo "| target | enabled | reason |"
+            echo "|---|---:|---|"
+            echo "| rust (global strict gate) | ${DIMPACT_E2E_STRICT_LSP:-unset} | ${rust_reason} |"
+            echo "| typescript | ${DIMPACT_E2E_STRICT_LSP_TYPESCRIPT:-unset} | ${ts_reason} |"
+            echo "| javascript | ${DIMPACT_E2E_STRICT_LSP_JAVASCRIPT:-unset} | ${js_reason} |"
+            echo "| go | ${DIMPACT_E2E_STRICT_LSP_GO:-unset} | ${go_reason} |"
+            echo "| java | ${DIMPACT_E2E_STRICT_LSP_JAVA:-unset} | ${java_reason} |"
+            echo "| ruby | ${DIMPACT_E2E_STRICT_LSP_RUBY:-unset} | ${ruby_reason} |"
+            echo "| python | ${DIMPACT_E2E_STRICT_LSP_PYTHON:-unset} | ${python_reason} |"
+            if [ -n "$python_server" ]; then
+              echo
+              echo "python server selected: \`$python_server\`"
             fi
-          done
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run strict real-LSP engine_lsp suite (env-gated)
-        env:
-          DIMPACT_E2E_STRICT_LSP: "1"
         run: |
           set -o pipefail
           echo "::group::cargo test -q --test engine_lsp (strict real-LSP, env-gated)"
@@ -227,7 +315,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nightly-strict-lsp-logs
-          path: engine-lsp-strict-e2e.log
+          path: |
+            engine-lsp-strict-preflight.log
+            engine-lsp-strict-e2e.log
           if-no-files-found: warn
 
       - name: Run LSP graduation auto-check script
