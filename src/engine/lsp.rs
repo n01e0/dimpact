@@ -184,10 +184,20 @@ fn required_impact_capability_hint(direction: crate::impact::ImpactDirection) ->
     }
 }
 
-fn strict_changed_capability_error(lang: LanguageMode, caps: &CapabilityMatrix) -> anyhow::Error {
+fn required_changed_capability_hint() -> &'static str {
+    "document_symbol or workspace_symbol"
+}
+
+fn strict_changed_capability_error(
+    lang: LanguageMode,
+    caps: &CapabilityMatrix,
+    policy: &str,
+) -> anyhow::Error {
     anyhow::anyhow!(
-        "lsp strict changed_symbols capability missing: language={:?}, required=document_symbol or workspace_symbol, capabilities=[{}]",
+        "lsp strict changed_symbols capability missing: policy={}, language={:?}, required={}, capabilities=[{}]",
+        policy,
         lang,
+        required_changed_capability_hint(),
         capability_snapshot(caps)
     )
 }
@@ -197,6 +207,7 @@ fn strict_impact_capability_error(
     direction: crate::impact::ImpactDirection,
     caps: &CapabilityMatrix,
     from_symbols: bool,
+    policy: &str,
 ) -> anyhow::Error {
     let phase = if from_symbols {
         "impact_from_symbols"
@@ -204,8 +215,9 @@ fn strict_impact_capability_error(
         "impact"
     };
     anyhow::anyhow!(
-        "lsp strict {} capability missing: language={:?}, direction={:?}, required={}, capabilities=[{}]",
+        "lsp strict {} capability missing: policy={}, language={:?}, direction={:?}, required={}, capabilities=[{}]",
         phase,
+        policy,
         lang,
         direction,
         required_impact_capability_hint(direction),
@@ -855,14 +867,70 @@ pub(crate) fn decode_jsonrpc_message(input: &[u8]) -> anyhow::Result<(serde_json
 pub struct LspEngine {
     cfg: super::EngineConfig,
     fallback: super::ts::TsEngine,
+    auto_policy: Option<super::AutoPolicy>,
 }
 
 impl LspEngine {
     pub fn new(cfg: super::EngineConfig) -> Self {
+        Self::new_with_auto_policy(cfg, None)
+    }
+
+    pub fn new_with_auto_policy(
+        cfg: super::EngineConfig,
+        auto_policy: Option<super::AutoPolicy>,
+    ) -> Self {
         Self {
             cfg,
             fallback: super::ts::TsEngine,
+            auto_policy,
         }
+    }
+
+    fn policy_label(&self) -> &'static str {
+        match self.auto_policy {
+            Some(super::AutoPolicy::StrictIfAvailable) => "strict-if-available",
+            Some(super::AutoPolicy::Compat) => "compat",
+            None if self.cfg.lsp_strict => "strict",
+            None => "non-strict",
+        }
+    }
+
+    fn prefers_lsp_in_auto(&self) -> bool {
+        matches!(self.auto_policy, Some(super::AutoPolicy::StrictIfAvailable))
+    }
+
+    fn log_capability_fallback_changed(
+        &self,
+        lang: LanguageMode,
+        caps: &CapabilityMatrix,
+        reason: &str,
+    ) {
+        warn!(
+            "engine.lsp.changed_symbols: policy={} fallback=ts reason={} language={:?} required={} capabilities=[{}]",
+            self.policy_label(),
+            reason,
+            lang,
+            required_changed_capability_hint(),
+            capability_snapshot(caps)
+        );
+    }
+
+    fn log_capability_fallback_impact(
+        &self,
+        lang: LanguageMode,
+        direction: crate::impact::ImpactDirection,
+        caps: &CapabilityMatrix,
+        reason: &str,
+    ) {
+        warn!(
+            "engine.lsp.impact: policy={} fallback=ts reason={} language={:?} direction={:?} required={} capabilities=[{}]",
+            self.policy_label(),
+            reason,
+            lang,
+            direction,
+            required_impact_capability_hint(direction),
+            capability_snapshot(caps)
+        );
     }
 }
 
@@ -879,8 +947,8 @@ impl super::AnalysisEngine for LspEngine {
         );
         let files_list: Vec<String> = diffs.iter().filter_map(|fc| fc.new_path.clone()).collect();
         let session_lang = session_mode_for_files(lang, &files_list);
-        // Hybrid policy: 非strict では変更点抽出はTSに委譲（堅牢）
-        if !self.cfg.lsp_strict {
+        // Default non-strict LSP behavior keeps TS fallback-first for compatibility.
+        if !self.cfg.lsp_strict && !self.prefers_lsp_in_auto() {
             if self.cfg.dump_capabilities {
                 // ベストエフォートでcapabilitiesをダンプ
                 let lsp_cfg = LspConfig {
@@ -932,8 +1000,16 @@ impl super::AnalysisEngine for LspEngine {
                         let out = lsp_changed_symbols(&mut _sess, diffs, lang)?;
                         if out.changed_symbols.is_empty() {
                             if self.cfg.lsp_strict {
-                                anyhow::bail!("lsp documentSymbol returned no symbols; strict mode")
+                                anyhow::bail!(
+                                    "lsp changed_symbols returned no symbols; policy=strict language={:?}",
+                                    lang
+                                )
                             } else {
+                                self.log_capability_fallback_changed(
+                                    lang,
+                                    &_sess.capabilities,
+                                    "empty-changed-symbols",
+                                );
                                 self.fallback.changed_symbols(diffs, lang)
                             }
                         } else {
@@ -942,8 +1018,17 @@ impl super::AnalysisEngine for LspEngine {
                     }
                     ChangedStrategy::TsFallback => {
                         if self.cfg.lsp_strict {
-                            Err(strict_changed_capability_error(lang, &_sess.capabilities))
+                            Err(strict_changed_capability_error(
+                                lang,
+                                &_sess.capabilities,
+                                self.policy_label(),
+                            ))
                         } else {
+                            self.log_capability_fallback_changed(
+                                lang,
+                                &_sess.capabilities,
+                                "missing-document-or-workspace-symbol",
+                            );
                             self.fallback.changed_symbols(diffs, lang)
                         }
                     }
@@ -960,6 +1045,12 @@ impl super::AnalysisEngine for LspEngine {
                 if self.cfg.lsp_strict {
                     Err(e)
                 } else {
+                    warn!(
+                        "engine.lsp.changed_symbols: policy={} fallback=ts reason=session-init-failed language={:?} error={}",
+                        self.policy_label(),
+                        lang,
+                        e
+                    );
                     self.fallback.changed_symbols(diffs, lang)
                 }
             }
@@ -1003,7 +1094,7 @@ impl super::AnalysisEngine for LspEngine {
                 }
             }
         }
-        if !self.cfg.lsp_strict && !self.cfg.mock_lsp {
+        if !self.cfg.lsp_strict && !self.cfg.mock_lsp && !self.prefers_lsp_in_auto() {
             return self.fallback.impact(diffs, lang, opts);
         }
         // Attempt LSP impact; if session init fails, fallback only when not strict
@@ -1105,6 +1196,12 @@ impl super::AnalysisEngine for LspEngine {
                             if self.cfg.lsp_strict {
                                 Ok(o_empty)
                             } else {
+                                self.log_capability_fallback_impact(
+                                    lang,
+                                    opts.direction,
+                                    &_sess.capabilities,
+                                    "lsp-produced-empty-impact",
+                                );
                                 self.fallback.impact(diffs, lang, opts)
                             }
                         }
@@ -1180,6 +1277,13 @@ impl super::AnalysisEngine for LspEngine {
                             if self.cfg.lsp_strict {
                                 Err(e)
                             } else {
+                                warn!(
+                                    "engine.lsp.impact: policy={} fallback=ts reason=lsp-impact-failed language={:?} direction={:?} error={}",
+                                    self.policy_label(),
+                                    lang,
+                                    opts.direction,
+                                    e
+                                );
                                 self.fallback.impact(diffs, lang, opts)
                             }
                         }
@@ -1197,8 +1301,15 @@ impl super::AnalysisEngine for LspEngine {
                         opts.direction,
                         &_sess.capabilities,
                         false,
+                        self.policy_label(),
                     ))
                 } else {
+                    self.log_capability_fallback_impact(
+                        lang,
+                        opts.direction,
+                        &_sess.capabilities,
+                        "missing-impact-capabilities",
+                    );
                     self.fallback.impact(diffs, lang, opts)
                 }
             }
@@ -1213,6 +1324,13 @@ impl super::AnalysisEngine for LspEngine {
                 if self.cfg.lsp_strict {
                     Err(e)
                 } else {
+                    warn!(
+                        "engine.lsp.impact: policy={} fallback=ts reason=session-init-failed language={:?} direction={:?} error={}",
+                        self.policy_label(),
+                        lang,
+                        opts.direction,
+                        e
+                    );
                     self.fallback.impact(diffs, lang, opts)
                 }
             }
@@ -1244,6 +1362,13 @@ impl super::AnalysisEngine for LspEngine {
                 if self.cfg.lsp_strict {
                     return Err(e);
                 }
+                warn!(
+                    "engine.lsp.impact_from_symbols: policy={} fallback=ts reason=session-init-failed language={:?} direction={:?} error={}",
+                    self.policy_label(),
+                    lang,
+                    opts.direction,
+                    e
+                );
                 return self.fallback.impact_from_symbols(changed, lang, opts);
             }
         };
@@ -1281,8 +1406,15 @@ impl super::AnalysisEngine for LspEngine {
                 opts.direction,
                 &sess.capabilities,
                 true,
+                self.policy_label(),
             ))
         } else {
+            self.log_capability_fallback_impact(
+                lang,
+                opts.direction,
+                &sess.capabilities,
+                "missing-impact-capabilities",
+            );
             self.fallback.impact_from_symbols(changed, lang, opts)
         }
     }
@@ -2893,6 +3025,45 @@ mod tests {
         assert!(!sess.capabilities.definition);
         assert!(sess.capabilities.document_symbol);
         assert!(!sess.capabilities.workspace_symbol);
+    }
+
+    #[test]
+    fn lsp_engine_policy_label_reflects_auto_policy_context() {
+        let cfg = crate::engine::EngineConfig {
+            lsp_strict: false,
+            dump_capabilities: false,
+            mock_lsp: true,
+            mock_caps: None,
+        };
+        let e = LspEngine::new_with_auto_policy(
+            cfg,
+            Some(crate::engine::AutoPolicy::StrictIfAvailable),
+        );
+        assert_eq!(e.policy_label(), "strict-if-available");
+    }
+
+    #[test]
+    fn strict_capability_errors_include_policy_label() {
+        let caps = CapabilityMatrix {
+            document_symbol: false,
+            workspace_symbol: false,
+            call_hierarchy: false,
+            references: false,
+            definition: false,
+        };
+        let e1 = strict_changed_capability_error(LanguageMode::Python, &caps, "strict");
+        let s1 = format!("{e1}");
+        assert!(s1.contains("policy=strict"));
+
+        let e2 = strict_impact_capability_error(
+            LanguageMode::Python,
+            crate::impact::ImpactDirection::Both,
+            &caps,
+            true,
+            "strict",
+        );
+        let s2 = format!("{e2}");
+        assert!(s2.contains("policy=strict"));
     }
 
     #[test]
