@@ -8,6 +8,8 @@ queries:
   calls: |
     ; bare call: foo()
     (call function: (identifier) @name) @call
+    ; receiver call: obj.m(), self.m()
+    (call function: (attribute object: (_) @qual attribute: (identifier) @name)) @call
   imports: |
     ; import x
     (import_statement) @use
