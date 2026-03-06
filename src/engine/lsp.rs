@@ -2246,6 +2246,9 @@ fn lsp_changed_symbols(
             }
         }
     }
+    symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    symbols.dedup_by(|a, b| a.id.0 == b.id.0);
+
     Ok(crate::mapping::ChangedOutput {
         changed_files,
         changed_symbols: symbols,
@@ -2530,6 +2533,9 @@ fn lsp_build_project_graph(
             }
         }
     }
+    all_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    all_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
+
     // 2) Build edges via references at callee definitions
     let mut edges: Vec<crate::ir::reference::Reference> = Vec::new();
     for to_sym in &all_symbols {
@@ -2582,9 +2588,15 @@ fn lsp_build_project_graph(
         }
     }
 
-    // Deduplicate edges.
-    let mut seen = std::collections::HashSet::new();
-    edges.retain(|e| seen.insert(format!("{}->{}", e.from.0, e.to.0)));
+    // Deduplicate edges deterministically to reduce order/duplicate flakes.
+    edges.sort_by(|a, b| {
+        a.from
+            .0
+            .cmp(&b.from.0)
+            .then_with(|| a.to.0.cmp(&b.to.0))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+    edges.dedup_by(|a, b| a.from.0 == b.from.0 && a.to.0 == b.to.0);
 
     let index = crate::ir::reference::SymbolIndex::build(all_symbols);
     Ok((index, edges))

@@ -81,6 +81,9 @@ pub fn compute_changed_symbols(
         }
     }
 
+    changed_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    changed_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
+
     Ok(ChangedOutput {
         changed_files,
         changed_symbols,
@@ -129,5 +132,45 @@ fn bar() {}
         assert!(out.changed_files.iter().any(|p| p.ends_with("main.rs")));
         assert!(out.changed_symbols.iter().any(|s| s.name == "foo"));
         assert!(!out.changed_symbols.iter().any(|s| s.name == "bar"));
+    }
+
+    #[test]
+    #[serial]
+    fn changed_symbols_are_sorted_and_unique() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.rs"), "fn zeta() {}\n").unwrap();
+        fs::write(dir.path().join("b.rs"), "fn alpha() {}\n").unwrap();
+
+        let diff = r#"diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -1 +1,2 @@
+ fn zeta() {}
++// changed
+
+diff --git a/b.rs b/b.rs
+--- a/b.rs
++++ b/b.rs
+@@ -1 +1,2 @@
+ fn alpha() {}
++// changed
+"#
+        .to_string();
+        let parsed = parse_unified_diff(&diff).unwrap();
+
+        let cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let out = compute_changed_symbols(&parsed, LanguageMode::Rust).unwrap();
+        std::env::set_current_dir(cwd).unwrap();
+
+        let ids: Vec<String> = out.changed_symbols.iter().map(|s| s.id.0.clone()).collect();
+        assert!(!ids.is_empty());
+        assert!(
+            ids.windows(2).all(|w| w[0] <= w[1]),
+            "ids should be sorted: {ids:?}"
+        );
+
+        let unique: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
+        assert_eq!(unique.len(), ids.len(), "ids should be unique: {ids:?}");
     }
 }
