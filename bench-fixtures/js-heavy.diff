@@ -1,0 +1,52 @@
+diff --git a/bench-fixtures/js-heavy/main.js b/bench-fixtures/js-heavy/main.js
+--- a/bench-fixtures/js-heavy/main.js
++++ b/bench-fixtures/js-heavy/main.js
+@@ -2 +2,2 @@
+-  return 0;
++  const v = 0;
++  return v;
+@@ -6 +7,3 @@
+-  return f00() + 1;
++  const v = f00();
++  const inc = 1;
++  return v + inc;
+@@ -10 +13,3 @@
+-  return f01() + 1;
++  const v = f01();
++  const inc = 1;
++  return v + inc;
+@@ -14 +19,3 @@
+-  return f02() + 1;
++  const v = f02();
++  const inc = 1;
++  return v + inc;
+@@ -18 +25,3 @@
+-  return f03() + 1;
++  const v = f03();
++  const inc = 1;
++  return v + inc;
+@@ -22 +31,3 @@
+-  return f04() + 1;
++  const v = f04();
++  const inc = 1;
++  return v + inc;
+@@ -26 +37,3 @@
+-  return f05() + 1;
++  const v = f05();
++  const inc = 1;
++  return v + inc;
+@@ -30 +43,3 @@
+-  return f06() + 1;
++  const v = f06();
++  const inc = 1;
++  return v + inc;
+@@ -34 +49,3 @@
+-  return f07() + 1;
++  const v = f07();
++  const inc = 1;
++  return v + inc;
+@@ -38 +55,3 @@
+-  return f08() + 1;
++  const v = f08();
++  const inc = 1;
++  return v + inc;
