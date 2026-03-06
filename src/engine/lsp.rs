@@ -2688,7 +2688,26 @@ mod tests {
         assert!(path_matches_mode("src/app.mts", LanguageMode::Typescript));
         assert!(path_matches_mode("src/app.rb", LanguageMode::Auto));
         assert!(path_matches_mode("src/tool.py", LanguageMode::Auto));
+        assert!(!path_matches_mode("src/tool.py", LanguageMode::Rust));
         assert!(!path_matches_mode("src/app.md", LanguageMode::Auto));
+    }
+
+    #[test]
+    fn profile_for_path_or_mode_python_detection_and_override() {
+        assert_eq!(
+            profile_for_path_or_mode("pkg/module.py", LanguageMode::Auto),
+            Some(LangProfile {
+                symbol_lang: "python",
+                lsp_language_id: "python"
+            })
+        );
+        assert_eq!(
+            profile_for_path_or_mode("pkg/module.py", LanguageMode::Rust),
+            Some(LangProfile {
+                symbol_lang: "rust",
+                lsp_language_id: "rust"
+            })
+        );
     }
 
     #[test]
@@ -2696,6 +2715,10 @@ mod tests {
         assert_eq!(
             did_open_language_id_for_path("pkg/module.py", LanguageMode::Auto),
             Some("python")
+        );
+        assert_eq!(
+            did_open_language_id_for_path("pkg/module.py", LanguageMode::Rust),
+            Some("rust")
         );
     }
 
