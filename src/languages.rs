@@ -15,6 +15,7 @@ pub trait LanguageAnalyzer {
 }
 
 pub mod go_spec;
+pub mod java_spec;
 pub mod js_spec;
 pub mod path;
 pub mod ruby_spec;
@@ -60,7 +61,7 @@ pub fn analyzer_for_path(path: &str, lang: LanguageKind) -> Option<Box<dyn Langu
         "ts" => Some(Box::new(ts_spec::SpecTsAnalyzer::new_ts())),
         "tsx" => Some(Box::new(ts_spec::SpecTsAnalyzer::new_tsx())),
         "go" => Some(Box::new(go_spec::SpecGoAnalyzer::new())),
-        "java" => None,
+        "java" => Some(Box::new(java_spec::SpecJavaAnalyzer::new())),
         _ => None,
     }
 }
@@ -72,9 +73,9 @@ mod tests {
     #[test]
     fn analyzer_for_path_recognizes_go_java_extensions() {
         assert!(analyzer_for_path("main.go", LanguageKind::Auto).is_some());
-        assert!(analyzer_for_path("Main.java", LanguageKind::Auto).is_none());
+        assert!(analyzer_for_path("Main.java", LanguageKind::Auto).is_some());
         assert!(analyzer_for_path("main.any", LanguageKind::Go).is_some());
-        assert!(analyzer_for_path("main.any", LanguageKind::Java).is_none());
+        assert!(analyzer_for_path("main.any", LanguageKind::Java).is_some());
     }
 
     #[test]
