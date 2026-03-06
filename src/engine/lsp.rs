@@ -99,6 +99,10 @@ fn profile_for_path_or_mode(path: &str, lang: LanguageMode) -> Option<LangProfil
     profile_for_mode(lang).or_else(|| profile_for_path(path))
 }
 
+fn did_open_language_id_for_path(path: &str, lang: LanguageMode) -> Option<&'static str> {
+    profile_for_path_or_mode(path, lang).map(|p| p.lsp_language_id)
+}
+
 /// Stub LSP session. Will later speak JSON-RPC over stdio.
 pub struct LspSession {
     _cfg: LspConfig,
@@ -2229,10 +2233,13 @@ fn lsp_changed_symbols(
         let Some(profile) = profile_for_path_or_mode(path, lang) else {
             continue;
         };
+        let Some(language_id) = did_open_language_id_for_path(path, lang) else {
+            continue;
+        };
         let abspath = std::fs::canonicalize(path).unwrap_or(std::path::PathBuf::from(path));
         let uri = path_to_uri(&abspath);
         let text = std::fs::read_to_string(&abspath).unwrap_or_else(|_| String::new());
-        let _ = sess.ensure_did_open(&uri, profile.lsp_language_id, &text);
+        let _ = sess.ensure_did_open(&uri, language_id, &text);
         if let Ok(items) = sess.req_document_symbol(&uri) {
             for item in &items {
                 collect_symbols_from_item(path, profile.symbol_lang, item, &mut symbols, lines);
@@ -2682,6 +2689,14 @@ mod tests {
         assert!(path_matches_mode("src/app.rb", LanguageMode::Auto));
         assert!(path_matches_mode("src/tool.py", LanguageMode::Auto));
         assert!(!path_matches_mode("src/app.md", LanguageMode::Auto));
+    }
+
+    #[test]
+    fn did_open_language_id_for_path_uses_python_for_py_auto() {
+        assert_eq!(
+            did_open_language_id_for_path("pkg/module.py", LanguageMode::Auto),
+            Some("python")
+        );
     }
 
     #[test]
