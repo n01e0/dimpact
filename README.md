@@ -87,6 +87,9 @@ LSP strict E2E tests
 - Go strict E2E (requires `gopls`):
   - `DIMPACT_E2E_STRICT_LSP_GO=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` also enables Go strict E2E tests.
+- Java strict E2E (requires `jdtls`):
+  - `DIMPACT_E2E_STRICT_LSP_JAVA=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` also enables Java strict E2E tests.
 - Python strict E2E (requires one of `pyright-langserver`, `basedpyright-langserver`, `pylsp`):
   - `DIMPACT_E2E_STRICT_LSP_PYTHON=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` also enables Python strict E2E tests.
