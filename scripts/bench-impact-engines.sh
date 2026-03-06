@@ -13,6 +13,8 @@ set -euo pipefail
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 3 --lang rust
 #   scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 1 --min-lsp-changed 40 --min-lsp-impacted 18
+#   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go
+#   scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java
 
 BASE_REF="origin/main"
 DIFF_INPUT=""
