@@ -68,7 +68,27 @@ fn has_gopls() -> bool {
 }
 
 fn has_jdtls() -> bool {
-    Command::new("jdtls").arg("--help").output().is_ok()
+    Command::new("jdtls")
+        .arg("--help")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn has_typescript_lsp_server() -> bool {
+    Command::new("typescript-language-server")
+        .arg("--help")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn has_ruby_lsp_server() -> bool {
+    Command::new("ruby-lsp")
+        .arg("--help")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn should_run_strict_lsp_e2e() -> bool {
@@ -82,6 +102,27 @@ fn should_run_go_strict_lsp_e2e() -> bool {
 
 fn should_run_java_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP_JAVA").ok().as_deref() == Some("1")
+        || should_run_strict_lsp_e2e()
+}
+
+fn should_run_typescript_strict_lsp_e2e() -> bool {
+    std::env::var("DIMPACT_E2E_STRICT_LSP_TYPESCRIPT")
+        .ok()
+        .as_deref()
+        == Some("1")
+        || should_run_strict_lsp_e2e()
+}
+
+fn should_run_javascript_strict_lsp_e2e() -> bool {
+    std::env::var("DIMPACT_E2E_STRICT_LSP_JAVASCRIPT")
+        .ok()
+        .as_deref()
+        == Some("1")
+        || should_run_strict_lsp_e2e()
+}
+
+fn should_run_ruby_strict_lsp_e2e() -> bool {
+    std::env::var("DIMPACT_E2E_STRICT_LSP_RUBY").ok().as_deref() == Some("1")
         || should_run_strict_lsp_e2e()
 }
 
@@ -253,6 +294,97 @@ fn setup_repo_java_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
     fs::write(
         path.join("src/main/java/Main.java"),
         "class Main {\n    static int bar() {\n        int x = 1;\n        return x;\n    }\n\n    static int foo() {\n        return bar();\n    }\n\n    public static void main(String[] args) {\n        foo();\n    }\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
+fn setup_repo_typescript_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("package.json"),
+        "{\n  \"name\": \"lsp-typescript-fixture\",\n  \"private\": true,\n  \"version\": \"0.1.0\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("tsconfig.json"),
+        "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"module\": \"commonjs\",\n    \"strict\": true\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.ts"),
+        "function bar(): number {\n  return 1;\n}\n\nfunction foo(): number {\n  return bar();\n}\n\nfunction main(): number {\n  return foo();\n}\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.ts"),
+        "function bar(): number {\n  const x = 1;\n  return x;\n}\n\nfunction foo(): number {\n  return bar();\n}\n\nfunction main(): number {\n  return foo();\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
+fn setup_repo_javascript_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("package.json"),
+        "{\n  \"name\": \"lsp-javascript-fixture\",\n  \"private\": true,\n  \"version\": \"0.1.0\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.js"),
+        "function bar() {\n  return 1;\n}\n\nfunction foo() {\n  return bar();\n}\n\nfunction main() {\n  return foo();\n}\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.js"),
+        "function bar() {\n  const x = 1;\n  return x;\n}\n\nfunction foo() {\n  return bar();\n}\n\nfunction main() {\n  return foo();\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
+fn setup_repo_ruby_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(path.join("Gemfile"), "source \"https://rubygems.org\"\n").unwrap();
+    fs::write(
+        path.join("main.rb"),
+        "def bar\n  1\nend\n\ndef foo\n  bar\nend\n\ndef main\n  foo\nend\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rb"),
+        "def bar\n  x = 1\n  x\nend\n\ndef foo\n  bar\nend\n\ndef main\n  foo\nend\n",
     )
     .unwrap();
 
@@ -2109,6 +2241,105 @@ fn python_fixture_for_impact_flow_has_call_chain() {
     assert!(decl_names.contains("main"));
     assert!(call_names.contains("bar"));
     assert!(call_names.contains("foo"));
+}
+
+#[test]
+#[serial]
+fn typescript_real_lsp_e2e_fixture_is_opt_in_gated() {
+    if !should_run_typescript_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e fixture"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_typescript_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("main.ts"));
+    assert!(
+        files[0]
+            .changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+
+    let tsconfig = fs::read_to_string(repo.join("tsconfig.json")).expect("read tsconfig");
+    assert!(tsconfig.contains("\"strict\": true"));
+}
+
+#[test]
+#[serial]
+fn javascript_real_lsp_e2e_fixture_is_opt_in_gated() {
+    if !should_run_javascript_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e fixture"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_javascript_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("main.js"));
+    assert!(
+        files[0]
+            .changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+
+    let package_json = fs::read_to_string(repo.join("package.json")).expect("read package.json");
+    assert!(package_json.contains("lsp-javascript-fixture"));
+}
+
+#[test]
+#[serial]
+fn ruby_real_lsp_e2e_fixture_is_opt_in_gated() {
+    if !should_run_ruby_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e fixture"
+        );
+        return;
+    }
+    if !has_ruby_lsp_server() {
+        eprintln!("skip: ruby-lsp not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_ruby_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("main.rb"));
+    assert!(
+        files[0]
+            .changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+
+    let gemfile = fs::read_to_string(repo.join("Gemfile")).expect("read Gemfile");
+    assert!(gemfile.contains("rubygems.org"));
 }
 
 #[test]
