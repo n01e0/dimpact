@@ -32,55 +32,170 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install TypeScript/JavaScript language server
+      - name: Install + health-check TypeScript/JavaScript language server
         run: |
-          npm install -g typescript typescript-language-server
-          typescript-language-server --help >/dev/null
+          set -euo pipefail
+          echo "[ts/js] node=$(node -v) npm=$(npm -v)"
 
-      - name: Install Python language server
+          if ! npm install -g typescript typescript-language-server; then
+            echo "::error::[ts/js] npm install failed (typescript/typescript-language-server)"
+            exit 1
+          fi
+
+          if ! command -v typescript-language-server >/dev/null 2>&1; then
+            echo "::error::[ts/js] typescript-language-server not found in PATH after install"
+            exit 1
+          fi
+
+          echo "[ts/js] typescript-language-server path=$(command -v typescript-language-server)"
+          if ! typescript-language-server --help >/tmp/typescript-language-server-help.log 2>&1; then
+            echo "::error::[ts/js] typescript-language-server --help failed"
+            cat /tmp/typescript-language-server-help.log >&2
+            exit 1
+          fi
+          echo "[ts/js] health-check=ok"
+
+      - name: Install + health-check Python language server
         run: |
-          npm install -g pyright
-          pyright-langserver --help >/dev/null
+          set -euo pipefail
+          echo "[python] node=$(node -v) npm=$(npm -v)"
+
+          if ! npm install -g pyright; then
+            echo "::error::[python] npm install failed (pyright)"
+            exit 1
+          fi
+
+          if ! command -v pyright-langserver >/dev/null 2>&1; then
+            echo "::error::[python] pyright-langserver not found in PATH after install"
+            exit 1
+          fi
+
+          echo "[python] pyright-langserver path=$(command -v pyright-langserver)"
+          if ! pyright-langserver --help >/tmp/pyright-langserver-help.log 2>&1; then
+            echo "::error::[python] pyright-langserver --help failed"
+            cat /tmp/pyright-langserver-help.log >&2
+            exit 1
+          fi
+          echo "[python] health-check=ok"
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22.x"
 
-      - name: Install Go language server
+      - name: Install + health-check Go language server
         run: |
-          go install golang.org/x/tools/gopls@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          gopls version >/dev/null
+          set -euo pipefail
+          echo "[go] go=$(go version)"
+
+          if ! go install golang.org/x/tools/gopls@latest; then
+            echo "::error::[go] go install failed (gopls@latest)"
+            exit 1
+          fi
+
+          GOBIN="$(go env GOPATH)/bin"
+          export PATH="$GOBIN:$PATH"
+          echo "$GOBIN" >> "$GITHUB_PATH"
+
+          if ! command -v gopls >/dev/null 2>&1; then
+            echo "::error::[go] gopls not found in PATH after install"
+            exit 1
+          fi
+
+          echo "[go] gopls path=$(command -v gopls)"
+          if ! gopls version >/tmp/gopls-version.log 2>&1; then
+            echo "::error::[go] gopls version failed"
+            cat /tmp/gopls-version.log >&2
+            exit 1
+          fi
+          cat /tmp/gopls-version.log
+          echo "[go] health-check=ok"
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Java language server
+      - name: Install + health-check Java language server
         run: |
+          set -euo pipefail
+          echo "[java] java=$(java -version 2>&1 | head -n 1)"
+
           mkdir -p "$HOME/.local/jdtls" "$HOME/.local/bin"
-          curl -fsSL "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz" -o /tmp/jdtls.tar.gz
-          tar -xzf /tmp/jdtls.tar.gz -C "$HOME/.local/jdtls"
+          if ! curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL \
+            "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz" \
+            -o /tmp/jdtls.tar.gz; then
+            echo "::error::[java] failed to download jdtls snapshot tarball"
+            exit 1
+          fi
+
+          if ! tar -xzf /tmp/jdtls.tar.gz -C "$HOME/.local/jdtls"; then
+            echo "::error::[java] failed to extract /tmp/jdtls.tar.gz"
+            exit 1
+          fi
 
           JDTLS_BIN="$(find "$HOME/.local/jdtls" -type f -name jdtls | head -n 1)"
           if [ -z "$JDTLS_BIN" ]; then
-            echo "jdtls binary not found after extraction" >&2
+            echo "::error::[java] jdtls binary not found after extraction"
+            find "$HOME/.local/jdtls" -maxdepth 3 -type f | head -n 50 >&2 || true
             exit 1
           fi
+
           chmod +x "$JDTLS_BIN"
           ln -sf "$JDTLS_BIN" "$HOME/.local/bin/jdtls"
+          export PATH="$HOME/.local/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          jdtls --help >/dev/null
+
+          if ! command -v jdtls >/dev/null 2>&1; then
+            echo "::error::[java] jdtls not found in PATH after install"
+            exit 1
+          fi
+
+          echo "[java] jdtls path=$(command -v jdtls)"
+          if ! jdtls --help >/tmp/jdtls-help.log 2>&1; then
+            echo "::error::[java] jdtls --help failed"
+            cat /tmp/jdtls-help.log >&2
+            exit 1
+          fi
+          echo "[java] health-check=ok"
 
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.2"
 
-      - name: Install Ruby language server
+      - name: Install + health-check Ruby language server
         run: |
-          gem install ruby-lsp --no-document
-          ruby-lsp --help >/dev/null
+          set -euo pipefail
+          echo "[ruby] ruby=$(ruby -v) gem=$(gem --version)"
+
+          if ! gem install ruby-lsp --no-document; then
+            echo "::error::[ruby] gem install failed (ruby-lsp)"
+            exit 1
+          fi
+
+          if ! command -v ruby-lsp >/dev/null 2>&1; then
+            echo "::error::[ruby] ruby-lsp not found in PATH after install"
+            exit 1
+          fi
+
+          echo "[ruby] ruby-lsp path=$(command -v ruby-lsp)"
+          if ! ruby-lsp --help >/tmp/ruby-lsp-help.log 2>&1; then
+            echo "::error::[ruby] ruby-lsp --help failed"
+            cat /tmp/ruby-lsp-help.log >&2
+            exit 1
+          fi
+          echo "[ruby] health-check=ok"
+
+      - name: Language server availability summary
+        run: |
+          set -euo pipefail
+          for cmd in typescript-language-server pyright-langserver gopls jdtls ruby-lsp; do
+            if command -v "$cmd" >/dev/null 2>&1; then
+              echo "[health-summary] $cmd path=$(command -v "$cmd")"
+            else
+              echo "::error::[health-summary] missing command: $cmd"
+              exit 1
+            fi
+          done
 
       - name: Run strict real-LSP engine_lsp suite (env-gated)
         env:
