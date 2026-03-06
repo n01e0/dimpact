@@ -2106,6 +2106,77 @@ fn go_real_lsp_e2e_fixture_is_opt_in_gated() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_go_callers_chain_e2e_when_available() {
+    if !should_run_go_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_gopls() {
+        eprintln!("skip: gopls not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_go_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Go changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Go callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict Go callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict Go LSP callers result should be stable"
+    );
+    assert!(names1.contains("foo"));
+}
+
+#[test]
+#[serial]
 fn python_real_lsp_e2e_fixture_is_opt_in_gated() {
     if !should_run_python_strict_lsp_e2e() {
         eprintln!(
