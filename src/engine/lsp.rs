@@ -27,6 +27,11 @@ struct LangProfile {
     lsp_language_id: &'static str,
 }
 
+const PYTHON_PROFILE: LangProfile = LangProfile {
+    symbol_lang: "python",
+    lsp_language_id: "python",
+};
+
 fn profile_for_mode(lang: LanguageMode) -> Option<LangProfile> {
     match lang {
         LanguageMode::Rust => Some(LangProfile {
@@ -68,6 +73,9 @@ fn profile_for_path(path: &str) -> Option<LangProfile> {
     }
     if path.ends_with(".js") || path.ends_with(".mjs") || path.ends_with(".cjs") {
         return profile_for_mode(LanguageMode::Javascript);
+    }
+    if path.ends_with(".py") {
+        return Some(PYTHON_PROFILE);
     }
     None
 }
@@ -2653,6 +2661,13 @@ mod tests {
                 lsp_language_id: "javascript"
             })
         );
+        assert_eq!(
+            profile_for_path("tools/check.py"),
+            Some(LangProfile {
+                symbol_lang: "python",
+                lsp_language_id: "python"
+            })
+        );
         assert_eq!(profile_for_path("README.md"), None);
     }
 
@@ -2665,6 +2680,7 @@ mod tests {
         assert!(path_matches_mode("src/app.mjs", LanguageMode::Javascript));
         assert!(path_matches_mode("src/app.mts", LanguageMode::Typescript));
         assert!(path_matches_mode("src/app.rb", LanguageMode::Auto));
+        assert!(path_matches_mode("src/tool.py", LanguageMode::Auto));
         assert!(!path_matches_mode("src/app.md", LanguageMode::Auto));
     }
 
