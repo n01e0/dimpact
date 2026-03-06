@@ -33,6 +33,7 @@ pub enum LanguageKind {
     Auto,
     Rust,
     Ruby,
+    Python,
     Javascript,
     Typescript,
     Tsx,
@@ -48,6 +49,7 @@ pub fn analyzer_for_path(path: &str, lang: LanguageKind) -> Option<Box<dyn Langu
     let target = match lang {
         LanguageKind::Rust => "rs",
         LanguageKind::Ruby => "rb",
+        LanguageKind::Python => "py",
         LanguageKind::Javascript => "js",
         LanguageKind::Typescript => "ts",
         LanguageKind::Tsx => "tsx",
@@ -58,6 +60,7 @@ pub fn analyzer_for_path(path: &str, lang: LanguageKind) -> Option<Box<dyn Langu
     match target {
         "rs" => Some(Box::new(rust_spec::SpecRustAnalyzer::new())),
         "rb" => Some(Box::new(ruby_spec::SpecRubyAnalyzer::new())),
+        "py" => Some(Box::new(py_spec::SpecPyAnalyzer::new())),
         "js" => Some(Box::new(js_spec::SpecJsAnalyzer::new())),
         "ts" => Some(Box::new(ts_spec::SpecTsAnalyzer::new_ts())),
         "tsx" => Some(Box::new(ts_spec::SpecTsAnalyzer::new_tsx())),
@@ -72,11 +75,13 @@ mod tests {
     use super::{LanguageKind, analyzer_for_path};
 
     #[test]
-    fn analyzer_for_path_recognizes_go_java_extensions() {
+    fn analyzer_for_path_recognizes_go_java_python_extensions() {
         assert!(analyzer_for_path("main.go", LanguageKind::Auto).is_some());
         assert!(analyzer_for_path("Main.java", LanguageKind::Auto).is_some());
+        assert!(analyzer_for_path("main.py", LanguageKind::Auto).is_some());
         assert!(analyzer_for_path("main.any", LanguageKind::Go).is_some());
         assert!(analyzer_for_path("main.any", LanguageKind::Java).is_some());
+        assert!(analyzer_for_path("main.any", LanguageKind::Python).is_some());
     }
 
     #[test]
@@ -86,17 +91,19 @@ mod tests {
         assert!(analyzer_for_path("web/main.js", LanguageKind::Auto).is_some());
         assert!(analyzer_for_path("web/main.ts", LanguageKind::Auto).is_some());
         assert!(analyzer_for_path("web/main.tsx", LanguageKind::Auto).is_some());
+        assert!(analyzer_for_path("pkg/main.py", LanguageKind::Auto).is_some());
 
         // Explicit language modes should keep previous behavior independent of extension.
         assert!(analyzer_for_path("x.any", LanguageKind::Rust).is_some());
         assert!(analyzer_for_path("x.any", LanguageKind::Ruby).is_some());
+        assert!(analyzer_for_path("x.any", LanguageKind::Python).is_some());
         assert!(analyzer_for_path("x.any", LanguageKind::Javascript).is_some());
         assert!(analyzer_for_path("x.any", LanguageKind::Typescript).is_some());
         assert!(analyzer_for_path("x.any", LanguageKind::Tsx).is_some());
     }
 
     #[test]
-    fn analyzer_for_path_uses_go_java_implementations_not_fallback() {
+    fn analyzer_for_path_uses_go_java_python_implementations_not_fallback() {
         let go = analyzer_for_path("main.go", LanguageKind::Auto).expect("go analyzer");
         assert_eq!(go.language(), "go");
         let go_syms = go.symbols_in_file("main.go", "package main\nfunc main() {}\n");
@@ -110,5 +117,10 @@ mod tests {
         );
         assert!(java_syms.iter().any(|s| s.name == "Main"));
         assert!(java_syms.iter().any(|s| s.name == "main"));
+
+        let py = analyzer_for_path("main.py", LanguageKind::Auto).expect("python analyzer");
+        assert_eq!(py.language(), "python");
+        let py_syms = py.symbols_in_file("main.py", "def run():\n    return 1\n");
+        assert!(py_syms.iter().any(|s| s.name == "run"));
     }
 }

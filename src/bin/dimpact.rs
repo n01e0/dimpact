@@ -1085,7 +1085,7 @@ fn run_id(
             LangOpt::Auto => dimpact::LanguageKind::Auto,
             LangOpt::Rust => dimpact::LanguageKind::Rust,
             LangOpt::Ruby => dimpact::LanguageKind::Ruby,
-            LangOpt::Python => dimpact::LanguageKind::Auto,
+            LangOpt::Python => dimpact::LanguageKind::Python,
             LangOpt::Javascript => dimpact::LanguageKind::Javascript,
             LangOpt::Typescript => dimpact::LanguageKind::Typescript,
             LangOpt::Tsx => dimpact::LanguageKind::Tsx,
