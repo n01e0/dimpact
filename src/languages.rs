@@ -18,6 +18,7 @@ pub mod go_spec;
 pub mod java_spec;
 pub mod js_spec;
 pub mod path;
+pub mod py_spec;
 pub mod ruby_spec;
 pub mod rust;
 pub mod rust_spec;
