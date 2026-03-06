@@ -37,3 +37,21 @@
 - 卒業判定は「単発成功」ではなく「継続安定」を重視する。
 - 閾値を急に厳格化せず、小刻み調整で CI 安定性を優先する。
 - language server 未導入環境を考慮し、real-LSP E2E は skip-safe 方針を維持する。
+
+## GA判定 実行結果（GA52-4）
+
+実行日: 2026-03-06 (Asia/Tokyo)
+
+- 実行コマンド:
+  - `scripts/verify-lsp-graduation.sh`
+- 実行結果:
+  - `PASS=62 FAIL=0`
+
+### 補足（同実行内で確認された統合回帰）
+- `cargo test -q --test engine_lsp` ✅
+- `cargo test -q` ✅
+- `cargo clippy -q --all-targets -- -D warnings` ✅
+
+### 判定
+- 現時点の GA 判定チェックはすべて pass。
+- required-check 相当の CI レーン（`lsp_graduation_check`）と nightly レーンの両方で同スクリプトを実行する構成。
