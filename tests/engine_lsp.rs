@@ -67,12 +67,21 @@ fn has_gopls() -> bool {
         .unwrap_or(false)
 }
 
+fn has_jdtls() -> bool {
+    Command::new("jdtls").arg("--help").output().is_ok()
+}
+
 fn should_run_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP").ok().as_deref() == Some("1")
 }
 
 fn should_run_go_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP_GO").ok().as_deref() == Some("1")
+        || should_run_strict_lsp_e2e()
+}
+
+fn should_run_java_strict_lsp_e2e() -> bool {
+    std::env::var("DIMPACT_E2E_STRICT_LSP_JAVA").ok().as_deref() == Some("1")
         || should_run_strict_lsp_e2e()
 }
 
@@ -213,6 +222,37 @@ fn setup_repo_go_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
     fs::write(
         path.join("main.go"),
         "package main\n\nfunc bar() int {\n\tx := 1\n\treturn x\n}\n\nfunc foo() int {\n\treturn bar()\n}\n\nfunc main() {\n\t_ = foo()\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
+fn setup_repo_java_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("src/main/java")).unwrap();
+    fs::write(
+        path.join("pom.xml"),
+        "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n         xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n         xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>dev.dimpact</groupId>\n  <artifactId>lsp-java-fixture</artifactId>\n  <version>0.1.0</version>\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n</project>\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("src/main/java/Main.java"),
+        "class Main {\n    static int bar() {\n        return 1;\n    }\n\n    static int foo() {\n        return bar();\n    }\n\n    public static void main(String[] args) {\n        foo();\n    }\n}\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("src/main/java/Main.java"),
+        "class Main {\n    static int bar() {\n        int x = 1;\n        return x;\n    }\n\n    static int foo() {\n        return bar();\n    }\n\n    public static void main(String[] args) {\n        foo();\n    }\n}\n",
     )
     .unwrap();
 
@@ -2102,6 +2142,42 @@ fn go_real_lsp_e2e_fixture_is_opt_in_gated() {
 
     let gomod = fs::read_to_string(repo.join("go.mod")).expect("read go.mod");
     assert!(gomod.contains("module lsp-go-fixture"));
+}
+
+#[test]
+#[serial]
+fn java_real_lsp_e2e_fixture_is_opt_in_gated() {
+    if !should_run_java_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e fixture"
+        );
+        return;
+    }
+    if !has_jdtls() {
+        eprintln!("skip: jdtls not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_java_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(
+        files[0].new_path.as_deref(),
+        Some("src/main/java/Main.java")
+    );
+    assert!(
+        files[0]
+            .changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+
+    let pom = fs::read_to_string(repo.join("pom.xml")).expect("read pom.xml");
+    assert!(pom.contains("<artifactId>lsp-java-fixture</artifactId>"));
 }
 
 #[test]
