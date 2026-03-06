@@ -59,8 +59,21 @@ fn has_python_lsp_server() -> bool {
         })
 }
 
+fn has_gopls() -> bool {
+    Command::new("gopls")
+        .arg("version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 fn should_run_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP").ok().as_deref() == Some("1")
+}
+
+fn should_run_go_strict_lsp_e2e() -> bool {
+    std::env::var("DIMPACT_E2E_STRICT_LSP_GO").ok().as_deref() == Some("1")
+        || should_run_strict_lsp_e2e()
 }
 
 fn should_run_python_strict_lsp_e2e() -> bool {
@@ -178,6 +191,32 @@ fn setup_repo_go_both_chain_fixture() -> (TempDir, std::path::PathBuf) {
     let initial = "package main\n\nfunc bar() {}\n\nfunc foo() {\n    bar()\n}\n\nfunc main() {\n    foo()\n}\n";
     let updated = "package main\n\nfunc bar() {}\n\nfunc foo() {\n    x := 1\n    _ = x\n    bar()\n}\n\nfunc main() {\n    foo()\n}\n";
     setup_repo_single_file("main.go", initial, updated)
+}
+
+fn setup_repo_go_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(path.join("go.mod"), "module lsp-go-fixture\n\ngo 1.22\n").unwrap();
+    fs::write(
+        path.join("main.go"),
+        "package main\n\nfunc bar() int {\n\treturn 1\n}\n\nfunc foo() int {\n\treturn bar()\n}\n\nfunc main() {\n\t_ = foo()\n}\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.go"),
+        "package main\n\nfunc bar() int {\n\tx := 1\n\treturn x\n}\n\nfunc foo() int {\n\treturn bar()\n}\n\nfunc main() {\n\t_ = foo()\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
 }
 
 fn setup_repo_python_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
@@ -2030,6 +2069,39 @@ fn python_fixture_for_impact_flow_has_call_chain() {
     assert!(decl_names.contains("main"));
     assert!(call_names.contains("bar"));
     assert!(call_names.contains("foo"));
+}
+
+#[test]
+#[serial]
+fn go_real_lsp_e2e_fixture_is_opt_in_gated() {
+    if !should_run_go_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e fixture"
+        );
+        return;
+    }
+    if !has_gopls() {
+        eprintln!("skip: gopls not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_go_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("main.go"));
+    assert!(
+        files[0]
+            .changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+
+    let gomod = fs::read_to_string(repo.join("go.mod")).expect("read go.mod");
+    assert!(gomod.contains("module lsp-go-fixture"));
 }
 
 #[test]
