@@ -6,7 +6,7 @@
 
 ## ハイライト
 - デフォルトで Tree‑Sitter エンジン（Auto）：堅牢かつ高速
-- LSP エンジン（実験的）：機能駆動、strict モードでない場合は TS にフォールバック
+- LSP エンジン（GA）：機能駆動、strict モードでない場合は TS にフォールバック
 - 柔軟なシード：Symbol ID または JSON を受け付け
 - Symbol ID ジェネレータ：ファイル/行/名前 から ID を解決、フィルタ指定可能
 
@@ -89,7 +89,7 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 
 ## エンジン選択
 - Auto: デフォルトで Tree‑Sitter エンジン (推奨)
-- LSP (実験的): `--engine lsp`
+- LSP (GA): `--engine lsp`
   - `--engine-lsp-strict`: LSP 課題時に TS にフォールバックしない
   - `--engine-dump-capabilities`: LSP 機能一覧を stderr に出力
 
@@ -156,7 +156,7 @@ git diff --no-ext-diff | dimpact impact --direction callees --max-depth 2 -f yam
 # Tree‑Sitter エンジンを強制 (推奨デフォルト)
 git diff --no-ext-diff | dimpact impact --engine ts -f json
 
-# strict モード付き LSP エンジン + 機能一覧ダンプ (実験的)
+# strict モード付き LSP エンジン + 機能一覧ダンプ (GA)
 git diff --no-ext-diff | dimpact impact --engine lsp --engine-lsp-strict --engine-dump-capabilities -f json
 # Tip: `RUST_LOG=info` で詳細なログを確認
 
