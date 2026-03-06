@@ -359,6 +359,10 @@ pub(crate) fn resolve_references(
     out
 }
 
+fn function_is_method_compatible(language: &str) -> bool {
+    matches!(language, "ruby" | "python")
+}
+
 fn score_candidate(
     from_file: &str,
     qualifier: Option<&str>,
@@ -385,13 +389,15 @@ fn score_candidate(
     {
         score += 15;
     }
-    // prefer method symbol if call site looked like a method
+    // prefer method symbol if call site looked like a method.
+    // Dynamic languages may represent methods as Function in some paths,
+    // so keep a language-scoped fallback.
     if call_is_method {
         if matches!(cand.kind, crate::ir::SymbolKind::Method) {
             score += 25;
-        }
-        // Ruby: def は Functionとして表現されることが多いので、メソッド的呼び出しでも許容
-        if cand.language == "ruby" && matches!(cand.kind, crate::ir::SymbolKind::Function) {
+        } else if matches!(cand.kind, crate::ir::SymbolKind::Function)
+            && function_is_method_compatible(&cand.language)
+        {
             score += 20;
         }
     } else if matches!(cand.kind, crate::ir::SymbolKind::Function) {
@@ -663,5 +669,77 @@ fn foo() { bar(); }
         let out = compute_impact(&[bar], &index, &refs, &ImpactOptions::default());
         std::env::set_current_dir(cwd).unwrap();
         assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+    }
+
+    #[test]
+    fn method_compatibility_accepts_python_and_ruby_function_symbols() {
+        assert!(function_is_method_compatible("ruby"));
+        assert!(function_is_method_compatible("python"));
+        assert!(!function_is_method_compatible("rust"));
+    }
+
+    #[test]
+    fn score_candidate_prefers_method_but_allows_python_function_fallback() {
+        let method = Symbol {
+            id: crate::ir::SymbolId::new(
+                "python",
+                "pkg/a.py",
+                &crate::ir::SymbolKind::Method,
+                "m",
+                1,
+            ),
+            name: "m".to_string(),
+            kind: crate::ir::SymbolKind::Method,
+            file: "pkg/a.py".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "python".to_string(),
+        };
+        let py_fn = Symbol {
+            id: crate::ir::SymbolId::new(
+                "python",
+                "pkg/a.py",
+                &crate::ir::SymbolKind::Function,
+                "m",
+                1,
+            ),
+            name: "m".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "pkg/a.py".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "python".to_string(),
+        };
+        let rust_fn = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "src/lib.rs",
+                &crate::ir::SymbolKind::Function,
+                "m",
+                1,
+            ),
+            name: "m".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "src/lib.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "rust".to_string(),
+        };
+
+        let m_score = score_candidate("pkg/b.py", None, None, &method, true);
+        let py_fn_score = score_candidate("pkg/b.py", None, None, &py_fn, true);
+        let rust_fn_score = score_candidate("pkg/b.py", None, None, &rust_fn, true);
+
+        assert!(m_score > py_fn_score, "method should score highest");
+        assert!(
+            py_fn_score > rust_fn_score,
+            "python function fallback should be preferred"
+        );
     }
 }
