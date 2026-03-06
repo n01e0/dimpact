@@ -95,8 +95,15 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 `env_logger` を使用。`RUST_LOG=info`（または `debug`/`trace`）で診断ログを有効化。
 
 ## LSP strict E2E テスト
-- strict LSP の E2E テストは、`rust-analyzer` がない環境での CI ぶれ回避のため opt-in です。
-- 実行方法: `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+- strict LSP の E2E テストは、言語サーバー未導入環境での CI ぶれ回避のため opt-in です。
+- Rust strict E2E（`rust-analyzer` が必要）:
+  - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+- Python strict E2E（`pyright-langserver` / `basedpyright-langserver` / `pylsp` のいずれかが必要）:
+  - `DIMPACT_E2E_STRICT_LSP_PYTHON=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` でも Python strict E2E が有効になります。
+- Python LSP サーバー選択:
+  - 自動検出順: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
+  - 明示指定: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
 
 ## 使用例
 ```bash
