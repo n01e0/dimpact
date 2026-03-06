@@ -114,3 +114,40 @@ jobs:
           name: nightly-strict-lsp-logs
           path: engine-lsp-strict-e2e.log
           if-no-files-found: warn
+
+      - name: Run LSP graduation auto-check script
+        if: always()
+        run: |
+          set -o pipefail
+          scripts/verify-lsp-graduation.sh --skip-regression 2>&1 | tee lsp-graduation-check.log
+
+      - name: Publish LSP graduation check summary
+        if: always()
+        run: |
+          {
+            echo "## LSP graduation auto-check summary"
+            if [ -f lsp-graduation-check.log ]; then
+              echo
+              echo "### Result"
+              if grep -E '^PASS=[0-9]+ FAIL=[0-9]+' lsp-graduation-check.log >/dev/null; then
+                grep -E '^PASS=[0-9]+ FAIL=[0-9]+' lsp-graduation-check.log
+              else
+                echo "PASS/FAIL summary line not found"
+              fi
+              echo
+              echo "### Full check log (tail -n 200)"
+              echo '```'
+              tail -n 200 lsp-graduation-check.log
+              echo '```'
+            else
+              echo "graduation check log missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload LSP graduation check artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-lsp-graduation-check
+          path: lsp-graduation-check.log
+          if-no-files-found: warn
