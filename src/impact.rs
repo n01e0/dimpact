@@ -95,7 +95,13 @@ pub fn build_project_graph() -> anyhow::Result<(SymbolIndex, Vec<Reference>)> {
         let path = entry.path();
         if path.is_file() {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if ext != "rs" && ext != "rb" && ext != "js" && ext != "ts" && ext != "tsx" {
+            if ext != "rs"
+                && ext != "rb"
+                && ext != "js"
+                && ext != "ts"
+                && ext != "tsx"
+                && ext != "py"
+            {
                 continue;
             }
             let path_str = path
@@ -114,8 +120,12 @@ pub fn build_project_graph() -> anyhow::Result<(SymbolIndex, Vec<Reference>)> {
                 LanguageKind::Javascript
             } else if ext == "ts" {
                 LanguageKind::Typescript
-            } else {
+            } else if ext == "tsx" {
                 LanguageKind::Tsx
+            } else {
+                // Python is admitted into graph scan scope in Loop 24,
+                // while parser/spec support arrives in subsequent loops.
+                LanguageKind::Auto
             };
             let Some(analyzer) = analyzer_for_path(&path_str, kind) else {
                 continue;
@@ -400,15 +410,18 @@ fn file_matches_module_path(file: &str, module_path: &str) -> bool {
     } else {
         std::borrow::Cow::from(file)
     };
-    // Match either <base> with supported extensions (and Rust mod.rs), and JS/TS index files
+    // Match either <base> with supported extensions (and Rust mod.rs),
+    // JS/TS index files, and Python package entry files.
     file_norm.ends_with(&(base.clone() + ".rs"))
         || file_norm.ends_with(&(base.clone() + ".rb"))
         || file_norm.ends_with(&(base.clone() + ".js"))
         || file_norm.ends_with(&(base.clone() + ".ts"))
         || file_norm.ends_with(&(base.clone() + ".tsx"))
+        || file_norm.ends_with(&(base.clone() + ".py"))
         || file_norm.ends_with(&(base.clone() + "/index.js"))
         || file_norm.ends_with(&(base.clone() + "/index.ts"))
         || file_norm.ends_with(&(base.clone() + "/index.tsx"))
+        || file_norm.ends_with(&(base.clone() + "/__init__.py"))
         || file_norm.ends_with(&(base + "/mod.rs"))
 }
 
@@ -451,18 +464,24 @@ pub fn module_path_for_file(file: &str) -> String {
         let dir = p.parent().unwrap_or_else(|| std::path::Path::new(""));
         return dir.to_string_lossy().replace('/', "::");
     }
+    if s.ends_with("/__init__.py") {
+        let dir = p.parent().unwrap_or_else(|| std::path::Path::new(""));
+        return dir.to_string_lossy().replace('/', "::");
+    }
     if s.ends_with(".rs")
         || s.ends_with(".rb")
         || s.ends_with(".js")
         || s.ends_with(".ts")
         || s.ends_with(".tsx")
+        || s.ends_with(".py")
     {
         let no_ext = s
             .trim_end_matches(".rs")
             .trim_end_matches(".rb")
             .trim_end_matches(".js")
             .trim_end_matches(".ts")
-            .trim_end_matches(".tsx");
+            .trim_end_matches(".tsx")
+            .trim_end_matches(".py");
         return no_ext.replace('/', "::");
     }
     s.replace('/', "::")

@@ -1176,7 +1176,7 @@ fn collect_candidate_files(path: Option<&str>, lang_opt: LangOpt) -> anyhow::Res
     // Workspace scan by extensions
     let mut out = Vec::new();
     let exts = match lang_opt {
-        LangOpt::Auto => vec!["rs", "rb", "js", "ts", "tsx"],
+        LangOpt::Auto => vec!["rs", "rb", "js", "ts", "tsx", "py"],
         LangOpt::Rust => vec!["rs"],
         LangOpt::Ruby => vec!["rb"],
         LangOpt::Javascript => vec!["js"],

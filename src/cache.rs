@@ -401,7 +401,7 @@ fn list_workspace_files() -> Vec<String> {
         let path = entry.path();
         if path.is_file() {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if ["rs", "rb", "js", "ts", "tsx"].contains(&ext) {
+            if ["rs", "rb", "js", "ts", "tsx", "py"].contains(&ext) {
                 let path_str = path
                     .strip_prefix("./")
                     .unwrap_or(path)
@@ -607,6 +607,7 @@ fn guess_lang_from_ext(path: &str) -> &'static str {
         "js" => "javascript",
         "ts" => "typescript",
         "tsx" => "tsx",
+        "py" => "python",
         _ => "unknown",
     }
 }
