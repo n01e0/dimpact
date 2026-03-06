@@ -148,6 +148,11 @@ scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 
 # Java strict-LSP ベンチ（`jdtls` が必要）
 scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java --min-lsp-changed 7 --min-lsp-impacted 15
 # CI ワークフロー: Benchmark Impact Engines（rust + Go + Java strict-LSP ジョブを実行）
+# 運用上の注意（既存 TS/Rust 運用との整合）
+# - Rust 既存ベンチ（`--base origin/main --lang rust`）を基準運用として維持する
+# - Go/Java は固定 heavy diff fixture を使う追加 guardrail で、Rust ベースラインの代替ではない
+# - 閾値は言語/fixture ごとに別管理し、Rust と Go/Java の絶対件数を直接比較しない
+# - 閾値調整は小刻みに行い、既存 TS/Rust CI の安定性を優先する
 
 # Symbol ID でシードし、diff 不要で影響解析
 dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json

@@ -128,6 +128,11 @@ Usage Examples
   - Go strict-LSP bench (requires `gopls`): `scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go --min-lsp-changed 6 --min-lsp-impacted 15`
   - Java strict-LSP bench (requires `jdtls`): `scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java --min-lsp-changed 7 --min-lsp-impacted 15`
   - CI workflow: `Benchmark Impact Engines` (includes rust + Go + Java strict-LSP jobs)
+  - Operational cautions (TS/Rust alignment):
+    - Existing Rust benchmark operation (`--base origin/main --lang rust`) remains the baseline and is unchanged.
+    - Go/Java jobs are additive guardrails using fixed heavy diff fixtures (not a replacement for Rust baseline runs).
+    - Threshold values are language/fixture specific; do not compare absolute counts across Rust vs Go/Java.
+    - Keep tuning policy conservative (small step updates) to avoid destabilizing existing TS/Rust CI behavior.
 - Seed via Symbol IDs (no diff needed):
   - `dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json`
 - Seed via JSON file:
