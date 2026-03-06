@@ -347,4 +347,41 @@ import (
             Some("github.com::acme::hidden")
         );
     }
+
+    #[test]
+    fn go_hard_case_fixture_generics_chained_embedded() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/go/analyzer_hard_cases.go"
+        ));
+        let ana = SpecGoAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/hard.go", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "Map"
+                && matches!(s.kind, SymbolKind::Function)
+                && s.id.0 == "go:pkg/hard.go:fn:Map:34"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "Handle"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "go:pkg/hard.go:method:Handle:42"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/hard.go", src);
+        assert!(
+            refs.iter()
+                .any(|r| { r.name == "Log" && r.qualifier.as_deref() == Some("s") && r.is_method })
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "Do" && r.qualifier.as_deref() == Some("s.repo.client") && r.is_method
+        }));
+        assert!(
+            refs.iter()
+                .any(|r| { r.name == "Map" && r.qualifier.is_none() && !r.is_method })
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "Background" && r.qualifier.as_deref() == Some("context") && !r.is_method
+        }));
+    }
 }
