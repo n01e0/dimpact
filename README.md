@@ -1,6 +1,6 @@
 # dimpact
 
-Current version: `0.3.0`
+Current version: `0.4.0`
 
 Fast, language-aware impact analysis for changed code. Feed it a git diff or seed it with specific symbols; get back changed symbols, impacted symbols, and optional reference edges.
 
