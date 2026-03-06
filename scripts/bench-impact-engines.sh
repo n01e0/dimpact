@@ -320,10 +320,29 @@ check_min "$SECOND_METRIC_PREFIX.impacted" "$LSP_IMPACTED" "$MIN_LSP_IMPACTED"
 if [[ "${#THRESHOLD_FAILURES[@]}" -gt 0 ]]; then
   echo
   echo "[threshold-check] RESULT=FAIL count=${#THRESHOLD_FAILURES[@]}"
+
+  echo "[threshold-fail-summary]"
+  echo "metric actual min shortage"
+
+  SHORTAGE_LIST=()
   for f in "${THRESHOLD_FAILURES[@]}"; do
     echo "  - $f"
     echo "::error::THRESHOLD FAILED: $f"
+
+    if [[ "$f" =~ ^([^[:space:]]+)[[:space:]]actual=([0-9]+)[[:space:]]min=([0-9]+)$ ]]; then
+      metric="${BASH_REMATCH[1]}"
+      actual="${BASH_REMATCH[2]}"
+      minv="${BASH_REMATCH[3]}"
+      shortage=$((minv - actual))
+      echo "$metric $actual $minv +$shortage"
+      SHORTAGE_LIST+=("$metric:+$shortage")
+    fi
   done
+
+  if [[ "${#SHORTAGE_LIST[@]}" -gt 0 ]]; then
+    echo "[threshold-fail-at-a-glance] missing=${SHORTAGE_LIST[*]}"
+  fi
+
   exit 1
 fi
 
