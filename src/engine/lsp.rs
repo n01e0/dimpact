@@ -119,6 +119,54 @@ fn did_open_language_id_for_path(path: &str, lang: LanguageMode) -> Option<&'sta
     profile_for_path_or_mode(path, lang).map(|p| p.lsp_language_id)
 }
 
+fn auto_server_mode_for_path(path: &str) -> Option<LanguageMode> {
+    if path.ends_with(".go") {
+        Some(LanguageMode::Go)
+    } else if path.ends_with(".java") {
+        Some(LanguageMode::Java)
+    } else {
+        None
+    }
+}
+
+fn session_mode_for_files(lang: LanguageMode, files: &[String]) -> LanguageMode {
+    if lang != LanguageMode::Auto {
+        return lang;
+    }
+    let mut chosen: Option<LanguageMode> = None;
+    for path in files {
+        let Some(mode) = auto_server_mode_for_path(path) else {
+            continue;
+        };
+        match chosen {
+            None => chosen = Some(mode),
+            Some(prev) if prev == mode => {}
+            Some(_) => return LanguageMode::Auto,
+        }
+    }
+    chosen.unwrap_or(LanguageMode::Auto)
+}
+
+fn session_mode_for_symbols(lang: LanguageMode, symbols: &[crate::ir::Symbol]) -> LanguageMode {
+    if lang != LanguageMode::Auto {
+        return lang;
+    }
+    let mut chosen: Option<LanguageMode> = None;
+    for sym in symbols {
+        let mode = match sym.language.as_str() {
+            "go" => LanguageMode::Go,
+            "java" => LanguageMode::Java,
+            _ => continue,
+        };
+        match chosen {
+            None => chosen = Some(mode),
+            Some(prev) if prev == mode => {}
+            Some(_) => return LanguageMode::Auto,
+        }
+    }
+    chosen.unwrap_or(LanguageMode::Auto)
+}
+
 fn capability_snapshot(c: &CapabilityMatrix) -> String {
     format!(
         "call_hierarchy={}, references={}, definition={}, document_symbol={}, workspace_symbol={}",
@@ -826,6 +874,8 @@ impl super::AnalysisEngine for LspEngine {
             self.cfg.lsp_strict,
             diffs.len()
         );
+        let files_list: Vec<String> = diffs.iter().filter_map(|fc| fc.new_path.clone()).collect();
+        let session_lang = session_mode_for_files(lang, &files_list);
         // Hybrid policy: 非strict では変更点抽出はTSに委譲（堅牢）
         if !self.cfg.lsp_strict {
             if self.cfg.dump_capabilities {
@@ -836,7 +886,7 @@ impl super::AnalysisEngine for LspEngine {
                     mock: self.cfg.mock_lsp,
                     mock_caps: self.cfg.mock_caps,
                 };
-                match LspSession::new(lang, lsp_cfg) {
+                match LspSession::new(session_lang, lsp_cfg) {
                     Ok(mut s) => {
                         s.probe_update();
                         eprintln!(
@@ -862,11 +912,9 @@ impl super::AnalysisEngine for LspEngine {
             mock: self.cfg.mock_lsp,
             mock_caps: self.cfg.mock_caps,
         };
-        match LspSession::new(lang, lsp_cfg) {
+        match LspSession::new(session_lang, lsp_cfg) {
             Ok(mut _sess) => {
                 _sess.probe_update();
-                let files_list: Vec<String> =
-                    diffs.iter().filter_map(|fc| fc.new_path.clone()).collect();
                 _sess.probe_files(&files_list);
                 if self.cfg.dump_capabilities {
                     eprintln!(
@@ -925,6 +973,8 @@ impl super::AnalysisEngine for LspEngine {
             "engine.lsp.impact: strict={}, direction={:?}, max_depth={:?}",
             self.cfg.lsp_strict, opts.direction, opts.max_depth
         );
+        let files_list: Vec<String> = diffs.iter().filter_map(|fc| fc.new_path.clone()).collect();
+        let session_lang = session_mode_for_files(lang, &files_list);
         if !self.cfg.lsp_strict && self.cfg.dump_capabilities {
             // Print capabilities for diagnostics even if we fallback computation
             let lsp_cfg = LspConfig {
@@ -933,7 +983,7 @@ impl super::AnalysisEngine for LspEngine {
                 mock: self.cfg.mock_lsp,
                 mock_caps: self.cfg.mock_caps,
             };
-            match LspSession::new(lang, lsp_cfg) {
+            match LspSession::new(session_lang, lsp_cfg) {
                 Ok(mut s) => {
                     s.probe_update();
                     eprintln!(
@@ -960,11 +1010,9 @@ impl super::AnalysisEngine for LspEngine {
             mock: self.cfg.mock_lsp,
             mock_caps: self.cfg.mock_caps,
         };
-        match LspSession::new(lang, lsp_cfg) {
+        match LspSession::new(session_lang, lsp_cfg) {
             Ok(mut _sess) => {
                 _sess.probe_update();
-                let files_list: Vec<String> =
-                    diffs.iter().filter_map(|fc| fc.new_path.clone()).collect();
                 _sess.probe_files(&files_list);
                 if self.cfg.dump_capabilities {
                     eprintln!(
@@ -1186,7 +1234,8 @@ impl super::AnalysisEngine for LspEngine {
             mock: self.cfg.mock_lsp,
             mock_caps: self.cfg.mock_caps,
         };
-        let mut sess = match LspSession::new(lang, lsp_cfg) {
+        let session_lang = session_mode_for_symbols(lang, changed);
+        let mut sess = match LspSession::new(session_lang, lsp_cfg) {
             Ok(s) => s,
             Err(e) => {
                 if self.cfg.lsp_strict {
@@ -2852,6 +2901,76 @@ mod tests {
         assert_eq!(
             server_command_for_mode(LanguageMode::Java),
             Some(("jdtls", vec![]))
+        );
+    }
+
+    #[test]
+    fn session_mode_for_files_auto_selects_go_java_servers() {
+        let go_files = vec!["cmd/main.go".to_string(), "pkg/lib.go".to_string()];
+        let java_files = vec!["src/Main.java".to_string()];
+        let mixed_files = vec!["cmd/main.go".to_string(), "src/Main.java".to_string()];
+        let py_files = vec!["tools/check.py".to_string()];
+
+        assert_eq!(
+            session_mode_for_files(LanguageMode::Auto, &go_files),
+            LanguageMode::Go
+        );
+        assert_eq!(
+            session_mode_for_files(LanguageMode::Auto, &java_files),
+            LanguageMode::Java
+        );
+        assert_eq!(
+            session_mode_for_files(LanguageMode::Auto, &mixed_files),
+            LanguageMode::Auto
+        );
+        assert_eq!(
+            session_mode_for_files(LanguageMode::Auto, &py_files),
+            LanguageMode::Auto
+        );
+    }
+
+    #[test]
+    fn session_mode_for_symbols_auto_selects_go_java_servers() {
+        let go_sym = crate::ir::Symbol {
+            id: crate::ir::SymbolId::new("go", "main.go", &crate::ir::SymbolKind::Function, "b", 1),
+            name: "b".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.go".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "go".to_string(),
+        };
+        let java_sym = crate::ir::Symbol {
+            id: crate::ir::SymbolId::new(
+                "java",
+                "Main.java",
+                &crate::ir::SymbolKind::Method,
+                "b",
+                1,
+            ),
+            name: "b".to_string(),
+            kind: crate::ir::SymbolKind::Method,
+            file: "Main.java".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "java".to_string(),
+        };
+
+        assert_eq!(
+            session_mode_for_symbols(LanguageMode::Auto, std::slice::from_ref(&go_sym)),
+            LanguageMode::Go
+        );
+        assert_eq!(
+            session_mode_for_symbols(LanguageMode::Auto, std::slice::from_ref(&java_sym)),
+            LanguageMode::Java
+        );
+        assert_eq!(
+            session_mode_for_symbols(LanguageMode::Auto, &[go_sym, java_sym]),
+            LanguageMode::Auto
         );
     }
 
