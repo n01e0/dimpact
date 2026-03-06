@@ -464,4 +464,28 @@ import static java.util.Collections.*;
             Some("java::util::Collections")
         );
     }
+
+    #[test]
+    fn extract_java_unresolved_refs_static_import_and_nested_qualified_call() {
+        let src = r#"package demo;
+
+import static demo.Ops.pick;
+
+public class Main {
+    static int run() {
+        return pick(1) + Outer.Inner.compute();
+    }
+}
+"#;
+        let ana = SpecJavaAnalyzer::new();
+        let refs = ana.unresolved_refs("demo/Main.java", src);
+
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "pick" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "compute" && r.qualifier.as_deref() == Some("Outer.Inner") && !r.is_method
+        }));
+    }
 }

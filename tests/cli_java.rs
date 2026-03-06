@@ -241,8 +241,6 @@ fn cli_impact_direction_callers_java_hard_cases() {
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("pick")));
 
     let impacted = v["impacted_symbols"].as_array().unwrap();
-    let _names: Vec<&str> = impacted.iter().filter_map(|s| s["name"].as_str()).collect();
-    // Hard-case fixture smoke: overload/static import/nested type should execute
-    // without parser failures on callers traversal.
-    assert!(v["impacted_symbols"].is_array());
+    let names: Vec<&str> = impacted.iter().filter_map(|s| s["name"].as_str()).collect();
+    assert!(names.contains(&"run"));
 }
