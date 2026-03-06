@@ -68,3 +68,55 @@ fn bench_script_lang_summary_includes_go_java() {
     assert!(stdout.contains("lsp(strict) changed_by_lang: go:1, java:2"));
     assert!(stdout.contains("lsp(strict) impacted_by_lang: go:1, java:1"));
 }
+
+#[test]
+fn bench_script_lang_summary_supports_custom_second_label() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let ts_json = tmp.path().join("ts.json");
+    let second_json = tmp.path().join("second.json");
+
+    fs::write(
+        &ts_json,
+        r#"{
+  "changed_symbols": [{"language": "rust"}],
+  "impacted_symbols": [{"language": "rust"}]
+}
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        &second_json,
+        r#"{
+  "changed_symbols": [{"language": "rust"}, {"language": "rust"}],
+  "impacted_symbols": [{"language": "rust"}]
+}
+"#,
+    )
+    .unwrap();
+
+    let repo = env!("CARGO_MANIFEST_DIR");
+    let script = format!("{repo}/scripts/bench-impact-engines.sh");
+    let out = Command::new("bash")
+        .current_dir(repo)
+        .arg(script)
+        .arg("--summary-ts-json")
+        .arg(&ts_json)
+        .arg("--summary-lsp-json")
+        .arg(&second_json)
+        .arg("--summary-second-label")
+        .arg("auto(strict-if-available)")
+        .output()
+        .expect("run bench-impact-engines.sh");
+
+    assert!(
+        out.status.success(),
+        "script failed\nstdout:{}\nstderr:{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("auto(strict-if-available) changed_by_lang: rust:2"));
+    assert!(stdout.contains("auto(strict-if-available) impacted_by_lang: rust:1"));
+}

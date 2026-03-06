@@ -31,7 +31,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release -q
 
-      - name: Run TS vs LSP(strict) benchmark
+      - name: Run TS vs Auto(strict-if-available) benchmark
         id: bench
         continue-on-error: true
         timeout-minutes: 12
@@ -44,15 +44,16 @@ jobs:
             RUNS=2
           fi
 
-          echo "base=$BASE runs=$RUNS" > bench-report.txt
+          echo "base=$BASE runs=$RUNS compare=auto(strict-if-available)" > bench-report.txt
           timeout 10m scripts/bench-impact-engines.sh \
             --base "$BASE" \
             --runs "$RUNS" \
             --direction callers \
             --lang rust \
+            --compare-auto-strict-if-available \
             --rpc-counts \
             --save-ts-json bench-rust-ts.json \
-            --save-lsp-json bench-rust-lsp.json \
+            --save-lsp-json bench-rust-auto-strict-if-available.json \
             | tee -a bench-report.txt
 
       - name: Publish benchmark summary
@@ -76,7 +77,7 @@ jobs:
           path: |
             bench-report.txt
             bench-rust-ts.json
-            bench-rust-lsp.json
+            bench-rust-auto-strict-if-available.json
           if-no-files-found: warn
 
   bench-go-strict-lsp:

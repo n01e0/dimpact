@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Benchmark Tree-Sitter vs LSP(strict) on the same diff input.
+# Benchmark Tree-Sitter baseline vs secondary policy/engine path on the same diff input.
+#
+# Default comparison:
+#   TS vs LSP(strict)
+#
+# Optional comparison:
+#   TS vs Auto(strict-if-available)  (enable with --compare-auto-strict-if-available)
 #
 # Usage:
 #   scripts/bench-impact-engines.sh [--base origin/main] [--diff-file /path/to.diff] [--runs 3] [--direction callers] [--lang rust] [--rpc-counts]
+#                                  [--compare-auto-strict-if-available]
 #                                  [--min-ts-changed N] [--min-ts-impacted N]
 #                                  [--min-lsp-changed N] [--min-lsp-impacted N]
-#                                  [--save-ts-json /path/to/ts.json] [--save-lsp-json /path/to/lsp.json]
-#   scripts/bench-impact-engines.sh --summary-ts-json /path/to/ts.json --summary-lsp-json /path/to/lsp.json
+#                                  [--save-ts-json /path/to/ts.json] [--save-lsp-json /path/to/secondary.json]
+#   scripts/bench-impact-engines.sh --summary-ts-json /path/to/ts.json --summary-lsp-json /path/to/secondary.json [--summary-second-label LABEL]
 #
 # Examples:
 #   scripts/bench-impact-engines.sh --base origin/main --runs 5 --direction callers --lang rust
+#   scripts/bench-impact-engines.sh --base origin/main --runs 3 --lang rust --compare-auto-strict-if-available
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 3 --lang rust
 #   scripts/bench-impact-engines.sh --base origin/main --runs 1 --rpc-counts
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 1 --min-lsp-changed 40 --min-lsp-impacted 18
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/python-heavy.diff --runs 1 --direction callers --lang python
-#   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --save-ts-json /tmp/go-ts.json --save-lsp-json /tmp/go-lsp.json
-#   scripts/bench-impact-engines.sh --summary-ts-json /tmp/ts.json --summary-lsp-json /tmp/lsp.json
+#   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --save-ts-json /tmp/go-ts.json --save-lsp-json /tmp/go-secondary.json
+#   scripts/bench-impact-engines.sh --summary-ts-json /tmp/ts.json --summary-lsp-json /tmp/secondary.json
 
 BASE_REF="origin/main"
 DIFF_INPUT=""
@@ -35,17 +43,21 @@ SAVE_TS_JSON=""
 SAVE_LSP_JSON=""
 SUMMARY_TS_JSON=""
 SUMMARY_LSP_JSON=""
+SUMMARY_SECOND_LABEL="lsp(strict)"
+COMPARE_AUTO_STRICT_IF_AVAILABLE=0
 
 print_lang_summary() {
   local ts_json="$1"
-  local lsp_json="$2"
-  python3 - "$ts_json" "$lsp_json" <<'PY'
+  local second_json="$2"
+  local second_label="$3"
+  python3 - "$ts_json" "$second_json" "$second_label" <<'PY'
 import json, sys
 from collections import Counter
 from pathlib import Path
 
 ts = json.loads(Path(sys.argv[1]).read_text())
-lsp = json.loads(Path(sys.argv[2]).read_text())
+second = json.loads(Path(sys.argv[2]).read_text())
+second_label = sys.argv[3]
 
 def by_lang(symbols):
     c = Counter((s.get("language") or "unknown") for s in symbols)
@@ -55,8 +67,8 @@ def by_lang(symbols):
 
 print(f"ts changed_by_lang: {by_lang(ts.get('changed_symbols', []))}")
 print(f"ts impacted_by_lang: {by_lang(ts.get('impacted_symbols', []))}")
-print(f"lsp(strict) changed_by_lang: {by_lang(lsp.get('changed_symbols', []))}")
-print(f"lsp(strict) impacted_by_lang: {by_lang(lsp.get('impacted_symbols', []))}")
+print(f"{second_label} changed_by_lang: {by_lang(second.get('changed_symbols', []))}")
+print(f"{second_label} impacted_by_lang: {by_lang(second.get('impacted_symbols', []))}")
 PY
 }
 
@@ -84,6 +96,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rpc-counts)
       RPC_COUNTS=1
+      shift
+      ;;
+    --compare-auto-strict-if-available)
+      COMPARE_AUTO_STRICT_IF_AVAILABLE=1
       shift
       ;;
     --min-ts-changed)
@@ -116,6 +132,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --summary-lsp-json)
       SUMMARY_LSP_JSON="${2:?missing value for --summary-lsp-json}"
+      shift 2
+      ;;
+    --summary-second-label)
+      SUMMARY_SECOND_LABEL="${2:?missing value for --summary-second-label}"
       shift 2
       ;;
     -h|--help)
@@ -160,7 +180,7 @@ if [[ -n "$SUMMARY_TS_JSON" || -n "$SUMMARY_LSP_JSON" ]]; then
     exit 2
   fi
   echo "[lang-summary]"
-  print_lang_summary "$SUMMARY_TS_JSON" "$SUMMARY_LSP_JSON"
+  print_lang_summary "$SUMMARY_TS_JSON" "$SUMMARY_LSP_JSON" "$SUMMARY_SECOND_LABEL"
   exit 0
 fi
 
@@ -207,18 +227,31 @@ summarize() {
   awk 'NR==1{min=$1;max=$1}{s+=$1;if($1<min)min=$1;if($1>max)max=$1} END{printf("avg=%.3fs min=%.3fs max=%.3fs", s/NR, min, max)}'
 }
 
+SECOND_ENGINE="lsp"
+SECOND_ARGS="--engine-lsp-strict"
+SECOND_LABEL="lsp(strict)"
+SECOND_SECTION="lsp-strict"
+SECOND_METRIC_PREFIX="lsp"
+if [[ "$COMPARE_AUTO_STRICT_IF_AVAILABLE" -eq 1 ]]; then
+  SECOND_ENGINE="auto"
+  SECOND_ARGS="--auto-policy strict-if-available"
+  SECOND_LABEL="auto(strict-if-available)"
+  SECOND_SECTION="auto-strict-if-available"
+  SECOND_METRIC_PREFIX="auto.strict-if-available"
+fi
+
 if [[ -n "$DIFF_INPUT" ]]; then
-  echo "diff_file=$DIFF_INPUT runs=$RUNS direction=$DIRECTION lang=$LANG rpc_counts=$RPC_COUNTS"
+  echo "diff_file=$DIFF_INPUT runs=$RUNS direction=$DIRECTION lang=$LANG rpc_counts=$RPC_COUNTS compare=$SECOND_LABEL"
 else
-  echo "base=$BASE_REF runs=$RUNS direction=$DIRECTION lang=$LANG rpc_counts=$RPC_COUNTS"
+  echo "base=$BASE_REF runs=$RUNS direction=$DIRECTION lang=$LANG rpc_counts=$RPC_COUNTS compare=$SECOND_LABEL"
 fi
 
 ts_times="$(measure_engine ts)"
-lsp_times="$(measure_engine lsp "--engine-lsp-strict")"
+second_times="$(measure_engine "$SECOND_ENGINE" "$SECOND_ARGS")"
 
 # one saved output each (for symbol counts)
 cat "$DIFF_FILE" | "$BIN" impact --engine ts --direction "$DIRECTION" --lang "$LANG" -f json > "$TS_JSON"
-cat "$DIFF_FILE" | "$BIN" impact --engine lsp --engine-lsp-strict --direction "$DIRECTION" --lang "$LANG" -f json > "$LSP_JSON"
+cat "$DIFF_FILE" | "$BIN" impact --engine "$SECOND_ENGINE" $SECOND_ARGS --direction "$DIRECTION" --lang "$LANG" -f json > "$LSP_JSON"
 
 echo "[ts]"
 printf "%s" "$ts_times"
@@ -226,10 +259,10 @@ echo
 printf "%s" "$ts_times" | summarize
 echo
 echo
-echo "[lsp-strict]"
-printf "%s" "$lsp_times"
+echo "[$SECOND_SECTION]"
+printf "%s" "$second_times"
 echo
-printf "%s" "$lsp_times" | summarize
+printf "%s" "$second_times" | summarize
 echo
 echo
 
@@ -244,12 +277,12 @@ PY
 )
 
 echo "ts changed=$TS_CHANGED impacted=$TS_IMPACTED"
-echo "lsp(strict) changed=$LSP_CHANGED impacted=$LSP_IMPACTED"
+echo "$SECOND_LABEL changed=$LSP_CHANGED impacted=$LSP_IMPACTED"
 
 echo
 
 echo "[lang-summary]"
-print_lang_summary "$TS_JSON" "$LSP_JSON"
+print_lang_summary "$TS_JSON" "$LSP_JSON" "$SECOND_LABEL"
 
 if [[ -n "$SAVE_TS_JSON" ]]; then
   cp "$TS_JSON" "$SAVE_TS_JSON"
@@ -281,8 +314,8 @@ fi
 
 check_min "ts.changed" "$TS_CHANGED" "$MIN_TS_CHANGED"
 check_min "ts.impacted" "$TS_IMPACTED" "$MIN_TS_IMPACTED"
-check_min "lsp.changed" "$LSP_CHANGED" "$MIN_LSP_CHANGED"
-check_min "lsp.impacted" "$LSP_IMPACTED" "$MIN_LSP_IMPACTED"
+check_min "$SECOND_METRIC_PREFIX.changed" "$LSP_CHANGED" "$MIN_LSP_CHANGED"
+check_min "$SECOND_METRIC_PREFIX.impacted" "$LSP_IMPACTED" "$MIN_LSP_IMPACTED"
 
 if [[ "${#THRESHOLD_FAILURES[@]}" -gt 0 ]]; then
   echo
@@ -300,8 +333,8 @@ fi
 
 if [[ "$RPC_COUNTS" -eq 1 ]]; then
   echo
-  echo "[lsp-rpc-counts]"
-  RUST_LOG=debug "$BIN" impact --engine lsp --engine-lsp-strict --direction "$DIRECTION" --lang "$LANG" -f json < "$DIFF_FILE" >/dev/null 2>"$LSP_DEBUG_LOG" || true
+  echo "[$SECOND_SECTION-rpc-counts]"
+  RUST_LOG=debug "$BIN" impact --engine "$SECOND_ENGINE" $SECOND_ARGS --direction "$DIRECTION" --lang "$LANG" -f json < "$DIFF_FILE" >/dev/null 2>"$LSP_DEBUG_LOG" || true
   if command -v rg >/dev/null 2>&1; then
     rg -o "method=[^ ]+" "$LSP_DEBUG_LOG" | sort | uniq -c | sort -nr | sed 's/^ *//'
   else
