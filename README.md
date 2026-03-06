@@ -6,7 +6,7 @@ Fast, language-aware impact analysis for changed code. Feed it a git diff or see
 
 Highlights
 - Tree‑Sitter engine by default (Auto): robust and fast
-- LSP engine (experimental): capability‑driven with TS fallback in non‑strict
+- LSP engine (GA): capability‑driven with TS fallback in non‑strict
 - Flexible seeding: pass Symbol IDs or JSON
 - Symbol ID generator: resolve IDs from file/line/name, with filters
 
@@ -73,7 +73,7 @@ Path highlighting in DOT/HTML
 
 Engine Selection
 - Auto: Tree‑Sitter by default (recommended)
-- LSP (experimental): `--engine lsp`
+- LSP (GA): `--engine lsp`
   - `--engine-lsp-strict`: don’t fall back to TS on LSP issues
   - `--engine-dump-capabilities`: emit LSP capabilities JSON to stderr
 
@@ -136,7 +136,7 @@ Usage Examples
   - `git diff --no-ext-diff | dimpact impact --direction callees --max-depth 2 -f yaml`
 - Force Tree‑Sitter engine (recommended default):
   - `git diff --no-ext-diff | dimpact impact --engine ts -f json`
-- Try LSP engine (experimental) with strict mode and capability dump:
+- Try LSP engine (GA) with strict mode and capability dump:
   - `git diff --no-ext-diff | dimpact impact --engine lsp --engine-lsp-strict --engine-dump-capabilities -f json`
   - Tip: `RUST_LOG=info` to see more diagnostics
 - Benchmark TS vs LSP(strict) on the same diff:
