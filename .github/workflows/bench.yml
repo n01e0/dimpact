@@ -124,3 +124,66 @@ jobs:
               echo "go benchmark report missing"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  bench-java-strict-lsp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install jdtls
+        run: |
+          mkdir -p "$HOME/.local/jdtls" "$HOME/.local/bin"
+          curl -fsSL "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz" -o /tmp/jdtls.tar.gz
+          tar -xzf /tmp/jdtls.tar.gz -C "$HOME/.local/jdtls"
+
+          JDTLS_BIN="$(find "$HOME/.local/jdtls" -type f -name jdtls | head -n 1)"
+          if [ -z "$JDTLS_BIN" ]; then
+            echo "jdtls binary not found after extraction" >&2
+            exit 1
+          fi
+          chmod +x "$JDTLS_BIN"
+          ln -sf "$JDTLS_BIN" "$HOME/.local/bin/jdtls"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build release binary
+        run: cargo build --release -q
+
+      - name: Run Java strict-LSP benchmark
+        timeout-minutes: 12
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RUNS=1
+          else
+            RUNS=2
+          fi
+
+          echo "runs=$RUNS lang=java fixture=bench-fixtures/java-heavy.diff" > bench-java-report.txt
+          timeout 10m scripts/bench-impact-engines.sh \
+            --diff-file bench-fixtures/java-heavy.diff \
+            --runs "$RUNS" \
+            --direction callers \
+            --lang java \
+            --min-lsp-changed 7 \
+            --min-lsp-impacted 15 \
+            | tee -a bench-java-report.txt
+
+      - name: Publish Java benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## Java strict-LSP benchmark"
+            echo
+            if [ -f bench-java-report.txt ]; then
+              sed 's/^/`/;s/$/`/' bench-java-report.txt
+            else
+              echo "java benchmark report missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
