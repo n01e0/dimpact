@@ -6,7 +6,7 @@ use dimpact::compute_changed_symbols;
 use dimpact::compute_impact;
 use dimpact::dfg::{DataFlowGraph, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
 use dimpact::dfg_to_dot;
-use dimpact::engine::{EngineKind, make_engine};
+use dimpact::engine::{AutoPolicy, EngineKind, make_engine_with_auto_policy};
 use dimpact::ir::SymbolId;
 use dimpact::ir::reference::{RefKind, Reference};
 use dimpact::{ChangedOutput, LanguageMode};
@@ -59,6 +59,12 @@ enum EngineOpt {
     Auto,
     Ts,
     Lsp,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AutoPolicyOpt {
+    Compat,
+    StrictIfAvailable,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -116,6 +122,10 @@ struct Args {
     /// Analysis engine: auto (default), ts, lsp
     #[arg(long = "engine", value_enum, default_value_t = EngineOpt::Auto)]
     engine: EngineOpt,
+
+    /// Auto engine policy: compat (default) or strict-if-available
+    #[arg(long = "auto-policy", value_enum, global = true)]
+    auto_policy: Option<AutoPolicyOpt>,
 
     /// LSP strict mode: do not fallback to TS on failure
     #[arg(long = "engine-lsp-strict", default_value_t = false)]
@@ -292,6 +302,7 @@ fn main() -> anyhow::Result<()> {
                 args.format,
                 lang,
                 engine,
+                args.auto_policy,
                 engine_lsp_strict,
                 engine_dump_capabilities,
             ),
@@ -318,6 +329,7 @@ fn main() -> anyhow::Result<()> {
                 with_pdg,
                 with_propagation,
                 engine,
+                args.auto_policy,
                 engine_lsp_strict,
                 engine_dump_capabilities,
                 seed_symbols,
@@ -356,6 +368,7 @@ fn main() -> anyhow::Result<()> {
                 args.format,
                 args.lang,
                 args.engine,
+                args.auto_policy,
                 args.engine_lsp_strict,
                 args.engine_dump_capabilities,
             )?;
@@ -371,6 +384,7 @@ fn main() -> anyhow::Result<()> {
                 false,
                 false,
                 args.engine,
+                args.auto_policy,
                 args.engine_lsp_strict,
                 args.engine_dump_capabilities,
                 args.seed_symbols,
@@ -596,6 +610,13 @@ fn parse_seed_json(content: &str) -> anyhow::Result<Vec<dimpact::Symbol>> {
     Ok(out)
 }
 
+fn map_auto_policy(opt: AutoPolicyOpt) -> AutoPolicy {
+    match opt {
+        AutoPolicyOpt::Compat => AutoPolicy::Compat,
+        AutoPolicyOpt::StrictIfAvailable => AutoPolicy::StrictIfAvailable,
+    }
+}
+
 fn run_diff(fmt: OutputFormat) -> anyhow::Result<()> {
     let diff_text = read_diff_from_stdin()?;
     let files = match parse_unified_diff(&diff_text) {
@@ -617,6 +638,7 @@ fn run_changed(
     fmt: OutputFormat,
     lang_opt: LangOpt,
     engine_opt: EngineOpt,
+    auto_policy: Option<AutoPolicyOpt>,
     lsp_strict: bool,
     dump_caps: bool,
 ) -> anyhow::Result<()> {
@@ -648,7 +670,7 @@ fn run_changed(
         mock_lsp: std::env::var("DIMPACT_TEST_LSP_MOCK").ok().as_deref() == Some("1"),
         mock_caps: None,
     };
-    let engine = make_engine(ekind, ecfg);
+    let engine = make_engine_with_auto_policy(ekind, ecfg, auto_policy.map(map_auto_policy));
     if dump_caps && !matches!(engine_opt, EngineOpt::Lsp) {
         // For diagnostics under TS/Auto, emit a stub capability matrix to stderr
         eprintln!(
@@ -702,6 +724,7 @@ fn run_impact(
     with_pdg: bool,
     with_propagation: bool,
     engine_opt: EngineOpt,
+    auto_policy: Option<AutoPolicyOpt>,
     lsp_strict: bool,
     dump_caps: bool,
     seed_symbols: Vec<String>,
@@ -772,7 +795,7 @@ fn run_impact(
         mock_lsp: std::env::var("DIMPACT_TEST_LSP_MOCK").ok().as_deref() == Some("1"),
         mock_caps: None,
     };
-    let engine = make_engine(ekind, ecfg);
+    let engine = make_engine_with_auto_policy(ekind, ecfg, auto_policy.map(map_auto_policy));
     if dump_caps && !matches!(engine_opt, EngineOpt::Lsp) {
         eprintln!(
             "{}",
@@ -1299,7 +1322,7 @@ fn impact_from_diff(args: Args, files: Vec<dimpact::FileChanges>) -> anyhow::Res
         mock_lsp: false,
         mock_caps: None,
     };
-    let engine = make_engine(ekind, ecfg);
+    let engine = make_engine_with_auto_policy(ekind, ecfg, args.auto_policy.map(map_auto_policy));
     log::info!(
         "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={}",
         ekind,
@@ -1379,6 +1402,37 @@ mod tests {
         match e.cmd {
             Some(Command::Changed { lang, .. }) => assert!(matches!(lang, LangOpt::Rust)),
             _ => panic!("expected changed subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_auto_policy_accepts_strict_if_available() {
+        let a = Args::try_parse_from([
+            "dimpact",
+            "changed",
+            "--engine",
+            "auto",
+            "--auto-policy",
+            "strict-if-available",
+        ])
+        .expect("strict-if-available should be accepted");
+        assert!(matches!(
+            a.auto_policy,
+            Some(AutoPolicyOpt::StrictIfAvailable)
+        ));
+    }
+
+    #[test]
+    fn cli_auto_policy_defaults_to_env_when_unspecified() {
+        // SAFETY: tests in this module are single-threaded in this process context.
+        unsafe {
+            std::env::set_var("DIMPACT_AUTO_POLICY", "strict-if-available");
+        }
+        let a = Args::try_parse_from(["dimpact", "changed", "--engine", "auto"])
+            .expect("auto policy omitted should still parse");
+        assert!(a.auto_policy.is_none());
+        unsafe {
+            std::env::remove_var("DIMPACT_AUTO_POLICY");
         }
     }
 }
