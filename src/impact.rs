@@ -123,9 +123,7 @@ pub fn build_project_graph() -> anyhow::Result<(SymbolIndex, Vec<Reference>)> {
             } else if ext == "tsx" {
                 LanguageKind::Tsx
             } else {
-                // Python is admitted into graph scan scope in Loop 24,
-                // while parser/spec support arrives in subsequent loops.
-                LanguageKind::Auto
+                LanguageKind::Python
             };
             let Some(analyzer) = analyzer_for_path(&path_str, kind) else {
                 continue;

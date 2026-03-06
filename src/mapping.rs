@@ -66,7 +66,7 @@ pub fn compute_changed_symbols(
             LanguageMode::Auto => LanguageKind::Auto,
             LanguageMode::Rust => LanguageKind::Rust,
             LanguageMode::Ruby => LanguageKind::Ruby,
-            LanguageMode::Python => LanguageKind::Auto,
+            LanguageMode::Python => LanguageKind::Python,
             LanguageMode::Javascript => LanguageKind::Javascript,
             LanguageMode::Typescript => LanguageKind::Typescript,
             LanguageMode::Tsx => LanguageKind::Tsx,
