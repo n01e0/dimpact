@@ -322,4 +322,35 @@ def foo(self, obj):
         assert!(quals.iter().any(|q| q == "self"));
         assert!(quals.iter().any(|q| q == "obj"));
     }
+
+    #[test]
+    fn python_spec_declarations_imports_and_control_match() {
+        let spec = load_python_spec();
+        let compiled = compile_queries_python(&spec).unwrap();
+        let src = r#"import os
+from pkg import thing
+
+class C:
+    def m(self):
+        if True:
+            pass
+
+def foo(xs):
+    for x in xs:
+        while x:
+            break
+"#;
+        let qr = QueryRunner::new_python();
+
+        let decls = qr.run_captures(src, &compiled.decl);
+        let imports = qr.run_captures(src, &compiled.imports);
+        let ctrls = qr.run_captures(src, &compiled.control.expect("python control query"));
+
+        assert!(
+            decls.len() >= 3,
+            "expected class + method + function declarations"
+        );
+        assert_eq!(imports.len(), 2, "should capture import + from import");
+        assert_eq!(ctrls.len(), 3, "should capture if/for/while control nodes");
+    }
 }
