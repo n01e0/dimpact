@@ -90,32 +90,62 @@ scripts/bench-impact-engines.sh \
   --min-lsp-impacted 5
 ```
 
-## Threshold update policy
+## Threshold update policy (ALL58-2, explicit rule set)
 
-### Review timing
-- Review thresholds when either condition is met:
+### 1) Review timing (when to evaluate)
+- Evaluate threshold updates when either condition is met:
   - every 2 weeks, or
-  - after 20 additional successful bench runs for the target language/fixture.
+  - after 20 additional successful runs for the target language/fixture.
 
-### Raise policy (stricter)
-- Raise `min-lsp-changed` / `min-lsp-impacted` only when all of the following hold:
-  - at least 20 recent successful runs are available,
-  - the 10th percentile (p10) for each metric is greater than current threshold + 2,
-  - no unexplained dip/regression is observed in the latest 10 successful runs.
-- Raise in small steps (`+1` or `+2` max per update) to avoid sudden CI instability.
+### 2) Required evidence (must collect before deciding)
+For each language/fixture pair, collect the latest window data:
+- at least 20 successful runs (if unavailable, mark as `insufficient-sample`),
+- guardrail pass/fail counts,
+- p10/p50 for `lsp.changed` and `lsp.impacted`,
+- latest 10-run trend (dip/outlier presence),
+- failure classification (`product-regression` vs `environment/tooling-noise` vs `infra-blocked`).
 
-### Lower policy (more relaxed)
-- Lower thresholds only when all of the following hold:
-  - guardrail failures occur in 3 or more recent runs,
-  - investigation indicates environment/tooling noise (not product regression),
-  - rerun with same fixture confirms expected changed/impacted shape is preserved.
-- Lower in small steps (`-1` or `-2` max per update).
+### 3) Raise conditions (stricten thresholds)
+Raise `min-lsp-changed` / `min-lsp-impacted` only if **all** are true:
+1. sample size is >= 20 successful runs,
+2. `p10(lsp.changed) > current_min_changed + 2`,
+3. `p10(lsp.impacted) > current_min_impacted + 2`,
+4. no unexplained dip is present in the latest 10 successful runs.
 
-### Safety floor
-- Never lower below these bootstrap floors:
-  - TypeScript: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
-  - JavaScript: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
-  - Ruby: `min-lsp-changed >= 2`, `min-lsp-impacted >= 4`
-  - Go: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
-  - Java: `min-lsp-changed >= 5`, `min-lsp-impacted >= 10`
-  - Python: `min-lsp-changed >= 2`, `min-lsp-impacted >= 4`
+Raise step limits:
+- one update max per review window,
+- each metric step is `+1` or `+2` (never larger in one change).
+
+### 4) Lower conditions (relax thresholds)
+Lower `min-lsp-changed` / `min-lsp-impacted` only if **all** are true:
+1. guardrail failures occurred in >= 3 recent runs,
+2. investigation classifies root cause as `environment/tooling-noise` (not product regression),
+3. same-fixture rerun confirms expected changed/impacted shape is preserved.
+
+Lower step limits:
+- each metric step is `-1` or `-2` (never larger in one change),
+- never lower below the safety floor.
+
+### 5) No-change / freeze conditions
+Keep thresholds unchanged when any of the following holds:
+- `insufficient-sample` (successful runs < 20),
+- `infra-blocked` (install/startup/timeout prevents reliable measurement),
+- active incident without root-cause classification,
+- conflicting signals (for example, p10 suggests raise but latest trend has unexplained dips).
+
+### 6) Safety floor (hard lower bound)
+Never lower below these bootstrap floors:
+- TypeScript: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
+- JavaScript: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
+- Ruby: `min-lsp-changed >= 2`, `min-lsp-impacted >= 4`
+- Go: `min-lsp-changed >= 4`, `min-lsp-impacted >= 10`
+- Java: `min-lsp-changed >= 5`, `min-lsp-impacted >= 10`
+- Python: `min-lsp-changed >= 2`, `min-lsp-impacted >= 4`
+
+### 7) Change record format (for PR body / docs)
+When thresholds are changed, record:
+- target language + fixture,
+- old/new threshold pair,
+- evidence window (run IDs/date range),
+- decision type (`raise` / `lower` / `freeze`) and rule justification,
+- rollback trigger condition.
