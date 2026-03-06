@@ -1046,6 +1046,9 @@ fn lang_mode_from_str(s: &str) -> Option<LanguageMode> {
         "javascript" | "js" => Some(LanguageMode::Javascript),
         "typescript" | "ts" => Some(LanguageMode::Typescript),
         "tsx" => Some(LanguageMode::Tsx),
+        // Python seeds are currently routed through Auto mode until a dedicated
+        // LanguageMode::Python is introduced.
+        "python" | "py" => Some(LanguageMode::Auto),
         "auto" => Some(LanguageMode::Auto),
         _ => None,
     }
@@ -1303,4 +1306,15 @@ enum CompletionShell {
     Fish,
     PowerShell,
     Elvish,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lang_mode_from_str_accepts_python_aliases() {
+        assert_eq!(lang_mode_from_str("python"), Some(LanguageMode::Auto));
+        assert_eq!(lang_mode_from_str("Py"), Some(LanguageMode::Auto));
+    }
 }
