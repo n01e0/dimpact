@@ -54,6 +54,8 @@ fn profile_for_mode(lang: LanguageMode) -> Option<LangProfile> {
             symbol_lang: "tsx",
             lsp_language_id: "typescriptreact",
         }),
+        LanguageMode::Go => None,
+        LanguageMode::Java => None,
         LanguageMode::Auto => None,
     }
 }
@@ -92,6 +94,8 @@ fn path_matches_mode(path: &str, lang: LanguageMode) -> bool {
             path.ends_with(".ts") || path.ends_with(".mts") || path.ends_with(".cts")
         }
         LanguageMode::Tsx => path.ends_with(".tsx"),
+        LanguageMode::Go => path.ends_with(".go"),
+        LanguageMode::Java => path.ends_with(".java"),
     }
 }
 
@@ -251,6 +255,7 @@ impl LspSession {
             LanguageMode::Javascript | LanguageMode::Typescript | LanguageMode::Tsx => {
                 Some(("typescript-language-server", vec!["--stdio"]))
             }
+            LanguageMode::Go | LanguageMode::Java => None,
             LanguageMode::Auto => detect_python_lsp_server(),
         };
         let Some((exe, args)) = cmd else {

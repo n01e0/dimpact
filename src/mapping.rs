@@ -13,6 +13,8 @@ pub enum LanguageMode {
     Javascript,
     Typescript,
     Tsx,
+    Go,
+    Java,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -66,6 +68,8 @@ pub fn compute_changed_symbols(
             LanguageMode::Javascript => LanguageKind::Javascript,
             LanguageMode::Typescript => LanguageKind::Typescript,
             LanguageMode::Tsx => LanguageKind::Tsx,
+            LanguageMode::Go => LanguageKind::Go,
+            LanguageMode::Java => LanguageKind::Java,
         };
         let Some(analyzer) = analyzer_for_path(path, kind) else {
             continue;
