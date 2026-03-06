@@ -2973,14 +2973,30 @@ mod tests {
     }
 
     #[test]
-    fn did_open_language_id_for_path_uses_python_for_py_auto() {
+    fn did_open_language_id_for_path_uses_python_go_java() {
         assert_eq!(
             did_open_language_id_for_path("pkg/module.py", LanguageMode::Auto),
             Some("python")
         );
         assert_eq!(
+            did_open_language_id_for_path("cmd/main.go", LanguageMode::Auto),
+            Some("go")
+        );
+        assert_eq!(
+            did_open_language_id_for_path("src/Main.java", LanguageMode::Auto),
+            Some("java")
+        );
+        assert_eq!(
             did_open_language_id_for_path("pkg/module.py", LanguageMode::Rust),
             Some("rust")
+        );
+        assert_eq!(
+            did_open_language_id_for_path("any.ext", LanguageMode::Go),
+            Some("go")
+        );
+        assert_eq!(
+            did_open_language_id_for_path("any.ext", LanguageMode::Java),
+            Some("java")
         );
     }
 
