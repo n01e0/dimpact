@@ -7,6 +7,7 @@ set -euo pipefail
 #   scripts/bench-impact-engines.sh [--base origin/main] [--diff-file /path/to.diff] [--runs 3] [--direction callers] [--lang rust] [--rpc-counts]
 #                                  [--min-ts-changed N] [--min-ts-impacted N]
 #                                  [--min-lsp-changed N] [--min-lsp-impacted N]
+#                                  [--save-ts-json /path/to/ts.json] [--save-lsp-json /path/to/lsp.json]
 #   scripts/bench-impact-engines.sh --summary-ts-json /path/to/ts.json --summary-lsp-json /path/to/lsp.json
 #
 # Examples:
@@ -16,6 +17,7 @@ set -euo pipefail
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 1 --min-lsp-changed 40 --min-lsp-impacted 18
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java
+#   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --save-ts-json /tmp/go-ts.json --save-lsp-json /tmp/go-lsp.json
 #   scripts/bench-impact-engines.sh --summary-ts-json /tmp/ts.json --summary-lsp-json /tmp/lsp.json
 
 BASE_REF="origin/main"
@@ -28,6 +30,8 @@ MIN_TS_CHANGED=""
 MIN_TS_IMPACTED=""
 MIN_LSP_CHANGED=""
 MIN_LSP_IMPACTED=""
+SAVE_TS_JSON=""
+SAVE_LSP_JSON=""
 SUMMARY_TS_JSON=""
 SUMMARY_LSP_JSON=""
 
@@ -95,6 +99,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --min-lsp-impacted)
       MIN_LSP_IMPACTED="${2:?missing value for --min-lsp-impacted}"
+      shift 2
+      ;;
+    --save-ts-json)
+      SAVE_TS_JSON="${2:?missing value for --save-ts-json}"
+      shift 2
+      ;;
+    --save-lsp-json)
+      SAVE_LSP_JSON="${2:?missing value for --save-lsp-json}"
       shift 2
       ;;
     --summary-ts-json)
@@ -237,6 +249,13 @@ echo
 
 echo "[lang-summary]"
 print_lang_summary "$TS_JSON" "$LSP_JSON"
+
+if [[ -n "$SAVE_TS_JSON" ]]; then
+  cp "$TS_JSON" "$SAVE_TS_JSON"
+fi
+if [[ -n "$SAVE_LSP_JSON" ]]; then
+  cp "$LSP_JSON" "$SAVE_LSP_JSON"
+fi
 
 check_min() {
   local name="$1" actual="$2" minv="$3"
