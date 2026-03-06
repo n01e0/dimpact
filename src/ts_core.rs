@@ -109,12 +109,38 @@ pub fn load_typescript_spec() -> Spec {
     serde_yaml::from_str(YAML).expect("valid typescript spec yaml")
 }
 
+pub fn load_python_spec() -> Spec {
+    static YAML: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/resources/specs/python.yml"
+    ));
+    serde_yaml::from_str(YAML).expect("valid python spec yaml")
+}
+
 pub fn compile_queries_typescript(spec: &Spec, tsx: bool) -> anyhow::Result<CompiledQueries> {
     let lang: tree_sitter::Language = if tsx {
         tree_sitter_typescript::LANGUAGE_TSX.into()
     } else {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     };
+    let decl = tree_sitter::Query::new(&lang, &spec.queries.declarations)?;
+    let calls = tree_sitter::Query::new(&lang, &spec.queries.calls)?;
+    let imports = tree_sitter::Query::new(&lang, &spec.queries.imports)?;
+    let control = if spec.queries.control.trim().is_empty() {
+        None
+    } else {
+        Some(tree_sitter::Query::new(&lang, &spec.queries.control)?)
+    };
+    Ok(CompiledQueries {
+        decl,
+        calls,
+        imports,
+        control,
+    })
+}
+
+pub fn compile_queries_python(spec: &Spec) -> anyhow::Result<CompiledQueries> {
+    let lang: tree_sitter::Language = tree_sitter_python::LANGUAGE.into();
     let decl = tree_sitter::Query::new(&lang, &spec.queries.declarations)?;
     let calls = tree_sitter::Query::new(&lang, &spec.queries.calls)?;
     let imports = tree_sitter::Query::new(&lang, &spec.queries.imports)?;
@@ -170,6 +196,15 @@ impl QueryRunner {
         } else {
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
         };
+        p.set_language(&lang).expect("lang");
+        Self {
+            parser: std::cell::RefCell::new(p),
+        }
+    }
+
+    pub fn new_python() -> Self {
+        let mut p = tree_sitter::Parser::new();
+        let lang: tree_sitter::Language = tree_sitter_python::LANGUAGE.into();
         p.set_language(&lang).expect("lang");
         Self {
             parser: std::cell::RefCell::new(p),
@@ -233,5 +268,26 @@ fn bar() {}
         assert!(!calls.is_empty(), "should match calls");
         let uses = qr.run_captures(src, &compiled.imports);
         assert_eq!(uses.len(), 1, "one use declaration");
+    }
+
+    #[test]
+    fn python_spec_bare_call_matches() {
+        let spec = load_python_spec();
+        let compiled = compile_queries_python(&spec).unwrap();
+        let src = r#"def bar():
+    pass
+
+def foo():
+    bar()
+"#;
+        let qr = QueryRunner::new_python();
+        let calls = qr.run_captures(src, &compiled.calls);
+        assert!(!calls.is_empty(), "should match bare python call");
+        let first = &calls[0];
+        let name_cap = first
+            .iter()
+            .find(|c| c.name == "name")
+            .expect("name capture");
+        assert_eq!(&src[name_cap.start..name_cap.end], "bar");
     }
 }

@@ -1,0 +1,19 @@
+language: python
+queries:
+  declarations: |
+    ; def foo(...)
+    (function_definition name: (identifier) @name) @decl
+    ; class A:
+    (class_definition name: (identifier) @name) @decl
+  calls: |
+    ; bare call: foo()
+    (call function: (identifier) @name) @call
+  imports: |
+    ; import x
+    (import_statement) @use
+    ; from x import y
+    (import_from_statement) @use
+  control: |
+    (if_statement) @ctrl
+    (for_statement) @ctrl
+    (while_statement) @ctrl
