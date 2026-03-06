@@ -33,6 +33,8 @@ pub enum LanguageKind {
     Javascript,
     Typescript,
     Tsx,
+    Go,
+    Java,
 }
 
 pub fn analyzer_for_path(path: &str, lang: LanguageKind) -> Option<Box<dyn LanguageAnalyzer>> {
@@ -46,6 +48,8 @@ pub fn analyzer_for_path(path: &str, lang: LanguageKind) -> Option<Box<dyn Langu
         LanguageKind::Javascript => "js",
         LanguageKind::Typescript => "ts",
         LanguageKind::Tsx => "tsx",
+        LanguageKind::Go => "go",
+        LanguageKind::Java => "java",
         LanguageKind::Auto => ext,
     };
     match target {
