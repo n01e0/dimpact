@@ -93,4 +93,21 @@ mod tests {
         assert!(analyzer_for_path("x.any", LanguageKind::Typescript).is_some());
         assert!(analyzer_for_path("x.any", LanguageKind::Tsx).is_some());
     }
+
+    #[test]
+    fn analyzer_for_path_uses_go_java_implementations_not_fallback() {
+        let go = analyzer_for_path("main.go", LanguageKind::Auto).expect("go analyzer");
+        assert_eq!(go.language(), "go");
+        let go_syms = go.symbols_in_file("main.go", "package main\nfunc main() {}\n");
+        assert!(go_syms.iter().any(|s| s.name == "main"));
+
+        let java = analyzer_for_path("Main.java", LanguageKind::Auto).expect("java analyzer");
+        assert_eq!(java.language(), "java");
+        let java_syms = java.symbols_in_file(
+            "Main.java",
+            "class Main {\n    static void main(String[] args) {\n    }\n}\n",
+        );
+        assert!(java_syms.iter().any(|s| s.name == "Main"));
+        assert!(java_syms.iter().any(|s| s.name == "main"));
+    }
 }
