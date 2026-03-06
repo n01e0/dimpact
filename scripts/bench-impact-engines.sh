@@ -7,6 +7,7 @@ set -euo pipefail
 #   scripts/bench-impact-engines.sh [--base origin/main] [--diff-file /path/to.diff] [--runs 3] [--direction callers] [--lang rust] [--rpc-counts]
 #                                  [--min-ts-changed N] [--min-ts-impacted N]
 #                                  [--min-lsp-changed N] [--min-lsp-impacted N]
+#   scripts/bench-impact-engines.sh --summary-ts-json /path/to/ts.json --summary-lsp-json /path/to/lsp.json
 #
 # Examples:
 #   scripts/bench-impact-engines.sh --base origin/main --runs 5 --direction callers --lang rust
@@ -15,6 +16,7 @@ set -euo pipefail
 #   scripts/bench-impact-engines.sh --diff-file /tmp/dimpact-heavy.diff --runs 1 --min-lsp-changed 40 --min-lsp-impacted 18
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 1 --direction callers --lang go
 #   scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 1 --direction callers --lang java
+#   scripts/bench-impact-engines.sh --summary-ts-json /tmp/ts.json --summary-lsp-json /tmp/lsp.json
 
 BASE_REF="origin/main"
 DIFF_INPUT=""
@@ -26,6 +28,32 @@ MIN_TS_CHANGED=""
 MIN_TS_IMPACTED=""
 MIN_LSP_CHANGED=""
 MIN_LSP_IMPACTED=""
+SUMMARY_TS_JSON=""
+SUMMARY_LSP_JSON=""
+
+print_lang_summary() {
+  local ts_json="$1"
+  local lsp_json="$2"
+  python3 - "$ts_json" "$lsp_json" <<'PY'
+import json, sys
+from collections import Counter
+from pathlib import Path
+
+ts = json.loads(Path(sys.argv[1]).read_text())
+lsp = json.loads(Path(sys.argv[2]).read_text())
+
+def by_lang(symbols):
+    c = Counter((s.get("language") or "unknown") for s in symbols)
+    if not c:
+        return "-"
+    return ", ".join(f"{lang}:{c[lang]}" for lang in sorted(c))
+
+print(f"ts changed_by_lang: {by_lang(ts.get('changed_symbols', []))}")
+print(f"ts impacted_by_lang: {by_lang(ts.get('impacted_symbols', []))}")
+print(f"lsp(strict) changed_by_lang: {by_lang(lsp.get('changed_symbols', []))}")
+print(f"lsp(strict) impacted_by_lang: {by_lang(lsp.get('impacted_symbols', []))}")
+PY
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -69,6 +97,14 @@ while [[ $# -gt 0 ]]; do
       MIN_LSP_IMPACTED="${2:?missing value for --min-lsp-impacted}"
       shift 2
       ;;
+    --summary-ts-json)
+      SUMMARY_TS_JSON="${2:?missing value for --summary-ts-json}"
+      shift 2
+      ;;
+    --summary-lsp-json)
+      SUMMARY_LSP_JSON="${2:?missing value for --summary-lsp-json}"
+      shift 2
+      ;;
     -h|--help)
       sed -n '1,30p' "$0"
       exit 0
@@ -96,6 +132,24 @@ for v in "$MIN_TS_CHANGED" "$MIN_TS_IMPACTED" "$MIN_LSP_CHANGED" "$MIN_LSP_IMPAC
     exit 2
   fi
 done
+
+if [[ -n "$SUMMARY_TS_JSON" || -n "$SUMMARY_LSP_JSON" ]]; then
+  if [[ -z "$SUMMARY_TS_JSON" || -z "$SUMMARY_LSP_JSON" ]]; then
+    echo "--summary-ts-json and --summary-lsp-json must be used together" >&2
+    exit 2
+  fi
+  if [[ ! -f "$SUMMARY_TS_JSON" ]]; then
+    echo "--summary-ts-json not found: $SUMMARY_TS_JSON" >&2
+    exit 2
+  fi
+  if [[ ! -f "$SUMMARY_LSP_JSON" ]]; then
+    echo "--summary-lsp-json not found: $SUMMARY_LSP_JSON" >&2
+    exit 2
+  fi
+  echo "[lang-summary]"
+  print_lang_summary "$SUMMARY_TS_JSON" "$SUMMARY_LSP_JSON"
+  exit 0
+fi
 
 if [[ -n "$DIFF_INPUT" && ! -f "$DIFF_INPUT" ]]; then
   echo "--diff-file not found: $DIFF_INPUT" >&2
@@ -182,25 +236,7 @@ echo "lsp(strict) changed=$LSP_CHANGED impacted=$LSP_IMPACTED"
 echo
 
 echo "[lang-summary]"
-python3 - "$TS_JSON" "$LSP_JSON" <<'PY'
-import json, sys
-from collections import Counter
-from pathlib import Path
-
-ts = json.loads(Path(sys.argv[1]).read_text())
-lsp = json.loads(Path(sys.argv[2]).read_text())
-
-def by_lang(symbols):
-    c = Counter((s.get("language") or "unknown") for s in symbols)
-    if not c:
-        return "-"
-    return ", ".join(f"{lang}:{c[lang]}" for lang in sorted(c))
-
-print(f"ts changed_by_lang: {by_lang(ts.get('changed_symbols', []))}")
-print(f"ts impacted_by_lang: {by_lang(ts.get('impacted_symbols', []))}")
-print(f"lsp(strict) changed_by_lang: {by_lang(lsp.get('changed_symbols', []))}")
-print(f"lsp(strict) impacted_by_lang: {by_lang(lsp.get('impacted_symbols', []))}")
-PY
+print_lang_summary "$TS_JSON" "$LSP_JSON"
 
 check_min() {
   local name="$1" actual="$2" minv="$3"
