@@ -22,6 +22,19 @@ jobs:
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
       - uses: actions/checkout@v6
+      - name: Ensure base tools (git/bash/ripgrep)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git bash ripgrep ca-certificates
+          elif command -v apk >/dev/null 2>&1; then
+            apk add --no-cache git bash ripgrep ca-certificates
+          elif command -v yum >/dev/null 2>&1; then
+            yum install -y git bash ripgrep ca-certificates
+          else
+            echo "no supported package manager found to install git/bash/ripgrep" >&2
+            exit 1
+          fi
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -32,20 +45,26 @@ jobs:
         run: cargo install cargo-make
       - name: Run cargo check --all-targets
         run: |
-          set -o pipefail
           echo "::group::cargo check --all-targets"
-          cargo check --all-targets 2>&1 | tee cargo-check.log
-          status=${PIPESTATUS[0]}
+          if cargo check --all-targets > cargo-check.log 2>&1; then
+            cat cargo-check.log
+          else
+            cat cargo-check.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "::endgroup::"
-          exit $status
       - name: Run cargo clippy
         run: |
-          set -o pipefail
           echo "::group::cargo clippy"
-          cargo clippy 2>&1 | tee cargo-clippy.log
-          status=${PIPESTATUS[0]}
+          if cargo clippy > cargo-clippy.log 2>&1; then
+            cat cargo-clippy.log
+          else
+            cat cargo-clippy.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "::endgroup::"
-          exit $status
       - name: Summarize check/clippy failure logs
         if: failure()
         run: |
@@ -75,6 +94,19 @@ jobs:
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
       - uses: actions/checkout@v6
+      - name: Ensure base tools (git/bash/ripgrep)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git bash ripgrep ca-certificates
+          elif command -v apk >/dev/null 2>&1; then
+            apk add --no-cache git bash ripgrep ca-certificates
+          elif command -v yum >/dev/null 2>&1; then
+            yum install -y git bash ripgrep ca-certificates
+          else
+            echo "no supported package manager found to install git/bash/ripgrep" >&2
+            exit 1
+          fi
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -83,12 +115,15 @@ jobs:
           restore-keys: ${{ runner.os }}
       - name: Run cargo test -q
         run: |
-          set -o pipefail
           echo "::group::cargo test -q"
-          cargo test -q 2>&1 | tee cargo-test.log
-          status=${PIPESTATUS[0]}
+          if cargo test -q > cargo-test.log 2>&1; then
+            cat cargo-test.log
+          else
+            cat cargo-test.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "::endgroup::"
-          exit $status
       - name: Summarize cargo test failure logs
         if: failure()
         run: |
@@ -115,6 +150,19 @@ jobs:
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
       - uses: actions/checkout@v6
+      - name: Ensure base tools (git/bash/ripgrep)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git bash ripgrep ca-certificates
+          elif command -v apk >/dev/null 2>&1; then
+            apk add --no-cache git bash ripgrep ca-certificates
+          elif command -v yum >/dev/null 2>&1; then
+            yum install -y git bash ripgrep ca-certificates
+          else
+            echo "no supported package manager found to install git/bash/ripgrep" >&2
+            exit 1
+          fi
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -129,28 +177,27 @@ jobs:
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
       - uses: actions/checkout@v6
-      - name: Ensure ripgrep is available
+      - name: Ensure base tools (git/bash/ripgrep)
         run: |
-          if command -v rg >/dev/null 2>&1; then
-            echo "ripgrep already installed"
-            exit 0
-          fi
-
           if command -v apt-get >/dev/null 2>&1; then
             apt-get update
-            apt-get install -y --no-install-recommends ripgrep
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git bash ripgrep ca-certificates
           elif command -v apk >/dev/null 2>&1; then
-            apk add --no-cache ripgrep
+            apk add --no-cache git bash ripgrep ca-certificates
           elif command -v yum >/dev/null 2>&1; then
-            yum install -y ripgrep
+            yum install -y git bash ripgrep ca-certificates
           else
-            echo "ripgrep (rg) is required but no supported package manager was found" >&2
+            echo "no supported package manager found to install git/bash/ripgrep" >&2
             exit 1
           fi
       - name: Run graduation auto-check script
         run: |
-          set -o pipefail
-          scripts/verify-lsp-graduation.sh --skip-regression 2>&1 | tee lsp-graduation-check.log
+          if bash scripts/verify-lsp-graduation.sh --skip-regression > lsp-graduation-check.log 2>&1; then
+            cat lsp-graduation-check.log
+          else
+            cat lsp-graduation-check.log
+            exit 1
+          fi
       - name: Publish graduation check summary
         if: always()
         run: |
