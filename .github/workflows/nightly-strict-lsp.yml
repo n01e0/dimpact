@@ -374,6 +374,20 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Classify nightly flaky causes
+        if: always()
+        run: |
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/run-flaky-classifier.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          scripts/classify-nightly-flaky.sh \
+            "$NIGHTLY_LOG_DIR" \
+            "$NIGHTLY_LOG_DIR/nightly-flaky-classification.json" \
+            "$NIGHTLY_LOG_DIR/nightly-flaky-classification.md"
+
+          cat "$NIGHTLY_LOG_DIR/nightly-flaky-classification.md" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload nightly execution log bundle
         if: always()
         uses: actions/upload-artifact@v4
