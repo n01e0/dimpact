@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.1 - draft
+
+### Major changes
+- Added v0.4.1 difficult-case analyzer fixtures for Go / Java / Python and expanded fixture-driven precision tests:
+  - Go: generics + chained call + embedded receiver
+  - Java: overload + static import + nested type
+  - Python: dynamic call/import edge
+- Optimized strict-LSP callers/both hot paths by reducing redundant caller-site symbol lookups and reusing document-symbol resolution in references traversal.
+- Added strict-LSP profiling and before/after benchmark artifacts for optimization validation.
+
+### Operational changes
+- Nightly strict-LSP workflow now auto-classifies flaky causes into `install` / `startup` / `capability` / `timeout`.
+- Added flaky-type based auto-retry policy in nightly workflow:
+  - `install` / `startup` / `timeout`: retry once
+  - `capability` only: no auto-retry by default
+- Added failure-time CI summary output with cause/language/evidence/repro command.
+- Documented nightly operations flow for triage / retry / escalation.
+
+### Notes
+- Strict-LSP stability/performance confirmation is recorded from before/after artifacts with explicit blocked-lane reporting.
+- Ruby/Java strict-LSP lanes may still show initialize-timeout instability depending on runtime environment.
+- Rust before/after comparison includes input-scope caveats; interpret absolute deltas with caution.
+
 ## 0.4.0 - draft
 
 ### Major changes
