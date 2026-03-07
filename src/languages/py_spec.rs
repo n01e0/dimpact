@@ -112,6 +112,7 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
     }
 
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
+        use regex::Regex;
         use std::collections::HashSet;
 
         let offs = line_offsets(source);
@@ -147,6 +148,59 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             } else {
                 false
             };
+            let key = (ln, name.to_string(), qual.clone(), is_method);
+            if !seen.insert(key) {
+                continue;
+            }
+
+            out.push(UnresolvedRef {
+                name: name.to_string(),
+                kind: RefKind::Call,
+                file: path.to_string(),
+                line: ln,
+                qualifier: qual,
+                is_method,
+            });
+        }
+
+        // Decorator references can appear without explicit call syntax (e.g. @traced).
+        // Treat decorator refs as non-method call-like unresolved refs for dependency edges.
+        let re_decorator = Regex::new(
+            r"(?m)^[ \t]*@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)(?:\([^\n]*\))?",
+        )
+        .expect("valid python decorator regex");
+
+        for caps in re_decorator.captures_iter(source) {
+            let Some(full) = caps.get(0) else {
+                continue;
+            };
+            let Some(chain_cap) = caps.get(1) else {
+                continue;
+            };
+
+            let chain = chain_cap.as_str().trim();
+            if chain.is_empty() {
+                continue;
+            }
+
+            let ln = byte_to_line(&offs, full.start());
+            let compact = chain.replace([' ', '\t', '\n'], "");
+            let mut parts: Vec<&str> = compact.split('.').collect();
+            if parts.is_empty() {
+                continue;
+            }
+
+            let name = parts.pop().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+            let qual = if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join("."))
+            };
+
+            let is_method = false;
             let key = (ln, name.to_string(), qual.clone(), is_method);
             if !seen.insert(key) {
                 continue;
@@ -394,6 +448,29 @@ def run():
     }
 
     #[test]
+    fn unresolved_refs_extracts_decorator_identifier_and_qualified_decorator() {
+        let src = r#"@traced
+@pkg.decorate
+@pkg.wrap(1)
+def run():
+    return 1
+"#;
+        let ana = SpecPyAnalyzer::new();
+        let refs = ana.unresolved_refs("pkg/main.py", src);
+
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "traced" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "decorate" && r.qualifier.as_deref() == Some("pkg") && !r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "wrap" && r.qualifier.as_deref() == Some("pkg") && !r.is_method
+        }));
+    }
+
+    #[test]
     fn imports_extract_alias_from_and_relative_paths() {
         let src = r#"import os
 import util.helpers as uh
@@ -585,6 +662,10 @@ from pkg.star import *
         assert!(
             refs.iter()
                 .any(|r| r.name == "w" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "traced" && r.qualifier.is_none() && !r.is_method)
         );
         assert!(refs.iter().any(|r| {
             r.name == "normalizer" && r.qualifier.as_deref() == Some("self") && r.is_method
