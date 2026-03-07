@@ -85,8 +85,66 @@ cargo test -q --test engine_lsp
 - skip-safe 判定: `engine-lsp-strict-preflight.log` で対象言語の `enabled=0 reason=...` を確認
 - strict 本体失敗: `engine-lsp-strict-e2e.log` の末尾 + `$GITHUB_STEP_SUMMARY` を併読
 
+## 6) 運用フロー（triage / retry / escalation）（ALL63-4）
+
+現在の nightly は、失敗時に以下の順で自動処理する。
+
+### 6.1 triage（自動分類）
+
+1. `scripts/classify-nightly-flaky.sh` が `nightly-logs/*.log` を走査
+2. flaky を 4分類で集計
+   - `install`
+   - `startup`
+   - `capability`
+   - `timeout`
+3. 生成物
+   - `nightly-flaky-classification.json`
+   - `nightly-flaky-classification.md`
+4. CI summary には分類結果が自動追記される
+
+### 6.2 retry（タイプ別ポリシー）
+
+分類結果をもとに、workflow が再試行可否を自動判定する。
+
+- `install` > 0: **retry 1回**（setup系を best-effort 再実行）
+- `startup` > 0: **retry 1回**
+- `timeout` > 0: **retry 1回**
+- `capability` のみ: **retry しない**（非一時要因扱い）
+
+再試行時は `engine_lsp` strict E2E / graduation check を policy-gated で再実行し、
+初回 + retry を統合して最終成功判定する。
+
+### 6.3 failure summary（原因/言語/再現）
+
+失敗時は `scripts/summarize-nightly-failure.sh` が triage 情報を要約し、
+CI summary に以下の表を出す。
+
+- cause type
+- language
+- evidence（`file:line` + snippet）
+- repro step（その場で叩けるコマンド）
+
+生成物:
+- `nightly-failure-triage.md`
+
+### 6.4 escalation（人手対応の条件）
+
+次の条件では、retry 成否に関係なく escalation 対象とする。
+
+- 同一カテゴリが 3回以上連続（例: startup timeout が連続）
+- `capability` が連続（設定/機能差分の恒久問題の可能性）
+- `install` 失敗が複数言語で同時発生（runner/container 側障害の可能性）
+- retry 後も `strict_e2e` または `graduation` が失敗
+
+escalation 時の最小提出セット:
+
+1. `nightly-strict-lsp-execution-logs` artifact 一式
+2. `nightly-flaky-classification.json`
+3. `nightly-failure-triage.md`
+4. 該当 run URL / commit SHA / 失敗カテゴリ
+
 ---
 
 フォローアップ候補:
 - preflight に startup handshake（initialize）検証を追加
-- 言語別 timeout と retry 方針の細分化
+- capability 判定の言語別粒度をさらに細分化
