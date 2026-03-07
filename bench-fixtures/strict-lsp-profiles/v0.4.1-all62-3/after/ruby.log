@@ -1,0 +1,7 @@
+=== ruby (after) ===
+tree=/home/shioriko/src/github.com/n01e0/dimpact
+cmd=scripts/bench-impact-engines.sh --diff-file bench-fixtures/ruby-heavy.diff --runs 3 --direction callers --lang ruby --rpc-counts
+timestamp=2026-03-07T18:25:34+09:00
+diff_file=bench-fixtures/ruby-heavy.diff runs=3 direction=callers lang=ruby rpc_counts=1 compare=lsp(strict)
+Error: lsp initialize timeout or invalid response
+exit_code=1

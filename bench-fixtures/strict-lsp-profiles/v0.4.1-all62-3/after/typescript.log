@@ -1,0 +1,31 @@
+=== typescript (after) ===
+tree=/home/shioriko/src/github.com/n01e0/dimpact
+cmd=scripts/bench-impact-engines.sh --diff-file bench-fixtures/ts-heavy.diff --runs 1 --direction callers --lang typescript --rpc-counts
+timestamp=2026-03-07T18:25:23+09:00
+diff_file=bench-fixtures/ts-heavy.diff runs=1 direction=callers lang=typescript rpc_counts=1 compare=lsp(strict)
+[ts]
+0.15
+avg=0.150s min=0.150s max=0.150s
+
+[lsp-strict]
+1.21
+avg=1.210s min=1.210s max=1.210s
+
+ts changed=10 impacted=31
+lsp(strict) changed=10 impacted=31
+
+[lang-summary]
+ts changed_by_lang: typescript:10
+ts impacted_by_lang: typescript:31
+lsp(strict) changed_by_lang: typescript:10
+lsp(strict) impacted_by_lang: typescript:31
+
+
+[lsp-strict-rpc-counts]
+41 method=callHierarchy/incomingCalls
+11 method=textDocument/prepareCallHierarchy
+2 method=textDocument/documentSymbol
+1 method=textDocument/references
+1 method=textDocument/didOpen
+1 method=textDocument/definition
+exit_code=0
