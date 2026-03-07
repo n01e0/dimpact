@@ -1,0 +1,178 @@
+{
+  "repo": "n01e0/dimpact",
+  "limit": 20,
+  "totalRunsChecked": 20,
+  "pythonJobsChecked": 16,
+  "patternCounts": {
+    "healthcheck-transport-mismatch": 16
+  },
+  "items": [
+    {
+      "runId": "22796801148",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22796801148",
+      "createdAt": "2026-03-07T09:51:36Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-07T09:51:49.4300261Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22796745421",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22796745421",
+      "createdAt": "2026-03-07T09:47:40Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-07T09:47:48.8413362Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22796092331",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22796092331",
+      "createdAt": "2026-03-07T09:01:51Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-07T09:02:05.1470328Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22796010472",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22796010472",
+      "createdAt": "2026-03-07T08:56:13Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-07T08:56:23.0916616Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22777954918",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22777954918",
+      "createdAt": "2026-03-06T19:06:56Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T19:07:08.5909061Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22777754151",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22777754151",
+      "createdAt": "2026-03-06T19:01:14Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T19:01:28.4855617Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22777602773",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22777602773",
+      "createdAt": "2026-03-06T18:56:57Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T18:57:06.3209880Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22777492937",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22777492937",
+      "createdAt": "2026-03-06T18:53:48Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T18:53:57.3101435Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22776479200",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22776479200",
+      "createdAt": "2026-03-06T18:25:45Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T18:25:59.3703380Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22773125204",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22773125204",
+      "createdAt": "2026-03-06T16:51:46Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T16:51:58.4410042Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22772544478",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22772544478",
+      "createdAt": "2026-03-06T16:35:57Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T16:36:12.7349303Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22767071760",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22767071760",
+      "createdAt": "2026-03-06T14:11:46Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T14:11:58.0852813Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22766923894",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22766923894",
+      "createdAt": "2026-03-06T14:07:47Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T14:07:59.9559615Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22766788681",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22766788681",
+      "createdAt": "2026-03-06T14:04:08Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T14:04:20.9506685Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22766654367",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22766654367",
+      "createdAt": "2026-03-06T14:00:29Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T14:00:42.2416678Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    },
+    {
+      "runId": "22763491982",
+      "runUrl": "https://github.com/n01e0/dimpact/actions/runs/22763491982",
+      "createdAt": "2026-03-06T12:29:29Z",
+      "runConclusion": "failure",
+      "jobConclusion": "failure",
+      "pattern": "healthcheck-transport-mismatch",
+      "reason": "pyright-langserver --help/--version exits non-zero without stdio/node-ipc/socket transport",
+      "sample": "2026-03-06T12:29:38.1580427Z Error: Connection input stream is not set. Use arguments of createConnection or set command line parameters: '--node-ipc', '--stdio' or '--socket={number}'"
+    }
+  ],
+  "localRepro": {
+    "badHealthcheck": [
+      "npm install -g pyright",
+      "pyright-langserver --help"
+    ],
+    "expectedSignature": "Connection input stream is not set"
+  }
+}
