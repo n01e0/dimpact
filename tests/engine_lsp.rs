@@ -121,6 +121,11 @@ fn should_run_javascript_strict_lsp_e2e() -> bool {
         || should_run_strict_lsp_e2e()
 }
 
+fn should_run_tsx_strict_lsp_e2e() -> bool {
+    std::env::var("DIMPACT_E2E_STRICT_LSP_TSX").ok().as_deref() == Some("1")
+        || should_run_strict_lsp_e2e()
+}
+
 fn should_run_ruby_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP_RUBY").ok().as_deref() == Some("1")
         || should_run_strict_lsp_e2e()
@@ -369,6 +374,41 @@ fn setup_repo_typescript_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf)
     fs::write(
         path.join("main.ts"),
         "function bar(): number {\n  const x = 1;\n  return x;\n}\n\nfunction foo(): number {\n  return bar();\n}\n\nfunction main(): number {\n  return foo();\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
+fn setup_repo_tsx_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("package.json"),
+        "{\n  \"name\": \"lsp-tsx-fixture\",\n  \"private\": true,\n  \"version\": \"0.1.0\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("tsconfig.json"),
+        "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"module\": \"commonjs\",\n    \"jsx\": \"react-jsx\",\n    \"strict\": true\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("app.tsx"),
+        "function bar() {\n  return 1;\n}\n\nfunction View() {\n  return <div>{bar()}</div>;\n}\n\nexport function App() {\n  return <View />;\n}\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("app.tsx"),
+        "function bar() {\n  const x = 1;\n  return x;\n}\n\nfunction View() {\n  return <div>{bar()}</div>;\n}\n\nexport function App() {\n  return <View />;\n}\n",
     )
     .unwrap();
 
@@ -2405,6 +2445,39 @@ fn typescript_real_lsp_e2e_fixture_is_opt_in_gated() {
 
     let tsconfig = fs::read_to_string(repo.join("tsconfig.json")).expect("read tsconfig");
     assert!(tsconfig.contains("\"strict\": true"));
+}
+
+#[test]
+#[serial]
+fn tsx_real_lsp_e2e_fixture_is_opt_in_gated() {
+    if !should_run_tsx_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e fixture"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_tsx_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].new_path.as_deref(), Some("app.tsx"));
+    assert!(
+        files[0]
+            .changes
+            .iter()
+            .any(|c| matches!(c.kind, dimpact::ChangeKind::Added)),
+        "fixture should include added lines for changed detection"
+    );
+
+    let tsconfig = fs::read_to_string(repo.join("tsconfig.json")).expect("read tsconfig");
+    assert!(tsconfig.contains("\"jsx\": \"react-jsx\""));
 }
 
 #[test]
