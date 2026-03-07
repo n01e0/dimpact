@@ -1,0 +1,36 @@
+=== rust (before) ===
+tree=/tmp/dimpact-all62-3-before-rust
+cmd=scripts/bench-impact-engines.sh --base v0.4.0 --runs 3 --direction callers --lang rust --rpc-counts
+timestamp=2026-03-07T18:26:24+09:00
+building release binary...
+base=v0.4.0 runs=3 direction=callers lang=rust rpc_counts=1 compare=lsp(strict)
+[ts]
+3.57
+0.44
+0.44
+avg=1.483s min=0.440s max=3.570s
+
+[lsp-strict]
+81.57
+58.54
+58.87
+avg=66.327s min=58.540s max=81.570s
+
+ts changed=6 impacted=0
+lsp(strict) changed=9 impacted=0
+
+[lang-summary]
+ts changed_by_lang: rust:6
+ts impacted_by_lang: -
+lsp(strict) changed_by_lang: rust:9
+lsp(strict) impacted_by_lang: -
+
+
+[lsp-strict-rpc-counts]
+1970 method=textDocument/documentSymbol
+780 method=textDocument/references
+85 method=textDocument/didOpen
+13 method=textDocument/prepareCallHierarchy
+10 method=textDocument/definition
+1 method=workspace/symbol
+exit_code=0

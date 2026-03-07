@@ -1,0 +1,35 @@
+=== javascript (after) ===
+tree=/home/shioriko/src/github.com/n01e0/dimpact
+cmd=scripts/bench-impact-engines.sh --diff-file bench-fixtures/js-heavy.diff --runs 3 --direction callers --lang javascript --rpc-counts
+timestamp=2026-03-07T18:25:27+09:00
+diff_file=bench-fixtures/js-heavy.diff runs=3 direction=callers lang=javascript rpc_counts=1 compare=lsp(strict)
+[ts]
+0.08
+0.08
+0.08
+avg=0.080s min=0.080s max=0.080s
+
+[lsp-strict]
+1.56
+1.00
+0.94
+avg=1.167s min=0.940s max=1.560s
+
+ts changed=10 impacted=31
+lsp(strict) changed=0 impacted=0
+
+[lang-summary]
+ts changed_by_lang: javascript:10
+ts impacted_by_lang: javascript:31
+lsp(strict) changed_by_lang: -
+lsp(strict) impacted_by_lang: -
+
+
+[lsp-strict-rpc-counts]
+41 method=callHierarchy/incomingCalls
+11 method=textDocument/prepareCallHierarchy
+2 method=textDocument/documentSymbol
+1 method=textDocument/references
+1 method=textDocument/didOpen
+1 method=textDocument/definition
+exit_code=0

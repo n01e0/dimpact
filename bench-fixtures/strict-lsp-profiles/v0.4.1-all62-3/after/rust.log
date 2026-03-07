@@ -1,0 +1,35 @@
+=== rust (after) ===
+tree=/home/shioriko/src/github.com/n01e0/dimpact
+cmd=scripts/bench-impact-engines.sh --base v0.4.0 --runs 3 --direction callers --lang rust --rpc-counts
+timestamp=2026-03-07T18:20:22+09:00
+base=v0.4.0 runs=3 direction=callers lang=rust rpc_counts=1 compare=lsp(strict)
+[ts]
+0.85
+0.85
+0.85
+avg=0.850s min=0.850s max=0.850s
+
+[lsp-strict]
+59.79
+59.09
+59.28
+avg=59.387s min=59.090s max=59.790s
+
+ts changed=9 impacted=4
+lsp(strict) changed=11 impacted=4
+
+[lang-summary]
+ts changed_by_lang: rust:9
+ts impacted_by_lang: rust:4
+lsp(strict) changed_by_lang: rust:11
+lsp(strict) impacted_by_lang: rust:4
+
+
+[lsp-strict-rpc-counts]
+2050 method=textDocument/documentSymbol
+782 method=textDocument/references
+85 method=textDocument/didOpen
+21 method=textDocument/prepareCallHierarchy
+12 method=textDocument/definition
+1 method=workspace/symbol
+exit_code=0
