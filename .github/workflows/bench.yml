@@ -238,9 +238,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          INSTALL_LOG="bench-python-install.log"
+          INSTALL_SUMMARY="bench-python-install-summary.txt"
+          : > "$INSTALL_LOG"
+          exec > >(tee -a "$INSTALL_LOG") 2>&1
+
           select_server() {
             local server="$1"
             echo "python_lsp=$server" >> "$GITHUB_OUTPUT"
+            echo "INSTALL_RESULT=success python_lsp=$server" > "$INSTALL_SUMMARY"
             echo "[python-lsp] selected=$server"
           }
 
@@ -284,6 +290,7 @@ jobs:
             cat /tmp/pylsp-version.log >&2 || true
           fi
 
+          echo "INSTALL_RESULT=failure reason=no-usable-server candidates=pyright,basedpyright,pylsp" > "$INSTALL_SUMMARY"
           echo "::error::[python-lsp] failed to install a usable python LSP server (pyright/basedpyright/pylsp)" >&2
           exit 1
 
@@ -319,6 +326,20 @@ jobs:
           {
             echo "## Python strict-LSP benchmark"
             echo
+            echo "install step conclusion: `${{ steps.install_python_lsp.conclusion }}`"
+            if [ -f bench-python-install-summary.txt ]; then
+              echo
+              echo "### install summary"
+              sed 's/^/`/;s/$/`/' bench-python-install-summary.txt
+            fi
+            if [ -f bench-python-install.log ]; then
+              echo
+              echo "### install log (tail -n 80)"
+              echo '```'
+              tail -n 80 bench-python-install.log
+              echo '```'
+            fi
+            echo
             if [ -f bench-python-report.txt ]; then
               sed 's/^/`/;s/$/`/' bench-python-report.txt
             else
@@ -332,6 +353,8 @@ jobs:
         with:
           name: bench-python-strict-lsp
           path: |
+            bench-python-install.log
+            bench-python-install-summary.txt
             bench-python-report.txt
             bench-python-ts.json
             bench-python-lsp.json
