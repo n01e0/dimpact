@@ -570,6 +570,19 @@ jobs:
             exit 1
           fi
 
+      - name: Publish failure triage summary (cause/language/repro)
+        if: failure()
+        run: |
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/run-failure-triage.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          scripts/summarize-nightly-failure.sh \
+            "$NIGHTLY_LOG_DIR" \
+            "$NIGHTLY_LOG_DIR/nightly-failure-triage.md"
+
+          cat "$NIGHTLY_LOG_DIR/nightly-failure-triage.md" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload nightly execution log bundle
         if: always()
         uses: actions/upload-artifact@v4
