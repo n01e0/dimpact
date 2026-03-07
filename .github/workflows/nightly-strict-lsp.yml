@@ -306,6 +306,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run strict real-LSP engine_lsp suite (env-gated)
+        id: strict_e2e_initial
+        continue-on-error: true
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/run-engine-lsp-strict.log"
@@ -337,7 +339,9 @@ jobs:
 
 
       - name: Run LSP graduation auto-check script
+        id: grad_check_initial
         if: always()
+        continue-on-error: true
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/run-graduation-check.log"
@@ -387,6 +391,184 @@ jobs:
             "$NIGHTLY_LOG_DIR/nightly-flaky-classification.md"
 
           cat "$NIGHTLY_LOG_DIR/nightly-flaky-classification.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Decide flaky-type retry policy
+        id: retry_policy
+        if: always()
+        run: |
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/retry-policy.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          CLASS_JSON="$NIGHTLY_LOG_DIR/nightly-flaky-classification.json"
+          python3 - "$CLASS_JSON" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          p = Path(sys.argv[1])
+          if p.exists():
+              d = json.loads(p.read_text())
+              totals = d.get("totals", {})
+          else:
+              totals = {}
+
+          install = int(totals.get("install", 0))
+          startup = int(totals.get("startup", 0))
+          capability = int(totals.get("capability", 0))
+          timeout = int(totals.get("timeout", 0))
+
+          retry_install = install > 0
+          retry_startup = startup > 0
+          retry_timeout = timeout > 0
+          retry_capability = capability > 0
+
+          # Policy:
+          # - install/startup/timeout: retry once
+          # - capability-only: no retry (non-transient by default)
+          retry_enabled = retry_install or retry_startup or retry_timeout
+
+          out = Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a", encoding="utf-8") as f:
+              def w(k, v):
+                  f.write(f"{k}={v}\n")
+              w("install", "1" if retry_install else "0")
+              w("startup", "1" if retry_startup else "0")
+              w("capability", "1" if retry_capability else "0")
+              w("timeout", "1" if retry_timeout else "0")
+              w("enabled", "1" if retry_enabled else "0")
+
+          print(f"retry_policy install={int(retry_install)} startup={int(retry_startup)} capability={int(retry_capability)} timeout={int(retry_timeout)} enabled={int(retry_enabled)}")
+          PY
+
+
+      - name: Publish flaky-type retry policy summary
+        if: always()
+        run: |
+          {
+            echo "## flaky-type retry policy"
+            echo
+            echo "| type | count>0 | auto-retry |"
+            echo "|---|---:|---:|"
+            echo "| install | ${{ steps.retry_policy.outputs.install }} | ${{ steps.retry_policy.outputs.install }} |"
+            echo "| startup | ${{ steps.retry_policy.outputs.startup }} | ${{ steps.retry_policy.outputs.startup }} |"
+            echo "| capability | ${{ steps.retry_policy.outputs.capability }} | 0 |"
+            echo "| timeout | ${{ steps.retry_policy.outputs.timeout }} | ${{ steps.retry_policy.outputs.timeout }} |"
+            echo
+            echo "retry enabled: ${{ steps.retry_policy.outputs.enabled }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retry setup actions for install/startup flaky types
+        if: always() && steps.retry_policy.outputs.enabled == '1' && (steps.retry_policy.outputs.install == '1' || steps.retry_policy.outputs.startup == '1')
+        run: |
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/retry-setup.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          echo "[retry] install/startup retry path"
+
+          npm install -g typescript typescript-language-server pyright || true
+          go install golang.org/x/tools/gopls@latest || true
+
+          mkdir -p "$HOME/.local/jdtls" "$HOME/.local/bin"
+          curl --retry 2 --retry-delay 2 --retry-all-errors -fsSL \
+            "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-latest.tar.gz" \
+            -o /tmp/jdtls-retry.tar.gz || true
+          tar -xzf /tmp/jdtls-retry.tar.gz -C "$HOME/.local/jdtls" || true
+          JDTLS_BIN="$(find "$HOME/.local/jdtls" -type f -name jdtls | head -n 1 || true)"
+          if [ -n "$JDTLS_BIN" ]; then
+            chmod +x "$JDTLS_BIN"
+            ln -sf "$JDTLS_BIN" "$HOME/.local/bin/jdtls"
+          fi
+
+          gem install ruby-lsp --no-document || true
+
+          echo "[retry] setup retry completed (best effort)"
+
+      - name: Retry strict real-LSP engine_lsp suite (policy-gated)
+        id: strict_e2e_retry
+        continue-on-error: true
+        if: always() && steps.retry_policy.outputs.enabled == '1'
+        env:
+          DIMPACT_E2E_STRICT_LSP: "1"
+          DIMPACT_E2E_STRICT_LSP_TYPESCRIPT: "1"
+          DIMPACT_E2E_STRICT_LSP_JAVASCRIPT: "1"
+          DIMPACT_E2E_STRICT_LSP_GO: "1"
+          DIMPACT_E2E_STRICT_LSP_JAVA: "1"
+          DIMPACT_E2E_STRICT_LSP_RUBY: "1"
+          DIMPACT_E2E_STRICT_LSP_PYTHON: "1"
+        run: |
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/run-engine-lsp-strict-retry.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          STRICT_E2E_RETRY_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-e2e-retry.log"
+          echo "::group::cargo test -q --test engine_lsp (strict real-LSP retry)"
+          set +e
+          cargo test -q --test engine_lsp 2>&1 | tee "$STRICT_E2E_RETRY_LOG"
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "::endgroup::"
+          exit $status
+
+      - name: Retry LSP graduation auto-check (policy-gated)
+        id: grad_check_retry
+        if: always() && steps.retry_policy.outputs.enabled == '1'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          LOG="$NIGHTLY_LOG_DIR/run-graduation-check-retry.log"
+          exec > >(tee -a "$LOG") 2>&1
+
+          GRAD_RETRY_LOG="$NIGHTLY_LOG_DIR/lsp-graduation-check-retry.log"
+          set +e
+          scripts/verify-lsp-graduation.sh --skip-regression 2>&1 | tee "$GRAD_RETRY_LOG"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit $status
+
+      - name: Finalize nightly result with retry policy
+        if: always()
+        run: |
+          set -euo pipefail
+
+          init_strict='${{ steps.strict_e2e_initial.outcome }}'
+          init_grad='${{ steps.grad_check_initial.outcome }}'
+          retry_enabled='${{ steps.retry_policy.outputs.enabled }}'
+          retry_strict='${{ steps.strict_e2e_retry.outcome }}'
+          retry_grad='${{ steps.grad_check_retry.outcome }}'
+
+          strict_ok=0
+          grad_ok=0
+
+          if [ "$init_strict" = "success" ]; then
+            strict_ok=1
+          elif [ "$retry_enabled" = "1" ] && [ "$retry_strict" = "success" ]; then
+            strict_ok=1
+          fi
+
+          if [ "$init_grad" = "success" ]; then
+            grad_ok=1
+          elif [ "$retry_enabled" = "1" ] && [ "$retry_grad" = "success" ]; then
+            grad_ok=1
+          fi
+
+          {
+            echo "## retry finalize"
+            echo "- strict initial: $init_strict"
+            echo "- strict retry: ${retry_strict:-skipped}"
+            echo "- graduation initial: $init_grad"
+            echo "- graduation retry: ${retry_grad:-skipped}"
+            echo "- retry enabled: $retry_enabled"
+            echo "- strict final ok: $strict_ok"
+            echo "- graduation final ok: $grad_ok"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$strict_ok" -ne 1 ] || [ "$grad_ok" -ne 1 ]; then
+            echo "nightly failed after applying retry policy" >&2
+            exit 1
+          fi
 
       - name: Upload nightly execution log bundle
         if: always()
