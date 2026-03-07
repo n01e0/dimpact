@@ -500,4 +500,58 @@ from pkg.star import *
             Some("pkg::sub::plugins")
         );
     }
+
+    #[test]
+    fn python_hard_case_fixture_v041_dynamic_call_import_edge() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_v041.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/sub/main.py", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "DynamicRunner"
+                && matches!(s.kind, SymbolKind::Struct)
+                && s.id.0 == "python:pkg/sub/main.py:struct:DynamicRunner:7"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "run"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "python:pkg/sub/main.py:method:run:8"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/sub/main.py", src);
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "imod" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "import_module" && r.qualifier.as_deref() == Some("il") && !r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "load" && r.qualifier.as_deref() == Some("loader_mod") && !r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "handle" && r.qualifier.as_deref() == Some("handler") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "process" && r.qualifier.as_deref() == Some("via_alias") && r.is_method
+        }));
+
+        let im = ana.imports_in_file("pkg/sub/main.py", src);
+        assert_eq!(im.get("il").map(String::as_str), Some("importlib"));
+        assert_eq!(
+            im.get("imod").map(String::as_str),
+            Some("importlib::import_module")
+        );
+        assert_eq!(
+            im.get("loader_mod").map(String::as_str),
+            Some("pkg::sub::plugins::loader")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::sub::plugins").map(String::as_str),
+            Some("pkg::sub::plugins")
+        );
+    }
 }
