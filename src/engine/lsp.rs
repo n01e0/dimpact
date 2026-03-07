@@ -1953,6 +1953,11 @@ fn enqueue_callers_via_references(
         .unwrap_or((cur_sym.range.start_line.saturating_sub(1), 0));
     let mut refs = sess.req_references(&uri, line0, ch0).unwrap_or_default();
 
+    let mut doc_items_cache: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    let mut seen_ref_sites: std::collections::HashSet<(String, u32)> =
+        std::collections::HashSet::new();
+
     // If direct references are sparse, resolve definition and retry at def position.
     if refs.len() <= 1 {
         let defs = sess.req_definition(&uri, line0, ch0).unwrap_or_default();
@@ -1987,6 +1992,9 @@ fn enqueue_callers_via_references(
     }
     for loc in refs {
         let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+        if loc_uri.is_empty() {
+            continue;
+        }
         let file = uri_to_path(loc_uri);
         let line0 = loc
             .get("range")
@@ -1994,7 +2002,18 @@ fn enqueue_callers_via_references(
             .and_then(|st| st.get("line"))
             .and_then(|n| n.as_u64())
             .unwrap_or(0) as u32;
-        let items = sess.req_document_symbol(loc_uri).unwrap_or_default();
+
+        if !seen_ref_sites.insert((loc_uri.to_string(), line0)) {
+            continue;
+        }
+
+        let items = if let Some(cached) = doc_items_cache.get(loc_uri) {
+            cached.clone()
+        } else {
+            let fetched = sess.req_document_symbol(loc_uri).unwrap_or_default();
+            doc_items_cache.insert(loc_uri.to_string(), fetched.clone());
+            fetched
+        };
         if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0)
             && matches!(
                 caller.kind,
@@ -2290,13 +2309,14 @@ fn lsp_impact_references(
     changed: Vec<crate::ir::Symbol>,
     opts: &crate::impact::ImpactOptions,
 ) -> anyhow::Result<crate::impact::ImpactOutput> {
-    use std::collections::{HashSet, VecDeque};
+    use std::collections::{HashMap, HashSet, VecDeque};
     let mut q: VecDeque<(crate::ir::Symbol, usize)> = VecDeque::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut nodes: HashSet<String> = HashSet::new();
     let mut node_map: std::collections::HashMap<String, crate::ir::Symbol> =
         std::collections::HashMap::new();
     let mut edges: Vec<crate::ir::reference::Reference> = Vec::new();
+    let mut doc_items_cache: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
 
     for s in changed.iter() {
         q.push_back((s.clone(), 0));
@@ -2338,8 +2358,12 @@ fn lsp_impact_references(
         let refs = sess
             .req_references(&def_uri, def_line0, def_ch0)
             .unwrap_or_default();
+        let mut seen_ref_sites: HashSet<(String, u32)> = HashSet::new();
         for loc in refs {
             let loc_uri = loc.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+            if loc_uri.is_empty() {
+                continue;
+            }
             let file = uri_to_path(loc_uri);
             let line0 = loc
                 .get("range")
@@ -2347,8 +2371,19 @@ fn lsp_impact_references(
                 .and_then(|s| s.get("line"))
                 .and_then(|n| n.as_u64())
                 .unwrap_or(0) as u32;
-            // find enclosing symbol via documentSymbol
-            let items = sess.req_document_symbol(loc_uri).unwrap_or_default();
+
+            if !seen_ref_sites.insert((loc_uri.to_string(), line0)) {
+                continue;
+            }
+
+            // find enclosing symbol via documentSymbol (with local cache)
+            let items = if let Some(cached) = doc_items_cache.get(loc_uri) {
+                cached.clone()
+            } else {
+                let fetched = sess.req_document_symbol(loc_uri).unwrap_or_default();
+                doc_items_cache.insert(loc_uri.to_string(), fetched.clone());
+                fetched
+            };
             if let Some(caller) = enclosing_symbol_in_doc(&items, &file, line0)
                 && matches!(
                     caller.kind,
