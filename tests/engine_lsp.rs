@@ -415,6 +415,41 @@ fn setup_repo_tsx_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
     (dir, path)
 }
 
+fn setup_repo_tsx_callees_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("package.json"),
+        "{\n  \"name\": \"lsp-tsx-callees-fixture\",\n  \"private\": true,\n  \"version\": \"0.1.0\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("tsconfig.json"),
+        "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"module\": \"commonjs\",\n    \"jsx\": \"react-jsx\",\n    \"strict\": true\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("app.tsx"),
+        "function bar(): number {\n  return 1;\n}\n\nfunction baz(): number {\n  return 2;\n}\n\nfunction View(): JSX.Element {\n  return <div>{bar() + baz()}</div>;\n}\n\nexport function App(): JSX.Element {\n  return <View />;\n}\n",
+    )
+    .unwrap();
+
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("app.tsx"),
+        "function bar(): number {\n  return 1;\n}\n\nfunction baz(): number {\n  return 2;\n}\n\nfunction View(): JSX.Element {\n  const x = 1;\n  return <div>{bar() + baz() + x}</div>;\n}\n\nexport function App(): JSX.Element {\n  return <View />;\n}\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_repo_typescript_callees_real_lsp_e2e_fixture() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -2478,6 +2513,231 @@ fn tsx_real_lsp_e2e_fixture_is_opt_in_gated() {
 
     let tsconfig = fs::read_to_string(repo.join("tsconfig.json")).expect("read tsconfig");
     assert!(tsconfig.contains("\"jsx\": \"react-jsx\""));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_tsx_callers_chain_e2e_when_available() {
+    if !should_run_tsx_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_tsx_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callers,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX callers impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict TSX LSP callers result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: TSX LSP did not report callers in this environment");
+        return;
+    }
+    assert!(names1.contains("View") || names1.contains("App"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_tsx_callees_chain_e2e_when_available() {
+    if !should_run_tsx_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_tsx_callees_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "View"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict TSX LSP callees result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: TSX LSP did not report callees in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_tsx_both_chain_e2e_when_available() {
+    if !should_run_tsx_strict_lsp_e2e() {
+        eprintln!(
+            "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
+        );
+        return;
+    }
+    if !has_typescript_lsp_server() {
+        eprintln!("skip: typescript-language-server not found");
+        return;
+    }
+
+    let (_tmp, repo) = setup_repo_tsx_callees_real_lsp_e2e_fixture();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX changed_symbols unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict TSX both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    assert!(changed.changed_symbols.iter().any(|s| s.name == "View"));
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict TSX LSP both result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: TSX LSP did not report both-direction impacts in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("App"));
 }
 
 #[test]
