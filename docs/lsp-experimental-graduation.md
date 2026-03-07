@@ -36,7 +36,47 @@
 
 - 卒業判定は「単発成功」ではなく「継続安定」を重視する。
 - 閾値を急に厳格化せず、小刻み調整で CI 安定性を優先する。
-- language server 未導入環境を考慮し、real-LSP E2E は skip-safe 方針を維持する。
+
+## skip-safe 移行ポリシー（PH65）
+
+strict real-LSP E2E は一律で fail-fast 化せず、言語/方向ごとに段階移行する。
+
+### 1) skip-safe を **維持**する条件
+
+以下のいずれかを満たすレーンは skip-safe 維持。
+
+- `server-missing`（言語サーバー未導入）
+- `env-gate-disabled`（実行ゲート未有効）
+- `*-not-reported`（LSP が callers/callees/both を返さない）
+- `*-unavailable`（changed_symbols / impact が環境依存で不安定）
+- nightly で `install/startup/timeout` が継続的に発生
+
+### 2) skip-safe を **解除（fail-fast 化）**する条件
+
+以下を満たしたレーンから fail-fast へ移行。
+
+1. PH65-1 集計で昇格候補に入っている
+2. 同一レーンで `changed/impacted` の安定性が確認済み
+3. CI 失敗時に原因が `server/capability/logic` で即判別できる
+4. 直近運用で重大な startup/timeout 不安定がない
+
+### 3) 移行順序（段階運用）
+
+- Phase-1: callers レーン優先（最低2言語）
+- Phase-2: callees
+- Phase-3: both
+
+保守性のため、1PRで広げすぎずレーン単位で移行する。
+
+### 4) fail-fast 化後のロールバック条件
+
+fail-fast 化したレーンで以下が連続した場合は一時的に skip-safe へ戻す。
+
+- startup/timeout 系の失敗が連続
+- capability 差分で false alarm が多発
+- 原因分類ログで `server` 優勢かつ環境要因が解消していない
+
+ロールバック時は原因分類ログと run URL を添えて記録する。
 
 ## GA判定 実行結果（GA52-4）
 
