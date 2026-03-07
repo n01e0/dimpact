@@ -384,4 +384,45 @@ import (
             r.name == "Background" && r.qualifier.as_deref() == Some("context") && !r.is_method
         }));
     }
+
+    #[test]
+    fn go_hard_case_fixture_v041_generics_chained_embedded_receiver() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/go/analyzer_hard_cases_v041.go"
+        ));
+        let ana = SpecGoAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/hard_v041.go", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "Chain"
+                && matches!(s.kind, SymbolKind::Function)
+                && s.id.0 == "go:pkg/hard_v041.go:fn:Chain:20"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "Execute"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "go:pkg/hard_v041.go:method:Execute:24"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/hard_v041.go", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "Trace" && r.qualifier.as_deref() == Some("s") && r.is_method && r.line == 25
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "Run"
+                && r.qualifier.as_deref() == Some("s.next")
+                && r.is_method
+                && r.line == 27
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "Chain" && r.qualifier.is_none() && !r.is_method && r.line == 26
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "Background"
+                && r.qualifier.as_deref() == Some("context")
+                && !r.is_method
+                && r.line == 27
+        }));
+    }
 }
