@@ -3212,31 +3212,17 @@ fn lsp_engine_strict_java_callers_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = changed_res
+        .unwrap_or_else(|e| panic!("fail-fast: strict Java changed_symbols unavailable: {e}"));
+    let out1 = out1_res
+        .unwrap_or_else(|e| panic!("fail-fast: strict Java callers impact unavailable: {e}"));
+    let out2 = out2_res
+        .unwrap_or_else(|e| panic!("fail-fast: strict Java callers impact unavailable: {e}"));
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
@@ -3433,31 +3419,17 @@ fn lsp_engine_strict_go_callers_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = changed_res
+        .unwrap_or_else(|e| panic!("fail-fast: strict Go changed_symbols unavailable: {e}"));
+    let out1 =
+        out1_res.unwrap_or_else(|e| panic!("fail-fast: strict Go callers impact unavailable: {e}"));
+    let out2 =
+        out2_res.unwrap_or_else(|e| panic!("fail-fast: strict Go callers impact unavailable: {e}"));
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
@@ -3688,31 +3660,17 @@ fn lsp_engine_strict_python_callers_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = changed_res
+        .unwrap_or_else(|e| panic!("fail-fast: strict Python changed_symbols unavailable: {e}"));
+    let out1 = out1_res
+        .unwrap_or_else(|e| panic!("fail-fast: strict Python callers impact unavailable: {e}"));
+    let out2 = out2_res
+        .unwrap_or_else(|e| panic!("fail-fast: strict Python callers impact unavailable: {e}"));
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
