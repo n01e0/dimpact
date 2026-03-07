@@ -233,10 +233,59 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install pyright-langserver
+      - name: Install Python LSP server (robust + fallback)
+        id: install_python_lsp
         run: |
-          npm install -g pyright
-          pyright-langserver --help >/dev/null
+          set -euo pipefail
+
+          select_server() {
+            local server="$1"
+            echo "python_lsp=$server" >> "$GITHUB_OUTPUT"
+            echo "[python-lsp] selected=$server"
+          }
+
+          echo "[python-lsp] node=$(node -v) npm=$(npm -v) python=$(python3 --version 2>&1)"
+
+          # Primary: pyright
+          if npm install -g pyright; then
+            if command -v pyright-langserver >/dev/null 2>&1 && pyright --version >/tmp/pyright-version.log 2>&1; then
+              select_server pyright
+              cat /tmp/pyright-version.log
+              exit 0
+            fi
+            echo "[python-lsp] pyright executable check failed, trying fallback" >&2
+            cat /tmp/pyright-version.log >&2 || true
+          else
+            echo "[python-lsp] npm install pyright failed, trying fallback" >&2
+          fi
+
+          # Fallback-1: basedpyright
+          if npm install -g basedpyright; then
+            if command -v basedpyright-langserver >/dev/null 2>&1 && basedpyright --version >/tmp/basedpyright-version.log 2>&1; then
+              select_server basedpyright
+              cat /tmp/basedpyright-version.log
+              exit 0
+            fi
+            echo "[python-lsp] basedpyright executable check failed, trying fallback-2" >&2
+            cat /tmp/basedpyright-version.log >&2 || true
+          else
+            echo "[python-lsp] npm install basedpyright failed, trying fallback-2" >&2
+          fi
+
+          # Fallback-2: pylsp
+          if python3 -m pip install --user --disable-pip-version-check python-lsp-server; then
+            export PATH="$HOME/.local/bin:$PATH"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            if command -v pylsp >/dev/null 2>&1 && pylsp --version >/tmp/pylsp-version.log 2>&1; then
+              select_server pylsp
+              cat /tmp/pylsp-version.log
+              exit 0
+            fi
+            cat /tmp/pylsp-version.log >&2 || true
+          fi
+
+          echo "::error::[python-lsp] failed to install a usable python LSP server (pyright/basedpyright/pylsp)" >&2
+          exit 1
 
       - name: Build release binary
         run: cargo build --release -q
@@ -244,7 +293,7 @@ jobs:
       - name: Run Python strict-LSP benchmark
         timeout-minutes: 12
         env:
-          DIMPACT_PYTHON_LSP: pyright
+          DIMPACT_PYTHON_LSP: ${{ steps.install_python_lsp.outputs.python_lsp }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             RUNS=1
@@ -252,7 +301,7 @@ jobs:
             RUNS=2
           fi
 
-          echo "runs=$RUNS lang=python fixture=bench-fixtures/python-heavy.diff" > bench-python-report.txt
+          echo "runs=$RUNS lang=python fixture=bench-fixtures/python-heavy.diff python_lsp=${DIMPACT_PYTHON_LSP}" > bench-python-report.txt
           timeout 10m scripts/bench-impact-engines.sh \
             --diff-file bench-fixtures/python-heavy.diff \
             --runs "$RUNS" \
