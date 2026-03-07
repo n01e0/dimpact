@@ -1,0 +1,33 @@
+=== rust ===
+command: scripts/bench-impact-engines.sh --base v0.4.0 --runs 3 --direction callers --lang rust --rpc-counts
+base=v0.4.0 runs=3 direction=callers lang=rust rpc_counts=1 compare=lsp(strict)
+[ts]
+0.28
+0.28
+0.28
+avg=0.280s min=0.280s max=0.280s
+
+[lsp-strict]
+21.79
+58.66
+59.67
+avg=46.707s min=21.790s max=59.670s
+
+ts changed=6 impacted=0
+lsp(strict) changed=9 impacted=0
+
+[lang-summary]
+ts changed_by_lang: rust:6
+ts impacted_by_lang: -
+lsp(strict) changed_by_lang: rust:9
+lsp(strict) impacted_by_lang: -
+
+
+[lsp-strict-rpc-counts]
+2098 method=textDocument/documentSymbol
+780 method=textDocument/references
+85 method=textDocument/didOpen
+13 method=textDocument/prepareCallHierarchy
+10 method=textDocument/definition
+1 method=workspace/symbol
+exit_code=0

@@ -1,0 +1,5 @@
+=== java ===
+command: scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --runs 3 --direction callers --lang java --rpc-counts
+diff_file=bench-fixtures/java-heavy.diff runs=3 direction=callers lang=java rpc_counts=1 compare=lsp(strict)
+Error: lsp initialize timeout or invalid response
+exit_code=1

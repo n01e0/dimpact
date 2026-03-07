@@ -1,0 +1,29 @@
+=== typescript-runs1 ===
+command: scripts/bench-impact-engines.sh --diff-file bench-fixtures/ts-heavy.diff --runs 1 --direction callers --lang typescript --rpc-counts
+diff_file=bench-fixtures/ts-heavy.diff runs=1 direction=callers lang=typescript rpc_counts=1 compare=lsp(strict)
+[ts]
+0.17
+avg=0.170s min=0.170s max=0.170s
+
+[lsp-strict]
+1.38
+avg=1.380s min=1.380s max=1.380s
+
+ts changed=10 impacted=31
+lsp(strict) changed=10 impacted=31
+
+[lang-summary]
+ts changed_by_lang: typescript:10
+ts impacted_by_lang: typescript:31
+lsp(strict) changed_by_lang: typescript:10
+lsp(strict) impacted_by_lang: typescript:31
+
+
+[lsp-strict-rpc-counts]
+41 method=callHierarchy/incomingCalls
+11 method=textDocument/prepareCallHierarchy
+2 method=textDocument/documentSymbol
+1 method=textDocument/references
+1 method=textDocument/didOpen
+1 method=textDocument/definition
+exit_code=0

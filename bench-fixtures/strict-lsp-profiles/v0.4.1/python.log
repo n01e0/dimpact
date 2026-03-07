@@ -1,0 +1,33 @@
+=== python ===
+command: scripts/bench-impact-engines.sh --diff-file bench-fixtures/python-heavy.diff --runs 3 --direction callers --lang python --rpc-counts
+diff_file=bench-fixtures/python-heavy.diff runs=3 direction=callers lang=python rpc_counts=1 compare=lsp(strict)
+[ts]
+0.06
+0.07
+0.07
+avg=0.067s min=0.060s max=0.070s
+
+[lsp-strict]
+1.13
+1.12
+1.13
+avg=1.127s min=1.120s max=1.130s
+
+ts changed=10 impacted=31
+lsp(strict) changed=10 impacted=31
+
+[lang-summary]
+ts changed_by_lang: python:10
+ts impacted_by_lang: python:31
+lsp(strict) changed_by_lang: python:10
+lsp(strict) impacted_by_lang: python:31
+
+
+[lsp-strict-rpc-counts]
+41 method=callHierarchy/incomingCalls
+11 method=textDocument/prepareCallHierarchy
+2 method=textDocument/documentSymbol
+1 method=textDocument/references
+1 method=textDocument/didOpen
+1 method=textDocument/definition
+exit_code=0

@@ -1,0 +1,4 @@
+=== typescript ===
+command: scripts/bench-impact-engines.sh --diff-file bench-fixtures/ts-heavy.diff --runs 3 --direction callers --lang typescript --rpc-counts
+diff_file=bench-fixtures/ts-heavy.diff runs=3 direction=callers lang=typescript rpc_counts=1 compare=lsp(strict)
+exit_code=124
