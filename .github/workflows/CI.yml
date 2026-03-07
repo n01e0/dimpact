@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
-      - uses: actions/checkout@v6
       - name: Ensure base tools (git/bash/ripgrep)
         run: |
           if command -v apt-get >/dev/null 2>&1; then
@@ -35,6 +34,7 @@ jobs:
             echo "no supported package manager found to install git/bash/ripgrep" >&2
             exit 1
           fi
+      - uses: actions/checkout@v6
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -93,7 +93,6 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
-      - uses: actions/checkout@v6
       - name: Ensure base tools (git/bash/ripgrep)
         run: |
           if command -v apt-get >/dev/null 2>&1; then
@@ -107,6 +106,7 @@ jobs:
             echo "no supported package manager found to install git/bash/ripgrep" >&2
             exit 1
           fi
+      - uses: actions/checkout@v6
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -149,7 +149,6 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
-      - uses: actions/checkout@v6
       - name: Ensure base tools (git/bash/ripgrep)
         run: |
           if command -v apt-get >/dev/null 2>&1; then
@@ -163,6 +162,7 @@ jobs:
             echo "no supported package manager found to install git/bash/ripgrep" >&2
             exit 1
           fi
+      - uses: actions/checkout@v6
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -176,7 +176,6 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
-      - uses: actions/checkout@v6
       - name: Ensure base tools (git/bash/ripgrep)
         run: |
           if command -v apt-get >/dev/null 2>&1; then
@@ -190,6 +189,7 @@ jobs:
             echo "no supported package manager found to install git/bash/ripgrep" >&2
             exit 1
           fi
+      - uses: actions/checkout@v6
       - name: Run graduation auto-check script
         run: |
           if bash scripts/verify-lsp-graduation.sh --skip-regression > lsp-graduation-check.log 2>&1; then
