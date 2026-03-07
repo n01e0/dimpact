@@ -4270,6 +4270,140 @@ fn lsp_engine_strict_callers_chain_is_stable_when_available() {
 
 #[test]
 #[serial]
+fn lsp_engine_strict_rust_callees_chain_e2e_when_available() {
+    if !should_run_strict_lsp_e2e() {
+        eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
+        return;
+    }
+    if !has_rust_analyzer() {
+        eprintln!("skip: rust-analyzer not available");
+        return;
+    }
+
+    let initial = "fn bar() -> i32 { 1 }\nfn baz() -> i32 { 2 }\nfn foo() -> i32 { bar() + baz() }\nfn main() { let _ = foo(); }\n";
+    let updated = "fn bar() -> i32 { 1 }\nfn baz() -> i32 { 2 }\nfn foo() -> i32 { let x = 1; bar() + baz() + x }\nfn main() { let _ = foo(); }\n";
+    let (_tmp, repo) = setup_repo_rust_project(initial, updated);
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Callees,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict rust callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict rust callees impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict rust LSP callees result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: rust LSP did not report callees in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz"));
+}
+
+#[test]
+#[serial]
+fn lsp_engine_strict_rust_both_chain_e2e_when_available() {
+    if !should_run_strict_lsp_e2e() {
+        eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
+        return;
+    }
+    if !has_rust_analyzer() {
+        eprintln!("skip: rust-analyzer not available");
+        return;
+    }
+
+    let initial = "fn bar() -> i32 { 1 }\nfn baz() -> i32 { 2 }\nfn foo() -> i32 { bar() + baz() }\nfn main() { let _ = foo(); }\n";
+    let updated = "fn bar() -> i32 { 1 }\nfn baz() -> i32 { 2 }\nfn foo() -> i32 { let x = 1; bar() + baz() + x }\nfn main() { let _ = foo(); }\n";
+    let (_tmp, repo) = setup_repo_rust_project(initial, updated);
+
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let files = dimpact::parse_unified_diff(&diff).unwrap();
+
+    let cfg = dimpact::EngineConfig {
+        lsp_strict: true,
+        dump_capabilities: false,
+        mock_lsp: false,
+        mock_caps: None,
+    };
+    let engine = dimpact::engine::make_engine(dimpact::EngineKind::Lsp, cfg);
+    let opts = dimpact::ImpactOptions {
+        direction: dimpact::ImpactDirection::Both,
+        max_depth: Some(5),
+        with_edges: Some(false),
+        ignore_dirs: Vec::new(),
+    };
+
+    let cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&repo).unwrap();
+    let out1 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict rust both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    let out2 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
+        Ok(v) => v,
+        Err(e) => {
+            std::env::set_current_dir(cwd).unwrap();
+            eprintln!("skip: strict rust both impact unavailable in this env: {e}");
+            return;
+        }
+    };
+    std::env::set_current_dir(cwd).unwrap();
+
+    let names1 = impacted_name_set(&out1);
+    let names2 = impacted_name_set(&out2);
+    assert_eq!(
+        names1, names2,
+        "strict rust LSP both result should be stable"
+    );
+    if names1.is_empty() {
+        eprintln!("skip: rust LSP did not report both-direction impacts in this environment");
+        return;
+    }
+    assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
+}
+
+#[test]
+#[serial]
 fn lsp_engine_strict_methods_chain_resolves_callers_when_available() {
     if !should_run_strict_lsp_e2e() {
         eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
