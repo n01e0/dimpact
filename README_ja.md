@@ -111,9 +111,9 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 
 ## LSP strict E2E テスト
 - strict LSP の E2E テストは、言語サーバー未導入環境での CI ぶれ回避のため opt-in です。
-- Rust strict E2E（`rust-analyzer` が必要）:
+- Rust strict E2E（`callers` / `callees` / `both`、`rust-analyzer` が必要）:
   - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
-- strict real-LSP の対象言語: **TypeScript / JavaScript / Ruby / Go / Java / Python**
+- strict real-LSP の対象言語: **TypeScript / TSX / JavaScript / Ruby / Go / Java / Python**
 - Go strict E2E（`gopls` が必要）:
   - `DIMPACT_E2E_STRICT_LSP_GO=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` でも Go strict E2E が有効になります。
@@ -126,6 +126,9 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 - JavaScript strict E2E（`typescript-language-server` が必要）:
   - `DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` でも JavaScript strict E2E が有効になります。
+- TSX strict E2E（`typescript-language-server` が必要）:
+  - `DIMPACT_E2E_STRICT_LSP_TSX=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` でも TSX strict E2E が有効になります。
 - Ruby strict E2E（`ruby-lsp` が必要）:
   - `DIMPACT_E2E_STRICT_LSP_RUBY=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` でも Ruby strict E2E が有効になります。
@@ -136,13 +139,13 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
   - 自動検出順: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
   - 明示指定: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
 - real-LSP サーバー導入クイック手順（ローカル）:
-  - TypeScript/JavaScript: `npm install -g typescript typescript-language-server`
+  - TypeScript/TSX/JavaScript: `npm install -g typescript typescript-language-server`
   - Python（pyright）: `npm install -g pyright`
   - Go: `go install golang.org/x/tools/gopls@latest`
   - Ruby: `gem install ruby-lsp --no-document`
   - Java（`jdtls`）: `jdtls` を導入して `PATH` に追加（詳細は下記 CI 設定を参照）
 - real-LSP サーバー導入（CI）:
-  - `nightly-strict-lsp.yml` で TS/JS/Python/Go/Java/Ruby の server を導入後に `engine_lsp` strict E2E を実行
+  - `nightly-strict-lsp.yml` で TS/TSX/JS/Python/Go/Java/Ruby の server を導入後に `engine_lsp` strict E2E を実行
   - `bench.yml` で strict-LSP ベンチの各言語ジョブごとに server を導入
 
 ## 既知の制約

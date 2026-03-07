@@ -95,15 +95,18 @@ Logging
 
 LSP strict E2E tests
 - Strict LSP E2E tests are opt-in (to avoid flaky CI environments without language servers).
-- Rust strict E2E (requires `rust-analyzer`):
+- Rust strict E2E (`callers` / `callees` / `both`, requires `rust-analyzer`):
   - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
-- strict real-LSP target languages: **TypeScript / JavaScript / Ruby / Go / Java / Python**
+- strict real-LSP target languages: **TypeScript / TSX / JavaScript / Ruby / Go / Java / Python**
 - TypeScript strict E2E (requires `typescript-language-server`):
   - `DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` also enables TypeScript strict E2E tests.
 - JavaScript strict E2E (requires `typescript-language-server`):
   - `DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` also enables JavaScript strict E2E tests.
+- TSX strict E2E (requires `typescript-language-server`):
+  - `DIMPACT_E2E_STRICT_LSP_TSX=1 cargo test --test engine_lsp`
+  - `DIMPACT_E2E_STRICT_LSP=1` also enables TSX strict E2E tests.
 - Ruby strict E2E (requires `ruby-lsp`):
   - `DIMPACT_E2E_STRICT_LSP_RUBY=1 cargo test --test engine_lsp`
   - `DIMPACT_E2E_STRICT_LSP=1` also enables Ruby strict E2E tests.
@@ -120,13 +123,13 @@ LSP strict E2E tests
   - auto-detect order: `pyright-langserver` -> `basedpyright-langserver` -> `pylsp`
   - override with: `DIMPACT_PYTHON_LSP=pyright|basedpyright|pylsp`
 - Real-LSP server install quickstart (local):
-  - TypeScript/JavaScript: `npm install -g typescript typescript-language-server`
+  - TypeScript/TSX/JavaScript: `npm install -g typescript typescript-language-server`
   - Python (pyright): `npm install -g pyright`
   - Go: `go install golang.org/x/tools/gopls@latest`
   - Ruby: `gem install ruby-lsp --no-document`
   - Java (`jdtls`): install `jdtls` and add it to `PATH` (see CI workflow snippet below)
 - Real-LSP server setup in CI:
-  - `nightly-strict-lsp.yml` installs TS/JS/Python/Go/Java/Ruby servers before `engine_lsp` strict E2E
+  - `nightly-strict-lsp.yml` installs TS/TSX/JS/Python/Go/Java/Ruby servers before `engine_lsp` strict E2E
   - `bench.yml` installs per-language servers in each strict-LSP benchmark job
 
 Known limitations
