@@ -46,6 +46,10 @@ SUMMARY_LSP_JSON=""
 SUMMARY_SECOND_LABEL="lsp(strict)"
 COMPARE_AUTO_STRICT_IF_AVAILABLE=0
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT"
+
 print_lang_summary() {
   local ts_json="$1"
   local second_json="$2"
@@ -149,11 +153,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "run inside git repository" >&2
-  exit 1
-fi
-
 if ! [[ "$RUNS" =~ ^[0-9]+$ ]] || [[ "$RUNS" -lt 1 ]]; then
   echo "--runs must be >= 1" >&2
   exit 2
@@ -182,6 +181,11 @@ if [[ -n "$SUMMARY_TS_JSON" || -n "$SUMMARY_LSP_JSON" ]]; then
   echo "[lang-summary]"
   print_lang_summary "$SUMMARY_TS_JSON" "$SUMMARY_LSP_JSON" "$SUMMARY_SECOND_LABEL"
   exit 0
+fi
+
+if [[ -z "$DIFF_INPUT" ]] && ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "run inside git repository (or pass --diff-file)" >&2
+  exit 1
 fi
 
 if [[ -n "$DIFF_INPUT" && ! -f "$DIFF_INPUT" ]]; then

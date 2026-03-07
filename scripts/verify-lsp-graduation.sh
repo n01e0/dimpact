@@ -21,12 +21,8 @@ EOF
   exit 0
 fi
 
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "run inside git repository" >&2
-  exit 1
-fi
-
-ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 DOC="docs/lsp-experimental-graduation.md"
@@ -113,7 +109,7 @@ for lang in rust go java python typescript javascript ruby; do
   case "$lang" in
     rust)
       check_contains "$BENCH_YML" "bench-rust-ts.json" "bench artifact includes rust ts json"
-      check_contains "$BENCH_YML" "bench-rust-lsp.json" "bench artifact includes rust lsp json"
+      check_contains "$BENCH_YML" "bench-rust-auto-strict-if-available.json" "bench artifact includes rust secondary json"
       check_contains "$BENCH_YML" "bench-report.txt" "bench artifact includes rust txt report"
       ;;
     *)
