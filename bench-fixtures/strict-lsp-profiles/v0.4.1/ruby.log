@@ -1,0 +1,5 @@
+=== ruby ===
+command: scripts/bench-impact-engines.sh --diff-file bench-fixtures/ruby-heavy.diff --runs 3 --direction callers --lang ruby --rpc-counts
+diff_file=bench-fixtures/ruby-heavy.diff runs=3 direction=callers lang=ruby rpc_counts=1 compare=lsp(strict)
+Error: lsp initialize timeout or invalid response
+exit_code=1

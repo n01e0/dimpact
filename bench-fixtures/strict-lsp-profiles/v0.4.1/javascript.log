@@ -1,0 +1,33 @@
+=== javascript ===
+command: scripts/bench-impact-engines.sh --diff-file bench-fixtures/js-heavy.diff --runs 3 --direction callers --lang javascript --rpc-counts
+diff_file=bench-fixtures/js-heavy.diff runs=3 direction=callers lang=javascript rpc_counts=1 compare=lsp(strict)
+[ts]
+0.10
+0.08
+0.08
+avg=0.087s min=0.080s max=0.100s
+
+[lsp-strict]
+1.56
+1.00
+1.56
+avg=1.373s min=1.000s max=1.560s
+
+ts changed=10 impacted=31
+lsp(strict) changed=0 impacted=0
+
+[lang-summary]
+ts changed_by_lang: javascript:10
+ts impacted_by_lang: javascript:31
+lsp(strict) changed_by_lang: -
+lsp(strict) impacted_by_lang: -
+
+
+[lsp-strict-rpc-counts]
+41 method=callHierarchy/incomingCalls
+11 method=textDocument/prepareCallHierarchy
+2 method=textDocument/documentSymbol
+1 method=textDocument/references
+1 method=textDocument/didOpen
+1 method=textDocument/definition
+exit_code=0

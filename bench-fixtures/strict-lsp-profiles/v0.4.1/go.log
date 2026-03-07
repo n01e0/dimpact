@@ -1,0 +1,34 @@
+=== go ===
+command: scripts/bench-impact-engines.sh --diff-file bench-fixtures/go-heavy.diff --runs 3 --direction callers --lang go --rpc-counts
+diff_file=bench-fixtures/go-heavy.diff runs=3 direction=callers lang=go rpc_counts=1 compare=lsp(strict)
+[ts]
+0.04
+0.05
+0.04
+avg=0.043s min=0.040s max=0.050s
+
+[lsp-strict]
+0.38
+0.64
+0.75
+avg=0.590s min=0.380s max=0.750s
+
+ts changed=10 impacted=31
+lsp(strict) changed=10 impacted=31
+
+[lang-summary]
+ts changed_by_lang: go:10
+ts impacted_by_lang: go:31
+lsp(strict) changed_by_lang: go:10
+lsp(strict) impacted_by_lang: go:31
+
+
+[lsp-strict-rpc-counts]
+41 method=callHierarchy/incomingCalls
+11 method=textDocument/prepareCallHierarchy
+2 method=textDocument/documentSymbol
+1 method=workspace/symbol
+1 method=textDocument/references
+1 method=textDocument/didOpen
+1 method=textDocument/definition
+exit_code=0
