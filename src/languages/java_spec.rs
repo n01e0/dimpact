@@ -219,6 +219,55 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
             });
         }
 
+        let re_method_ref = Regex::new(
+            r"\b([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*::\s*([A-Za-z_][A-Za-z0-9_]*)",
+        )
+        .expect("valid java method ref regex");
+        for caps in re_method_ref.captures_iter(source) {
+            let Some(m) = caps.get(0) else {
+                continue;
+            };
+            let Some(qual_cap) = caps.get(1) else {
+                continue;
+            };
+            let Some(name_cap) = caps.get(2) else {
+                continue;
+            };
+
+            let ln = byte_to_line(&offs, m.start());
+            if decl_lines.contains(&ln) {
+                continue;
+            }
+
+            let qual = qual_cap.as_str().replace([' ', '\t', '\n'], "");
+            let name = name_cap.as_str();
+            let first = qual.split('.').next().unwrap_or("");
+            let is_method = if first == "this" || first == "super" {
+                true
+            } else if import_aliases.contains(first) {
+                false
+            } else {
+                !first
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_uppercase())
+                    .unwrap_or(false)
+            };
+
+            let key = (ln, name.to_string(), Some(qual.clone()), is_method);
+            if !seen.insert(key) {
+                continue;
+            }
+            out.push(UnresolvedRef {
+                name: name.to_string(),
+                kind: RefKind::Call,
+                file: path.to_string(),
+                line: ln,
+                qualifier: Some(qual),
+                is_method,
+            });
+        }
+
         let re_bare_call =
             Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(").expect("valid java bare call regex");
         for caps in re_bare_call.captures_iter(source) {
@@ -584,6 +633,54 @@ public class Main {
         assert_eq!(
             imports.get("requireNonNull").map(String::as_str),
             Some("java::util::Objects::requireNonNull")
+        );
+    }
+
+    #[test]
+    fn java_hard_case_fixture_lambda_method_ref_inner_class_call() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/java/analyzer_hard_cases_lambda_methodref_inner.java"
+        ));
+        let ana = SpecJavaAnalyzer::new();
+
+        let syms = ana.symbols_in_file("demo/Flow.java", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "Flow" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "run" && matches!(s.kind, SymbolKind::Method))
+        );
+        let parse_count = syms
+            .iter()
+            .filter(|s| s.name == "parse" && matches!(s.kind, SymbolKind::Method))
+            .count();
+        assert!(
+            parse_count >= 2,
+            "expected parse methods in outer and inner classes"
+        );
+
+        let refs = ana.unresolved_refs("demo/Flow.java", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "parse" && r.qualifier.as_deref() == Some("this") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "compute" && r.qualifier.as_deref() == Some("inner") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "parse" && r.qualifier.as_deref() == Some("Outer.Inner") && !r.is_method
+        }));
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "parse" && r.qualifier.is_none() && !r.is_method)
+        );
+
+        let imports = ana.imports_in_file("demo/Flow.java", src);
+        assert_eq!(
+            imports.get("Function").map(String::as_str),
+            Some("java::util::function::Function")
         );
     }
 }
