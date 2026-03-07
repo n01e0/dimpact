@@ -163,6 +163,46 @@ fn impacted_name_set(out: &dimpact::ImpactOutput) -> BTreeSet<String> {
         .collect()
 }
 
+fn classify_fail_fast_cause(err: &str) -> &'static str {
+    let m = err.to_ascii_lowercase();
+    if m.contains("not found")
+        || m.contains("no such file")
+        || m.contains("failed to spawn")
+        || m.contains("initialize timeout")
+        || m.contains("server")
+    {
+        "server"
+    } else if m.contains("capability")
+        || m.contains("documentsymbol")
+        || m.contains("workspace symbol")
+        || m.contains("callhierarchy")
+        || m.contains("references")
+        || m.contains("definition")
+    {
+        "capability"
+    } else {
+        "logic"
+    }
+}
+
+fn fail_fast_with_triage<T>(lane: &str, phase: &str, res: anyhow::Result<T>) -> T {
+    match res {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            let cause = classify_fail_fast_cause(&msg);
+            eprintln!(
+                "fail-fast-triage: lane={} phase={} cause={} error={}",
+                lane, phase, cause, msg
+            );
+            panic!(
+                "fail-fast: lane={} phase={} cause={} error={}",
+                lane, phase, cause, msg
+            );
+        }
+    }
+}
+
 fn setup_repo_single_file(
     filename: &str,
     initial_src: &str,
@@ -3217,12 +3257,9 @@ fn lsp_engine_strict_java_callers_chain_e2e_when_available() {
     let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
 
-    let changed = changed_res
-        .unwrap_or_else(|e| panic!("fail-fast: strict Java changed_symbols unavailable: {e}"));
-    let out1 = out1_res
-        .unwrap_or_else(|e| panic!("fail-fast: strict Java callers impact unavailable: {e}"));
-    let out2 = out2_res
-        .unwrap_or_else(|e| panic!("fail-fast: strict Java callers impact unavailable: {e}"));
+    let changed = fail_fast_with_triage("java/callers", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("java/callers", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("java/callers", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
@@ -3231,7 +3268,11 @@ fn lsp_engine_strict_java_callers_chain_e2e_when_available() {
         names1, names2,
         "strict Java LSP callers result should be stable"
     );
-    assert!(names1.contains("foo"));
+    assert!(
+        names1.contains("foo"),
+        "fail-fast: lane=java/callers phase=assertion cause=logic expected impacted caller 'foo', got {:?}",
+        names1
+    );
 }
 
 #[test]
@@ -3424,12 +3465,9 @@ fn lsp_engine_strict_go_callers_chain_e2e_when_available() {
     let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
 
-    let changed = changed_res
-        .unwrap_or_else(|e| panic!("fail-fast: strict Go changed_symbols unavailable: {e}"));
-    let out1 =
-        out1_res.unwrap_or_else(|e| panic!("fail-fast: strict Go callers impact unavailable: {e}"));
-    let out2 =
-        out2_res.unwrap_or_else(|e| panic!("fail-fast: strict Go callers impact unavailable: {e}"));
+    let changed = fail_fast_with_triage("go/callers", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("go/callers", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("go/callers", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
@@ -3438,7 +3476,11 @@ fn lsp_engine_strict_go_callers_chain_e2e_when_available() {
         names1, names2,
         "strict Go LSP callers result should be stable"
     );
-    assert!(names1.contains("foo"));
+    assert!(
+        names1.contains("foo"),
+        "fail-fast: lane=go/callers phase=assertion cause=logic expected impacted caller 'foo', got {:?}",
+        names1
+    );
 }
 
 #[test]
@@ -3665,12 +3707,9 @@ fn lsp_engine_strict_python_callers_chain_e2e_when_available() {
     let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
 
-    let changed = changed_res
-        .unwrap_or_else(|e| panic!("fail-fast: strict Python changed_symbols unavailable: {e}"));
-    let out1 = out1_res
-        .unwrap_or_else(|e| panic!("fail-fast: strict Python callers impact unavailable: {e}"));
-    let out2 = out2_res
-        .unwrap_or_else(|e| panic!("fail-fast: strict Python callers impact unavailable: {e}"));
+    let changed = fail_fast_with_triage("python/callers", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("python/callers", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("python/callers", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
@@ -3679,7 +3718,11 @@ fn lsp_engine_strict_python_callers_chain_e2e_when_available() {
         names1, names2,
         "strict python LSP callers result should be stable"
     );
-    assert!(names1.contains("foo"));
+    assert!(
+        names1.contains("foo"),
+        "fail-fast: lane=python/callers phase=assertion cause=logic expected impacted caller 'foo', got {:?}",
+        names1
+    );
 }
 
 #[test]
