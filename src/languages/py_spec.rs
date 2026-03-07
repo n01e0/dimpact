@@ -554,4 +554,59 @@ from pkg.star import *
             Some("pkg::sub::plugins")
         );
     }
+
+    #[test]
+    fn python_hard_case_fixture_decorator_descriptor_attribute_chain() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_decorator_descriptor_chain.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/svc.py", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "UpperDescriptor" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "Service" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "process" && matches!(s.kind, SymbolKind::Method))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "traced" && matches!(s.kind, SymbolKind::Function))
+        );
+
+        let refs = ana.unresolved_refs("pkg/svc.py", src);
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "w" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "normalizer" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "send"
+                && r.qualifier.as_deref() == Some("self.api.client.dispatcher")
+                && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "strip" && r.qualifier.as_deref() == Some("cleaned") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "lower"
+                && r.qualifier
+                    .as_deref()
+                    .map(|q| q.starts_with("cleaned.strip"))
+                    .unwrap_or(false)
+                && r.is_method
+        }));
+
+        let im = ana.imports_in_file("pkg/svc.py", src);
+        assert_eq!(im.get("w").map(String::as_str), Some("functools::wraps"));
+    }
 }
