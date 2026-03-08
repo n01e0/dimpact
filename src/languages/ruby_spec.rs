@@ -330,4 +330,38 @@ end
         assert!(names.contains(&"defined_sym"));
         assert!(names.contains(&"defined_str"));
     }
+
+    #[test]
+    fn ruby_dynamic_fixture_method_missing_include_prepend() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_method_missing_include_prepend.rb"
+        ));
+        let ana = SpecRubyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/ruby_dynamic_method_missing.rb", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "method_missing"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "ruby:pkg/ruby_dynamic_method_missing.rb:method:method_missing:17"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "respond_to_missing?"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "ruby:pkg/ruby_dynamic_method_missing.rb:method:respond_to_missing?:22"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "execute"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "ruby:pkg/ruby_dynamic_method_missing.rb:method:execute:26"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic_method_missing.rb", src);
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"include"));
+        assert!(names.contains(&"prepend"));
+        assert!(names.contains(&"dyn_alpha"));
+        assert!(names.contains(&"from_included"));
+        assert!(names.contains(&"around_before"));
+    }
 }
