@@ -1,0 +1,165 @@
+{
+  "source": "tests/engine_lsp.rs",
+  "phase": "B1",
+  "summary": {
+    "languages": 8,
+    "activeCallersNotReported": 4,
+    "promotedFailfastLogic": 3,
+    "other": 1
+  },
+  "items": [
+    {
+      "language": "tsx",
+      "functions": [
+        "lsp_engine_strict_tsx_callers_chain_e2e_when_available"
+      ],
+      "status": "active-callers-not-reported",
+      "causeSummary": "LSP callers result empty in current env (paired with unavailable markers)",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": true,
+        "skip_callers_not_reported": true,
+        "skip_changed_symbols_unavailable": true,
+        "skip_callers_impact_unavailable": true,
+        "skip_strict_lsp_unavailable": false,
+        "skip_rust_analyzer_missing": false,
+        "failfast_assert_expected_caller": false
+      },
+      "recommendedNextTask": "B2"
+    },
+    {
+      "language": "typescript",
+      "functions": [
+        "lsp_engine_strict_typescript_callers_chain_e2e_when_available"
+      ],
+      "status": "active-callers-not-reported",
+      "causeSummary": "LSP callers result empty in current env (paired with unavailable markers)",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": true,
+        "skip_callers_not_reported": true,
+        "skip_changed_symbols_unavailable": true,
+        "skip_callers_impact_unavailable": true,
+        "skip_strict_lsp_unavailable": false,
+        "skip_rust_analyzer_missing": false,
+        "failfast_assert_expected_caller": false
+      },
+      "recommendedNextTask": "B2"
+    },
+    {
+      "language": "javascript",
+      "functions": [
+        "lsp_engine_strict_javascript_callers_chain_e2e_when_available"
+      ],
+      "status": "active-callers-not-reported",
+      "causeSummary": "LSP callers result empty in current env (paired with unavailable markers)",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": true,
+        "skip_callers_not_reported": true,
+        "skip_changed_symbols_unavailable": true,
+        "skip_callers_impact_unavailable": true,
+        "skip_strict_lsp_unavailable": false,
+        "skip_rust_analyzer_missing": false,
+        "failfast_assert_expected_caller": false
+      },
+      "recommendedNextTask": "B3"
+    },
+    {
+      "language": "ruby",
+      "functions": [
+        "lsp_engine_strict_ruby_callers_chain_e2e_when_available"
+      ],
+      "status": "active-callers-not-reported",
+      "causeSummary": "LSP callers result empty in current env (paired with unavailable markers)",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": true,
+        "skip_callers_not_reported": true,
+        "skip_changed_symbols_unavailable": true,
+        "skip_callers_impact_unavailable": true,
+        "skip_strict_lsp_unavailable": false,
+        "skip_rust_analyzer_missing": false,
+        "failfast_assert_expected_caller": false
+      },
+      "recommendedNextTask": "B4"
+    },
+    {
+      "language": "go",
+      "functions": [
+        "lsp_engine_strict_go_callers_chain_e2e_when_available"
+      ],
+      "status": "promoted-failfast-logic",
+      "causeSummary": "not-reported skip removed; callers emptiness is treated as logic failure",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": true,
+        "skip_callers_not_reported": false,
+        "skip_changed_symbols_unavailable": false,
+        "skip_callers_impact_unavailable": false,
+        "skip_strict_lsp_unavailable": false,
+        "skip_rust_analyzer_missing": false,
+        "failfast_assert_expected_caller": true
+      },
+      "recommendedNextTask": "B5"
+    },
+    {
+      "language": "java",
+      "functions": [
+        "lsp_engine_strict_java_callers_chain_e2e_when_available"
+      ],
+      "status": "promoted-failfast-logic",
+      "causeSummary": "not-reported skip removed; callers emptiness is treated as logic failure",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": true,
+        "skip_callers_not_reported": false,
+        "skip_changed_symbols_unavailable": false,
+        "skip_callers_impact_unavailable": false,
+        "skip_strict_lsp_unavailable": false,
+        "skip_rust_analyzer_missing": false,
+        "failfast_assert_expected_caller": true
+      },
+      "recommendedNextTask": "B6"
+    },
+    {
+      "language": "python",
+      "functions": [
+        "lsp_engine_strict_python_callers_chain_e2e_when_available"
+      ],
+      "status": "promoted-failfast-logic",
+      "causeSummary": "not-reported skip removed; callers emptiness is treated as logic failure",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": true,
+        "skip_callers_not_reported": false,
+        "skip_changed_symbols_unavailable": false,
+        "skip_callers_impact_unavailable": false,
+        "skip_strict_lsp_unavailable": false,
+        "skip_rust_analyzer_missing": false,
+        "failfast_assert_expected_caller": true
+      },
+      "recommendedNextTask": "B7"
+    },
+    {
+      "language": "rust",
+      "functions": [
+        "lsp_engine_strict_callers_chain_is_stable_when_available",
+        "lsp_engine_strict_methods_chain_resolves_callers_when_available"
+      ],
+      "status": "env-server-dominated",
+      "causeSummary": "no callers-not-reported marker; env/server availability dominates failure path",
+      "markers": {
+        "env_gate_failfast_helper": true,
+        "server_preflight_failfast": false,
+        "skip_callers_not_reported": false,
+        "skip_changed_symbols_unavailable": false,
+        "skip_callers_impact_unavailable": false,
+        "skip_strict_lsp_unavailable": true,
+        "skip_rust_analyzer_missing": true,
+        "failfast_assert_expected_caller": false
+      },
+      "recommendedNextTask": "B8"
+    }
+  ]
+}
