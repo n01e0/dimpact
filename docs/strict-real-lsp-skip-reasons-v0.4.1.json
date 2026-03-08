@@ -1,478 +1,331 @@
 {
   "source": "tests/engine_lsp.rs",
-  "totalSkipPrints": 95,
+  "totalSkipPrints": 25,
   "lanes": {
     "go/all": {
-      "server-missing": 1
+      "env-gate-disabled": 1
     },
     "go/both": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "both-impact-unavailable": 2,
-      "both-not-reported": 1
+      "env-gate-disabled": 1
     },
     "go/callees": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callees-impact-unavailable": 2,
-      "callees-not-reported": 1
-    },
-    "go/callers": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callers-impact-unavailable": 2
+      "env-gate-disabled": 1
     },
     "java/all": {
-      "server-missing": 1
+      "env-gate-disabled": 1
     },
     "java/both": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "both-impact-unavailable": 2,
-      "both-not-reported": 1
+      "env-gate-disabled": 1
     },
     "java/callees": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callees-impact-unavailable": 2,
-      "callees-not-reported": 1
-    },
-    "java/callers": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callers-impact-unavailable": 2
+      "env-gate-disabled": 1
     },
     "javascript/all": {
-      "server-missing": 1
+      "env-gate-disabled": 1
     },
     "javascript/both": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "both-impact-unavailable": 2,
-      "both-not-reported": 1
+      "env-gate-disabled": 1
     },
     "javascript/callees": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callees-impact-unavailable": 2,
-      "callees-not-reported": 1
+      "env-gate-disabled": 1
     },
-    "javascript/callers": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callers-impact-unavailable": 2,
-      "callers-not-reported": 1
+    "python/all": {
+      "env-gate-disabled": 1
     },
     "python/both": {
-      "changed-symbols-unavailable": 1,
-      "both-impact-unavailable": 2,
-      "both-not-reported": 1
+      "env-gate-disabled": 1
     },
     "python/callees": {
-      "changed-symbols-unavailable": 1,
-      "callees-impact-unavailable": 2,
-      "callees-not-reported": 1
-    },
-    "python/callers": {
-      "changed-symbols-unavailable": 1,
-      "callers-impact-unavailable": 2
+      "env-gate-disabled": 1
     },
     "ruby/all": {
-      "server-missing": 1
+      "env-gate-disabled": 1
     },
     "ruby/both": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "both-impact-unavailable": 2,
-      "both-not-reported": 1
+      "env-gate-disabled": 1
     },
     "ruby/callees": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callees-impact-unavailable": 2,
-      "callees-not-reported": 1
+      "env-gate-disabled": 1
     },
-    "ruby/callers": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callers-impact-unavailable": 2,
-      "callers-not-reported": 1
-    },
-    "rust/callers": {
-      "env-gate-disabled": 2,
-      "other": 2,
-      "strict-lsp-unavailable": 2
-    },
-    "typescript/all": {
+    "rust/both": {
       "server-missing": 1
     },
+    "rust/callees": {
+      "server-missing": 1
+    },
+    "rust/callers": {
+      "server-missing": 2
+    },
+    "tsx/all": {
+      "env-gate-disabled": 1
+    },
+    "tsx/both": {
+      "env-gate-disabled": 1
+    },
+    "tsx/callees": {
+      "env-gate-disabled": 1
+    },
+    "typescript/all": {
+      "env-gate-disabled": 1
+    },
     "typescript/both": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "both-impact-unavailable": 2,
-      "both-not-reported": 1
+      "env-gate-disabled": 1
     },
     "typescript/callees": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callees-impact-unavailable": 2,
-      "callees-not-reported": 1
-    },
-    "typescript/callers": {
-      "server-missing": 1,
-      "changed-symbols-unavailable": 1,
-      "callers-impact-unavailable": 2,
-      "callers-not-reported": 1
+      "env-gate-disabled": 1
     }
   },
   "samples": {
     "go/all": {
-      "server-missing": "skip: gopls not found"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e fixture"
     },
     "go/both": {
-      "server-missing": "skip: gopls not found",
-      "changed-symbols-unavailable": "skip: strict Go changed_symbols unavailable in this env: {e}",
-      "both-impact-unavailable": "skip: strict Go both impact unavailable in this env: {e}",
-      "both-not-reported": "skip: Go LSP did not report both-direction impacts in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
     },
     "go/callees": {
-      "server-missing": "skip: gopls not found",
-      "changed-symbols-unavailable": "skip: strict Go changed_symbols unavailable in this env: {e}",
-      "callees-impact-unavailable": "skip: strict Go callees impact unavailable in this env: {e}",
-      "callees-not-reported": "skip: Go LSP did not report callees in this environment"
-    },
-    "go/callers": {
-      "server-missing": "skip: gopls not found",
-      "changed-symbols-unavailable": "skip: strict Go changed_symbols unavailable in this env: {e}",
-      "callers-impact-unavailable": "skip: strict Go callers impact unavailable in this env: {e}"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
     },
     "java/all": {
-      "server-missing": "skip: jdtls not found"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e fixture"
     },
     "java/both": {
-      "server-missing": "skip: jdtls not found",
-      "changed-symbols-unavailable": "skip: strict Java changed_symbols unavailable in this env: {e}",
-      "both-impact-unavailable": "skip: strict Java both impact unavailable in this env: {e}",
-      "both-not-reported": "skip: Java LSP did not report both-direction impacts in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e tests"
     },
     "java/callees": {
-      "server-missing": "skip: jdtls not found",
-      "changed-symbols-unavailable": "skip: strict Java changed_symbols unavailable in this env: {e}",
-      "callees-impact-unavailable": "skip: strict Java callees impact unavailable in this env: {e}",
-      "callees-not-reported": "skip: Java LSP did not report callees in this environment"
-    },
-    "java/callers": {
-      "server-missing": "skip: jdtls not found",
-      "changed-symbols-unavailable": "skip: strict Java changed_symbols unavailable in this env: {e}",
-      "callers-impact-unavailable": "skip: strict Java callers impact unavailable in this env: {e}"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e tests"
     },
     "javascript/all": {
-      "server-missing": "skip: typescript-language-server not found"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e fixture"
     },
     "javascript/both": {
-      "server-missing": "skip: typescript-language-server not found",
-      "changed-symbols-unavailable": "skip: strict JavaScript changed_symbols unavailable in this env: {e}",
-      "both-impact-unavailable": "skip: strict JavaScript both impact unavailable in this env: {e}",
-      "both-not-reported": "skip: JavaScript LSP did not report both-direction impacts in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
     },
     "javascript/callees": {
-      "server-missing": "skip: typescript-language-server not found",
-      "changed-symbols-unavailable": "skip: strict JavaScript changed_symbols unavailable in this env: {e}",
-      "callees-impact-unavailable": "skip: strict JavaScript callees impact unavailable in this env: {e}",
-      "callees-not-reported": "skip: JavaScript LSP did not report callees in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
     },
-    "javascript/callers": {
-      "server-missing": "skip: typescript-language-server not found",
-      "changed-symbols-unavailable": "skip: strict JavaScript changed_symbols unavailable in this env: {e}",
-      "callers-impact-unavailable": "skip: strict JavaScript callers impact unavailable in this env: {e}",
-      "callers-not-reported": "skip: JavaScript LSP did not report callers in this environment"
+    "python/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e fixture"
     },
     "python/both": {
-      "changed-symbols-unavailable": "skip: strict python changed_symbols unavailable in this env: {e}",
-      "both-impact-unavailable": "skip: strict python both impact unavailable in this env: {e}",
-      "both-not-reported": "skip: python LSP did not report both-direction impacts in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e tests"
     },
     "python/callees": {
-      "changed-symbols-unavailable": "skip: strict python changed_symbols unavailable in this env: {e}",
-      "callees-impact-unavailable": "skip: strict python callees impact unavailable in this env: {e}",
-      "callees-not-reported": "skip: python LSP did not report callees in this environment"
-    },
-    "python/callers": {
-      "changed-symbols-unavailable": "skip: strict python changed_symbols unavailable in this env: {e}",
-      "callers-impact-unavailable": "skip: strict python callers impact unavailable in this env: {e}"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e tests"
     },
     "ruby/all": {
-      "server-missing": "skip: ruby-lsp not found"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e fixture"
     },
     "ruby/both": {
-      "server-missing": "skip: ruby-lsp not found",
-      "changed-symbols-unavailable": "skip: strict Ruby changed_symbols unavailable in this env: {e}",
-      "both-impact-unavailable": "skip: strict Ruby both impact unavailable in this env: {e}",
-      "both-not-reported": "skip: Ruby LSP did not report both-direction impacts in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
     },
     "ruby/callees": {
-      "server-missing": "skip: ruby-lsp not found",
-      "changed-symbols-unavailable": "skip: strict Ruby changed_symbols unavailable in this env: {e}",
-      "callees-impact-unavailable": "skip: strict Ruby callees impact unavailable in this env: {e}",
-      "callees-not-reported": "skip: Ruby LSP did not report callees in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
     },
-    "ruby/callers": {
-      "server-missing": "skip: ruby-lsp not found",
-      "changed-symbols-unavailable": "skip: strict Ruby changed_symbols unavailable in this env: {e}",
-      "callers-impact-unavailable": "skip: strict Ruby callers impact unavailable in this env: {e}",
-      "callers-not-reported": "skip: Ruby LSP did not report callers in this environment"
+    "rust/both": {
+      "server-missing": "skip: rust-analyzer not available"
+    },
+    "rust/callees": {
+      "server-missing": "skip: rust-analyzer not available"
     },
     "rust/callers": {
-      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests",
-      "other": "skip: rust-analyzer not available",
-      "strict-lsp-unavailable": "skip: strict LSP unavailable in this environment: {e}"
+      "server-missing": "skip: rust-analyzer not available"
+    },
+    "tsx/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e fixture"
+    },
+    "tsx/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
+    },
+    "tsx/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
     },
     "typescript/all": {
-      "server-missing": "skip: typescript-language-server not found"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e fixture"
     },
     "typescript/both": {
-      "server-missing": "skip: typescript-language-server not found",
-      "changed-symbols-unavailable": "skip: strict TypeScript changed_symbols unavailable in this env: {e}",
-      "both-impact-unavailable": "skip: strict TypeScript both impact unavailable in this env: {e}",
-      "both-not-reported": "skip: TypeScript LSP did not report both-direction impacts in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e tests"
     },
     "typescript/callees": {
-      "server-missing": "skip: typescript-language-server not found",
-      "changed-symbols-unavailable": "skip: strict TypeScript changed_symbols unavailable in this env: {e}",
-      "callees-impact-unavailable": "skip: strict TypeScript callees impact unavailable in this env: {e}",
-      "callees-not-reported": "skip: TypeScript LSP did not report callees in this environment"
-    },
-    "typescript/callers": {
-      "server-missing": "skip: typescript-language-server not found",
-      "changed-symbols-unavailable": "skip: strict TypeScript changed_symbols unavailable in this env: {e}",
-      "callers-impact-unavailable": "skip: strict TypeScript callers impact unavailable in this env: {e}",
-      "callers-not-reported": "skip: TypeScript LSP did not report callers in this environment"
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e tests"
     }
   },
-  "promotionCandidates": [
-    {
-      "lane": "go/callers",
-      "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callers-impact-unavailable": 2
-      },
-      "note": "callers lane has no explicit report-gap skip marker in current tests"
-    },
-    {
-      "lane": "java/callers",
-      "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callers-impact-unavailable": 2
-      },
-      "note": "callers lane has no explicit report-gap skip marker in current tests"
-    },
-    {
-      "lane": "python/callers",
-      "reasons": {
-        "changed-symbols-unavailable": 1,
-        "callers-impact-unavailable": 2
-      },
-      "note": "callers lane has no explicit report-gap skip marker in current tests"
-    }
-  ],
-  "holdCandidates": [
+  "actionableResidual": [],
+  "operationalResidual": [
     {
       "lane": "go/all",
       "reasons": {
-        "server-missing": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration"
+      "note": "env gate opt-in"
     },
     {
       "lane": "go/both",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "both-impact-unavailable": 2,
-        "both-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "go/callees",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callees-impact-unavailable": 2,
-        "callees-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "java/all",
       "reasons": {
-        "server-missing": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration"
+      "note": "env gate opt-in"
     },
     {
       "lane": "java/both",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "both-impact-unavailable": 2,
-        "both-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "java/callees",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callees-impact-unavailable": 2,
-        "callees-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "javascript/all",
       "reasons": {
-        "server-missing": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration"
+      "note": "env gate opt-in"
     },
     {
       "lane": "javascript/both",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "both-impact-unavailable": 2,
-        "both-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "javascript/callees",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callees-impact-unavailable": 2,
-        "callees-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
-      "lane": "javascript/callers",
+      "lane": "python/all",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callers-impact-unavailable": 2,
-        "callers-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "python/both",
       "reasons": {
-        "changed-symbols-unavailable": 1,
-        "both-impact-unavailable": 2,
-        "both-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "python/callees",
       "reasons": {
-        "changed-symbols-unavailable": 1,
-        "callees-impact-unavailable": 2,
-        "callees-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "ruby/all",
       "reasons": {
-        "server-missing": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration"
+      "note": "env gate opt-in"
     },
     {
       "lane": "ruby/both",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "both-impact-unavailable": 2,
-        "both-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "ruby/callees",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callees-impact-unavailable": 2,
-        "callees-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
-      "lane": "ruby/callers",
+      "lane": "rust/both",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callers-impact-unavailable": 2,
-        "callers-not-reported": 1
+        "server-missing": 1
       },
-      "note": "contains not-reported skip marker; contains unavailable skip marker"
+      "note": "server missing on host"
+    },
+    {
+      "lane": "rust/callees",
+      "reasons": {
+        "server-missing": 1
+      },
+      "note": "server missing on host"
     },
     {
       "lane": "rust/callers",
       "reasons": {
-        "env-gate-disabled": 2,
-        "other": 2,
-        "strict-lsp-unavailable": 2
+        "server-missing": 2
       },
-      "note": "contains unavailable skip marker"
+      "note": "server missing on host"
+    },
+    {
+      "lane": "tsx/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "tsx/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "tsx/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
     },
     {
       "lane": "typescript/all",
       "reasons": {
-        "server-missing": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration"
+      "note": "env gate opt-in"
     },
     {
       "lane": "typescript/both",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "both-impact-unavailable": 2,
-        "both-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     },
     {
       "lane": "typescript/callees",
       "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callees-impact-unavailable": 2,
-        "callees-not-reported": 1
+        "env-gate-disabled": 1
       },
-      "note": "prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker"
-    },
-    {
-      "lane": "typescript/callers",
-      "reasons": {
-        "server-missing": 1,
-        "changed-symbols-unavailable": 1,
-        "callers-impact-unavailable": 2,
-        "callers-not-reported": 1
-      },
-      "note": "contains not-reported skip marker; contains unavailable skip marker"
+      "note": "env gate opt-in"
     }
   ],
+  "summary": {
+    "actionableResidualLanes": 0,
+    "operationalResidualLanes": 24
+  },
   "policy": {
-    "phase": "PH65-1",
-    "rule": "callers lane first; env/server prerequisites ignored for promotion screening"
+    "phase": "F2",
+    "rule": "residual is minimal when only env-gate-disabled/server-missing remain"
   }
 }

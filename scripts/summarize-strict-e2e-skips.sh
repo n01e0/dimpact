@@ -126,52 +126,37 @@ for e in entries:
     bucket[key][reason] += 1
     samples[key].setdefault(reason, e["message"])
 
-# classification for fail-fast promotion candidates
-# Policy used for this report:
-# - evaluate callers lane first
-# - ignore env-gate-disabled/server-missing (operational prerequisites)
-# - hold if no-*-reported or strict-lsp-unavailable is present
-candidates = []
-holds = []
-for key in sorted(bucket.keys()):
-    lang, direction = key.split("/", 1)
-    reasons = bucket[key]
-    has_reporting_gap = any(
-        r in reasons
-        for r in ["callers-not-reported", "callees-not-reported", "both-not-reported"]
-    )
-    has_unavailable = any(
-        r in reasons
-        for r in [
-            "strict-lsp-unavailable",
-            "changed-symbols-unavailable",
-            "callers-impact-unavailable",
-            "callees-impact-unavailable",
-            "both-impact-unavailable",
-        ]
-    )
+# F2 policy: keep only minimal, reasoned residuals.
+# - operational prerequisites: env-gate-disabled / server-missing
+# - actionable residual: anything else
+OPERATIONAL_REASONS = {"env-gate-disabled", "server-missing"}
 
-    if direction == "callers" and not has_reporting_gap and lang in {"go", "java", "python"}:
-        candidates.append(
+actionable = []
+operational = []
+for key in sorted(bucket.keys()):
+    reasons = bucket[key]
+    non_operational = {k: v for k, v in reasons.items() if k not in OPERATIONAL_REASONS}
+    op_only = {k: v for k, v in reasons.items() if k in OPERATIONAL_REASONS}
+
+    if non_operational:
+        actionable.append(
             {
                 "lane": key,
-                "reasons": dict(reasons),
-                "note": "callers lane has no explicit report-gap skip marker in current tests",
+                "reasons": non_operational,
+                "note": "contains non-operational skip reason(s); needs follow-up",
             }
         )
-    else:
-        why = []
-        if direction != "callers":
-            why.append("prioritize callers for phase-1 fail-fast migration")
-        if has_reporting_gap:
-            why.append("contains not-reported skip marker")
-        if has_unavailable:
-            why.append("contains unavailable skip marker")
-        holds.append(
+    elif op_only:
+        note = []
+        if "env-gate-disabled" in op_only:
+            note.append("env gate opt-in")
+        if "server-missing" in op_only:
+            note.append("server missing on host")
+        operational.append(
             {
                 "lane": key,
-                "reasons": dict(reasons),
-                "note": "; ".join(why) if why else "keep in hold set",
+                "reasons": op_only,
+                "note": ", ".join(note),
             }
         )
 
@@ -180,11 +165,15 @@ report = {
     "totalSkipPrints": len(entries),
     "lanes": {k: dict(v) for k, v in sorted(bucket.items())},
     "samples": {k: v for k, v in sorted(samples.items())},
-    "promotionCandidates": candidates,
-    "holdCandidates": holds,
+    "actionableResidual": actionable,
+    "operationalResidual": operational,
+    "summary": {
+        "actionableResidualLanes": len(actionable),
+        "operationalResidualLanes": len(operational),
+    },
     "policy": {
-        "phase": "PH65-1",
-        "rule": "callers lane first; env/server prerequisites ignored for promotion screening",
+        "phase": "F2",
+        "rule": "residual is minimal when only env-gate-disabled/server-missing remain",
     },
 }
 
@@ -192,7 +181,7 @@ out_json.parent.mkdir(parents=True, exist_ok=True)
 out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 md = []
-md.append("# strict real-LSP E2E skip reason matrix (PH65-1)")
+md.append("# strict real-LSP E2E skip-safe residual report (F2)")
 md.append("")
 md.append(f"source: `{src}`")
 md.append(f"total skip prints: **{len(entries)}**")
@@ -212,29 +201,30 @@ for lane in sorted(bucket.keys()):
             md.append(f"|  | {r} | {rs[r]} |")
 
 md.append("")
-md.append("## 2) promotion candidates (fail-fast migration candidates)")
+md.append("## 2) actionable residual (non-operational)")
 md.append("")
-if not candidates:
-    md.append("- none")
+md.append(f"- lanes: **{len(actionable)}**")
+if not actionable:
+    md.append("- none (0)")
 else:
-    for c in candidates:
-        md.append(f"- `{c['lane']}`: {c['note']}")
+    for a in actionable:
+        md.append(f"- `{a['lane']}`: {a['note']}")
 
 md.append("")
-md.append("## 3) hold candidates")
+md.append("## 3) minimal residual with reasons (operational prerequisites)")
 md.append("")
-if not holds:
+md.append(f"- lanes: **{len(operational)}**")
+if not operational:
     md.append("- none")
 else:
-    for h in holds:
-        md.append(f"- `{h['lane']}`: {h['note']}")
+    for o in operational:
+        md.append(f"- `{o['lane']}`: {o['note']}")
 
 md.append("")
-md.append("## 4) screening policy used")
+md.append("## 4) policy used")
 md.append("")
-md.append("- callers lane first (phase-1)")
-md.append("- `env-gate-disabled` / `server-missing` are treated as operational prerequisites")
-md.append("- lanes with `*-not-reported` or `*-unavailable` markers are kept in hold set")
+md.append("- residual is acceptable when only `env-gate-disabled` / `server-missing` remain")
+md.append("- any other reason is treated as actionable residual")
 
 out_md.parent.mkdir(parents=True, exist_ok=True)
 out_md.write_text("\n".join(md) + "\n", encoding="utf-8")
