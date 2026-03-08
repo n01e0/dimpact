@@ -733,4 +733,56 @@ from pkg.star import *
                 .any(|r| r.name == "lower" && r.qualifier.as_deref() == Some("v") && r.is_method)
         );
     }
+
+    #[test]
+    fn python_hard_case_fixture_dynamic_descriptor_decorator_chain() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_dynamic_descriptor_decorator_chain.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/dynamic_chain.py", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "TrimDescriptor"
+                && matches!(s.kind, SymbolKind::Struct)
+                && s.id.0 == "python:pkg/dynamic_chain.py:struct:TrimDescriptor:4"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "Pipeline"
+                && matches!(s.kind, SymbolKind::Struct)
+                && s.id.0 == "python:pkg/dynamic_chain.py:struct:Pipeline:31"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "run"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "python:pkg/dynamic_chain.py:method:run:39"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/dynamic_chain.py", src);
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "wraps" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "audited" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "traced" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "trim" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "emit" && r.qualifier.as_deref() == Some("self.sink.client") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "lower" && r.qualifier.as_deref() == Some("cleaned") && r.is_method
+        }));
+
+        let im = ana.imports_in_file("pkg/dynamic_chain.py", src);
+        assert_eq!(im.get("wraps").map(String::as_str), Some("functools::wraps"));
+    }
 }
