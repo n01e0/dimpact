@@ -300,4 +300,34 @@ end
         assert!(refs.iter().any(|r| r.name == "send"));
         assert!(refs.iter().any(|r| r.name == "public_send"));
     }
+
+    #[test]
+    fn ruby_dynamic_fixture_alias_method_define_method() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_alias_define_method.rb"
+        ));
+        let ana = SpecRubyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/ruby_dynamic_alias_define.rb", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "original"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "ruby:pkg/ruby_dynamic_alias_define.rb:method:original:2"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "execute"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "ruby:pkg/ruby_dynamic_alias_define.rb:method:execute:17"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic_alias_define.rb", src);
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"alias_method"));
+        assert!(names.contains(&"define_method"));
+        assert!(names.contains(&"aliased_sym"));
+        assert!(names.contains(&"aliased_str"));
+        assert!(names.contains(&"defined_sym"));
+        assert!(names.contains(&"defined_str"));
+    }
 }
