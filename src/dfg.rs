@@ -179,6 +179,55 @@ impl DfgBuilder for RustDfgBuilder {
         }
         let control_ranges = collect_control_ranges_rust(source);
 
+        // Lightweight alias propagation: a = b; / let a = b;
+        // Add conservative data edge def(b) -> def(a) at assignment lines.
+        let re_alias_let = regex::Regex::new(
+            r"^\s*let(?:\s+mut)?\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*:[^=]+)?\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\b",
+        )
+        .unwrap();
+        let re_alias_assign =
+            regex::Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\b")
+                .unwrap();
+        for (idx, line) in source.lines().enumerate() {
+            let line_no = (idx + 1) as u32;
+            let pair = if let Some(cap) = re_alias_let.captures(line) {
+                Some((
+                    cap.get(1).unwrap().as_str().to_string(),
+                    cap.get(2).unwrap().as_str().to_string(),
+                ))
+            } else {
+                re_alias_assign.captures(line).map(|cap| {
+                    (
+                        cap.get(1).unwrap().as_str().to_string(),
+                        cap.get(2).unwrap().as_str().to_string(),
+                    )
+                })
+            };
+            let Some((lhs, rhs)) = pair else {
+                continue;
+            };
+            if lhs == rhs {
+                continue;
+            }
+            let Some(lhs_def_id) = def_records_by_name.get(&lhs).and_then(|recs| {
+                recs.iter()
+                    .rev()
+                    .find(|(ln, _)| *ln == line_no)
+                    .map(|(_, id)| id.clone())
+            }) else {
+                continue;
+            };
+            let rhs_defs =
+                reaching_def_ids_ssa_like(&rhs, line_no, &def_records_by_name, &control_ranges);
+            for rhs_def_id in rhs_defs {
+                edges.push(DfgEdge {
+                    from: rhs_def_id,
+                    to: lhs_def_id.clone(),
+                    kind: DependencyKind::Data,
+                });
+            }
+        }
+
         // Second pass: collect uses and link to reaching defs (SSA-like)
         for (idx, line) in source.lines().enumerate() {
             let line_no = (idx + 1) as u32;
@@ -258,7 +307,9 @@ impl DfgBuilder for RubyDfgBuilder {
         let mut def_records_by_name: HashMap<String, Vec<(u32, String)>> = HashMap::new();
         let mut def_lines_by_name: HashMap<String, HashSet<u32>> = HashMap::new();
         let mut seen_node_ids: HashSet<String> = HashSet::new();
-        let reserved = ["if", "else", "elsif", "end", "return", "def", "class", "module"];
+        let reserved = [
+            "if", "else", "elsif", "end", "return", "def", "class", "module",
+        ];
 
         // Parse parameters via regex
         let fn_re = Regex::new(r"def\s+\w+\s*\(([^)]*)\)").unwrap();
@@ -323,9 +374,9 @@ impl DfgBuilder for RubyDfgBuilder {
                             line: line_no,
                         });
                     }
-                    for def_id in reaching_rhs {
+                    for def_id in &reaching_rhs {
                         edges.push(DfgEdge {
-                            from: def_id,
+                            from: def_id.clone(),
                             to: use_id.clone(),
                             kind: DependencyKind::Data,
                         });
@@ -350,6 +401,17 @@ impl DfgBuilder for RubyDfgBuilder {
                     .entry(lhs.to_string())
                     .or_default()
                     .insert(line_no);
+
+                // Lightweight alias propagation: a = b => def(b) -> def(a)
+                if lhs != rhs {
+                    for rhs_def_id in &reaching_rhs {
+                        edges.push(DfgEdge {
+                            from: rhs_def_id.clone(),
+                            to: def_id.clone(),
+                            kind: DependencyKind::Data,
+                        });
+                    }
+                }
             }
         }
 
@@ -603,7 +665,9 @@ fn collect_control_ranges_ruby(source: &str) -> Vec<(u32, u32)> {
             if_stack.push(line_no);
             continue;
         }
-        if t.starts_with("end") && let Some(start_ln) = if_stack.pop() {
+        if t.starts_with("end")
+            && let Some(start_ln) = if_stack.pop()
+        {
             out.push((start_ln, line_no));
         }
     }
@@ -785,6 +849,13 @@ mod tests {
             "expected latest def at line 3, got {}",
             incoming[0]
         );
+
+        // Alias propagation: let y = x should add def(x@3) -> def(y@4)
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:x:3")
+                && e.to.ends_with(":def:y:4")
+        }));
     }
 
     #[test]
@@ -889,6 +960,18 @@ mod tests {
             !incoming.iter().any(|id| id.ends_with(":def:x:1")),
             "initial def should be shadowed by branch defs"
         );
+    }
+
+    #[test]
+    fn ruby_alias_assignment_adds_def_to_def_edge() {
+        let src = "a = seed\nb = a\nreturn b\n";
+        let dfg = RubyDfgBuilder::build("test.rb", src);
+
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:a:1")
+                && e.to.ends_with(":def:b:2")
+        }));
     }
 
     #[test]
