@@ -97,7 +97,66 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
         let mut out = Vec::new();
         let offs = line_offsets(source);
-        let re_sym_call = regex::Regex::new(r":([A-Za-z_][A-Za-z0-9_?!]*)").unwrap();
+
+        // Track simple local assignments for send/public_send argument tracing.
+        // Example: dyn_sym = :target, dyn_str = "target".
+        let re_assign_literal = regex::Regex::new(
+            r#"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?::([A-Za-z_][A-Za-z0-9_?!]*)|[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"'])\s*$"#,
+        )
+        .unwrap();
+        let mut assigned_literals: std::collections::HashMap<String, Vec<(u32, String)>> =
+            std::collections::HashMap::new();
+        for caps in re_assign_literal.captures_iter(source) {
+            let Some(full) = caps.get(0) else {
+                continue;
+            };
+            let Some(var) = caps.get(1) else {
+                continue;
+            };
+            let Some(value) = caps.get(2).or_else(|| caps.get(3)) else {
+                continue;
+            };
+            let ln = byte_to_line(&offs, full.start());
+            assigned_literals
+                .entry(var.as_str().to_string())
+                .or_default()
+                .push((ln, value.as_str().to_string()));
+        }
+        for entries in assigned_literals.values_mut() {
+            entries.sort_by_key(|(ln, _)| *ln);
+        }
+
+        let re_send_first_arg =
+            regex::Regex::new(r#"(?:^|[^\w])(?:send|public_send)\s*\(\s*([^,\)\n]+)"#).unwrap();
+        let re_symbol_lit = regex::Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)$"#).unwrap();
+        let re_string_lit = regex::Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']$"#).unwrap();
+        let re_ident = regex::Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).unwrap();
+
+        let resolve_send_target = |call_text: &str, ln: u32| -> Option<String> {
+            let arg_raw = re_send_first_arg
+                .captures(call_text)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().trim())?;
+
+            if let Some(cap) = re_symbol_lit.captures(arg_raw) {
+                return cap.get(1).map(|m| m.as_str().to_string());
+            }
+            if let Some(cap) = re_string_lit.captures(arg_raw) {
+                return cap.get(1).map(|m| m.as_str().to_string());
+            }
+            if let Some(cap) = re_ident.captures(arg_raw) {
+                let var = cap.get(1).map(|m| m.as_str())?;
+                if let Some(cands) = assigned_literals.get(var) {
+                    return cands
+                        .iter()
+                        .rev()
+                        .find(|(line, _)| *line <= ln)
+                        .map(|(_, v)| v.clone());
+                }
+            }
+            None
+        };
+
         for caps in self.runner.run_captures(source, &self.queries.calls) {
             let name_cap = caps.iter().find(|c| c.name == "name");
             if let Some(n) = name_cap {
@@ -105,19 +164,19 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 if name.is_empty() {
                     continue;
                 }
-                if (name == "send" || name == "public_send")
-                    && let Some(callnode) = caps.iter().find(|c| c.name == "call")
-                {
-                    let text = &source[callnode.start..callnode.end];
-                    if let Some(mat) = re_sym_call.captures(text) {
-                        name = mat.get(1).unwrap().as_str().to_string();
-                    }
-                }
                 let ln = if let Some(callnode) = caps.iter().find(|c| c.name == "call") {
                     byte_to_line(&offs, callnode.start)
                 } else {
                     byte_to_line(&offs, n.start)
                 };
+                if (name == "send" || name == "public_send")
+                    && let Some(callnode) = caps.iter().find(|c| c.name == "call")
+                {
+                    let text = &source[callnode.start..callnode.end];
+                    if let Some(resolved) = resolve_send_target(text, ln) {
+                        name = resolved;
+                    }
+                }
                 out.push(UnresolvedRef {
                     name,
                     kind: RefKind::Call,
@@ -294,11 +353,12 @@ end
         }));
 
         let refs = ana.unresolved_refs("pkg/ruby_dynamic.rb", src);
-        // symbol-literal send/public_send is already normalized to method name.
-        assert!(refs.iter().any(|r| r.name == "target_sym"));
-        // string-literal send/public_send currently remains as send/public_send call names.
-        assert!(refs.iter().any(|r| r.name == "send"));
-        assert!(refs.iter().any(|r| r.name == "public_send"));
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.iter().filter(|&&n| n == "target_sym").count() >= 3);
+        assert!(names.iter().filter(|&&n| n == "target_str").count() >= 3);
+        // send/public_send targets should be traced from symbol/string args (including local var assignment).
+        assert!(!names.contains(&"send"));
+        assert!(!names.contains(&"public_send"));
     }
 
     #[test]
