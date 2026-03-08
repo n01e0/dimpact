@@ -2713,31 +2713,14 @@ fn lsp_engine_strict_tsx_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("tsx/callees", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("tsx/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("tsx/callees", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "View"));
     let names1 = impacted_name_set(&out1);
@@ -2746,10 +2729,6 @@ fn lsp_engine_strict_tsx_callees_chain_e2e_when_available() {
         names1, names2,
         "strict TSX LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: TSX LSP did not report callees in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz"));
 }
 
@@ -2785,31 +2764,14 @@ fn lsp_engine_strict_tsx_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("tsx/both", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("tsx/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("tsx/both", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "View"));
     let names1 = impacted_name_set(&out1);
@@ -2818,10 +2780,6 @@ fn lsp_engine_strict_tsx_both_chain_e2e_when_available() {
         names1, names2,
         "strict TSX LSP both result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: TSX LSP did not report both-direction impacts in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("App"));
 }
 
@@ -2913,31 +2871,14 @@ fn lsp_engine_strict_typescript_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("typescript/callees", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("typescript/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("typescript/callees", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -2946,10 +2887,6 @@ fn lsp_engine_strict_typescript_callees_chain_e2e_when_available() {
         names1, names2,
         "strict TypeScript LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: TypeScript LSP did not report callees in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz"));
 }
 
@@ -2985,31 +2922,14 @@ fn lsp_engine_strict_typescript_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("typescript/both", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("typescript/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("typescript/both", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -3018,10 +2938,6 @@ fn lsp_engine_strict_typescript_both_chain_e2e_when_available() {
         names1, names2,
         "strict TypeScript LSP both result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: TypeScript LSP did not report both-direction impacts in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
 }
 
@@ -3143,31 +3059,14 @@ fn lsp_engine_strict_javascript_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict JavaScript changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict JavaScript callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict JavaScript callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("javascript/callees", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("javascript/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("javascript/callees", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -3176,10 +3075,6 @@ fn lsp_engine_strict_javascript_callees_chain_e2e_when_available() {
         names1, names2,
         "strict JavaScript LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: JavaScript LSP did not report callees in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz"));
 }
 
@@ -3215,31 +3110,14 @@ fn lsp_engine_strict_javascript_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict JavaScript changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict JavaScript both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict JavaScript both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("javascript/both", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("javascript/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("javascript/both", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -3248,10 +3126,6 @@ fn lsp_engine_strict_javascript_both_chain_e2e_when_available() {
         names1, names2,
         "strict JavaScript LSP both result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: JavaScript LSP did not report both-direction impacts in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
 }
 
@@ -3373,31 +3247,14 @@ fn lsp_engine_strict_ruby_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Ruby changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Ruby callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Ruby callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("ruby/callees", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("ruby/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("ruby/callees", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -3406,10 +3263,6 @@ fn lsp_engine_strict_ruby_callees_chain_e2e_when_available() {
         names1, names2,
         "strict Ruby LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: Ruby LSP did not report callees in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz"));
 }
 
@@ -3445,31 +3298,14 @@ fn lsp_engine_strict_ruby_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Ruby changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Ruby both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Ruby both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("ruby/both", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("ruby/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("ruby/both", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -3478,10 +3314,6 @@ fn lsp_engine_strict_ruby_both_chain_e2e_when_available() {
         names1, names2,
         "strict Ruby LSP both result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: Ruby LSP did not report both-direction impacts in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
 }
 
@@ -3636,31 +3468,14 @@ fn lsp_engine_strict_java_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("java/callees", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("java/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("java/callees", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "b"));
     let names1 = impacted_name_set(&out1);
@@ -3669,10 +3484,6 @@ fn lsp_engine_strict_java_callees_chain_e2e_when_available() {
         names1, names2,
         "strict Java LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: Java LSP did not report callees in this environment");
-        return;
-    }
     assert!(names1.contains("c"));
 }
 
@@ -3708,31 +3519,14 @@ fn lsp_engine_strict_java_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Java both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("java/both", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("java/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("java/both", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -3741,10 +3535,6 @@ fn lsp_engine_strict_java_both_chain_e2e_when_available() {
         names1, names2,
         "strict Java LSP both result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: Java LSP did not report both-direction impacts in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("entry"));
 }
 
@@ -3836,31 +3626,14 @@ fn lsp_engine_strict_go_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("go/callees", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("go/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("go/callees", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "b"));
     let names1 = impacted_name_set(&out1);
@@ -3869,10 +3642,6 @@ fn lsp_engine_strict_go_callees_chain_e2e_when_available() {
         names1, names2,
         "strict Go LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: Go LSP did not report callees in this environment");
-        return;
-    }
     assert!(names1.contains("c"));
 }
 
@@ -3908,40 +3677,19 @@ fn lsp_engine_strict_go_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict Go both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("go/both", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("go/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("go/both", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
     let names2 = impacted_name_set(&out2);
     assert_eq!(names1, names2, "strict Go LSP both result should be stable");
-    if names1.is_empty() {
-        eprintln!("skip: Go LSP did not report both-direction impacts in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("main"));
 }
 
@@ -4063,31 +3811,14 @@ fn lsp_engine_strict_python_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("python/callees", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("python/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("python/callees", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -4096,10 +3827,6 @@ fn lsp_engine_strict_python_callees_chain_e2e_when_available() {
         names1, names2,
         "strict python LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: python LSP did not report callees in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz"));
 }
 
@@ -4135,31 +3862,14 @@ fn lsp_engine_strict_python_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict python both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("python/both", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("python/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("python/both", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "foo"));
     let names1 = impacted_name_set(&out1);
@@ -4168,10 +3878,6 @@ fn lsp_engine_strict_python_both_chain_e2e_when_available() {
         names1, names2,
         "strict python LSP both result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: python LSP did not report both-direction impacts in this environment");
-        return;
-    }
     assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
 }
 
