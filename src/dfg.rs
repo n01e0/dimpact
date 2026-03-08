@@ -588,7 +588,15 @@ impl PdgBuilder {
                 defs_by_loc.entry(key).or_default().push(n.id.clone());
             }
         }
-        // 1) Call-site bridges
+        // Precompute minimal function summaries and map by callee symbol ID.
+        let summaries = Self::build_function_summaries(pdg, index);
+        let mut summary_by_fn: std::collections::HashMap<String, FunctionSummary> =
+            std::collections::HashMap::new();
+        for s in summaries {
+            summary_by_fn.insert(s.function_id.clone(), s);
+        }
+
+        // 1) Call-site bridges + summary-connected inter-procedural bridges
         for r in refs {
             let key = (r.file.clone(), r.line);
             if let Some(uses) = uses_by_loc.get(&key) {
@@ -607,6 +615,39 @@ impl PdgBuilder {
                         to: d.clone(),
                         kind: DependencyKind::Data,
                     });
+                }
+            }
+
+            // Connect call-site propagation through callee summary (input -> impacted).
+            if let Some(summary) = summary_by_fn.get(&r.to.0) {
+                let callsite_uses = uses_by_loc.get(&key).cloned().unwrap_or_default();
+                let callsite_defs = defs_by_loc.get(&key).cloned().unwrap_or_default();
+
+                let mut impacted_union: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                for flow in &summary.flows {
+                    for impacted in &flow.impacted_node_ids {
+                        impacted_union.insert(impacted.clone());
+                    }
+                }
+
+                for input in &summary.inputs {
+                    for u in &callsite_uses {
+                        pdg.edges.push(DfgEdge {
+                            from: u.clone(),
+                            to: input.clone(),
+                            kind: DependencyKind::Data,
+                        });
+                    }
+                }
+                for impacted in &impacted_union {
+                    for d in &callsite_defs {
+                        pdg.edges.push(DfgEdge {
+                            from: impacted.clone(),
+                            to: d.clone(),
+                            kind: DependencyKind::Data,
+                        });
+                    }
                 }
             }
         }
@@ -652,9 +693,16 @@ impl PdgBuilder {
             if e.kind != DependencyKind::Data {
                 continue;
             }
-            if nodes_by_id.contains_key(e.from.as_str()) && nodes_by_id.contains_key(e.to.as_str()) {
-                out_adj.entry(e.from.as_str()).or_default().push(e.to.as_str());
-                in_adj.entry(e.to.as_str()).or_default().push(e.from.as_str());
+            if nodes_by_id.contains_key(e.from.as_str()) && nodes_by_id.contains_key(e.to.as_str())
+            {
+                out_adj
+                    .entry(e.from.as_str())
+                    .or_default()
+                    .push(e.to.as_str());
+                in_adj
+                    .entry(e.to.as_str())
+                    .or_default()
+                    .push(e.from.as_str());
             }
         }
 
@@ -931,6 +979,73 @@ mod pdg_tests {
     }
 
     #[test]
+    fn propagation_connects_summary_interprocedurally() {
+        use crate::ir::{Symbol, SymbolKind, TextRange};
+
+        let mut pdg = DataFlowGraph {
+            nodes: vec![
+                DfgNode {
+                    id: "f.rs:use:x:10".to_string(),
+                    name: "x".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                DfgNode {
+                    id: "f.rs:def:y:10".to_string(),
+                    name: "y".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                DfgNode {
+                    id: "f.rs:def:a:1".to_string(),
+                    name: "a".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 1,
+                },
+                DfgNode {
+                    id: "f.rs:use:a:2".to_string(),
+                    name: "a".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 2,
+                },
+            ],
+            edges: vec![DfgEdge {
+                from: "f.rs:def:a:1".to_string(),
+                to: "f.rs:use:a:2".to_string(),
+                kind: DependencyKind::Data,
+            }],
+        };
+
+        let refs = vec![Reference {
+            from: SymbolId("rust:f.rs:fn:caller:9".to_string()),
+            to: SymbolId("rust:f.rs:fn:callee:1".to_string()),
+            kind: crate::ir::reference::RefKind::Call,
+            file: "f.rs".to_string(),
+            line: 10,
+        }];
+        let index = crate::ir::reference::SymbolIndex::build(vec![Symbol {
+            id: SymbolId("rust:f.rs:fn:callee:1".to_string()),
+            name: "callee".to_string(),
+            kind: SymbolKind::Function,
+            file: "f.rs".to_string(),
+            range: TextRange {
+                start_line: 1,
+                end_line: 3,
+            },
+            language: "rust".to_string(),
+        }]);
+
+        PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
+
+        assert!(pdg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data && e.from == "f.rs:use:x:10" && e.to == "f.rs:def:a:1"
+        }));
+        assert!(pdg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data && e.from == "f.rs:use:a:2" && e.to == "f.rs:def:y:10"
+        }));
+    }
+
+    #[test]
     fn function_summary_minimal_input_to_impact() {
         use crate::ir::{Symbol, SymbolKind, TextRange};
 
@@ -964,8 +1079,16 @@ mod pdg_tests {
             .iter()
             .find(|f| f.input_node_id.ends_with(":def:a:1"))
             .expect("flow for input a");
-        assert!(flow.impacted_node_ids.iter().any(|id| id.ends_with(":def:b:2")));
-        assert!(flow.impacted_node_ids.iter().any(|id| id.ends_with(":use:b:3")));
+        assert!(
+            flow.impacted_node_ids
+                .iter()
+                .any(|id| id.ends_with(":def:b:2"))
+        );
+        assert!(
+            flow.impacted_node_ids
+                .iter()
+                .any(|id| id.ends_with(":use:b:3"))
+        );
     }
 }
 
