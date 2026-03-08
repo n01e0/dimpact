@@ -5,6 +5,10 @@
 このメモは **server install / startup / timeout** 観点で、現状の flaky 要因候補を抽出したもの。
 （対策実装は ALL57-2 以降で実施）
 
+Phase A（env/server 起因の fail-fast 移行）以降は、nightly summary で以下を常時追跡する。
+- `fail-fast 昇格済み`
+- `skip-safe 残件`
+
 ## 1) Server install 由来の flaky 候補
 
 - **latest/snapshot 依存で再現性が揺れる**
@@ -55,7 +59,8 @@
 2. 実行後、artifact `nightly-strict-lsp-execution-logs` を取得
 3. 次のログを優先確認
    - `install-*.log`（server install/health-check）
-   - `preflight.log` / `engine-lsp-strict-preflight.log`（skip-safe 判定理由）
+   - `preflight.log` / `engine-lsp-strict-preflight.log`（preflight gate 判定理由）
+   - `strict-e2e-migration-summary.md`（`skip-safe 残件` / `fail-fast 昇格済み` の集計）
    - `engine-lsp-strict-e2e.log`（strict E2E 本体）
    - `run-graduation-check.log` / `lsp-graduation-check.log`（graduation check）
 
@@ -82,7 +87,8 @@ cargo test -q --test engine_lsp
 ### 切り分けのコツ
 
 - install 失敗: `install-*.log` の `::error::` 行を先頭に確認
-- skip-safe 判定: `engine-lsp-strict-preflight.log` で対象言語の `enabled=0 reason=...` を確認
+- migration 判定: `strict-e2e-migration-summary.md` で `skip-safe 残件` / `fail-fast 昇格済み` を確認
+- preflight 判定: `engine-lsp-strict-preflight.log` で gate 理由（`enabled=... reason=...`）を確認
 - strict 本体失敗: `engine-lsp-strict-e2e.log` の末尾 + `$GITHUB_STEP_SUMMARY` を併読
 
 ## 6) 運用フロー（triage / retry / escalation）（ALL63-4）
@@ -141,7 +147,8 @@ escalation 時の最小提出セット:
 1. `nightly-strict-lsp-execution-logs` artifact 一式
 2. `nightly-flaky-classification.json`
 3. `nightly-failure-triage.md`
-4. 該当 run URL / commit SHA / 失敗カテゴリ
+4. `strict-e2e-migration-summary.md`
+5. 該当 run URL / commit SHA / 失敗カテゴリ
 
 ---
 
