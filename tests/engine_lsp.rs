@@ -47,16 +47,52 @@ fn has_rust_analyzer() -> bool {
         .unwrap_or(false)
 }
 
-fn has_python_lsp_server() -> bool {
-    ["pyright-langserver", "basedpyright-langserver", "pylsp"]
-        .iter()
-        .any(|exe| {
-            Command::new(exe)
-                .arg("--help")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        })
+fn detect_python_lsp_server_for_tests() -> Option<&'static str> {
+    let has = |exe: &str| {
+        Command::new(exe)
+            .arg("--help")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+
+    if let Ok(preferred) = std::env::var("DIMPACT_PYTHON_LSP") {
+        let p = preferred.trim().to_ascii_lowercase();
+        let cand = match p.as_str() {
+            "pyright" | "pyright-langserver" => "pyright-langserver",
+            "basedpyright" | "basedpyright-langserver" => "basedpyright-langserver",
+            "pylsp" => "pylsp",
+            _ => "",
+        };
+        if !cand.is_empty() && has(cand) {
+            return Some(cand);
+        }
+    }
+
+    if has("pyright-langserver") {
+        return Some("pyright-langserver");
+    }
+    if has("basedpyright-langserver") {
+        return Some("basedpyright-langserver");
+    }
+    if has("pylsp") {
+        return Some("pylsp");
+    }
+    None
+}
+
+fn require_python_lsp_server_for_lane(lane: &str) {
+    if let Some(server) = detect_python_lsp_server_for_tests() {
+        eprintln!(
+            "fail-fast preflight: lane={} python_lsp_selected={} (selection logic preserved)",
+            lane, server
+        );
+    } else {
+        panic!(
+            "fail-fast preflight: lane={} cause=server python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)",
+            lane
+        );
+    }
 }
 
 fn has_gopls() -> bool {
@@ -3936,12 +3972,7 @@ fn python_real_lsp_e2e_fixture_is_opt_in_gated() {
         );
         return;
     }
-    if !has_python_lsp_server() {
-        eprintln!(
-            "skip: python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)"
-        );
-        return;
-    }
+    require_python_lsp_server_for_lane("python/preflight-fixture");
 
     let (_tmp, repo) = setup_repo_python_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3971,12 +4002,7 @@ fn lsp_engine_strict_python_callers_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_python_lsp_server() {
-        eprintln!(
-            "skip: python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)"
-        );
-        return;
-    }
+    require_python_lsp_server_for_lane("python/callers");
 
     let (_tmp, repo) = setup_repo_python_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -4031,12 +4057,7 @@ fn lsp_engine_strict_python_callees_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_python_lsp_server() {
-        eprintln!(
-            "skip: python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)"
-        );
-        return;
-    }
+    require_python_lsp_server_for_lane("python/callees");
 
     let (_tmp, repo) = setup_repo_python_callees_chain_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -4108,12 +4129,7 @@ fn lsp_engine_strict_python_both_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_python_lsp_server() {
-        eprintln!(
-            "skip: python LSP server not found (pyright-langserver/basedpyright-langserver/pylsp)"
-        );
-        return;
-    }
+    require_python_lsp_server_for_lane("python/both");
 
     let (_tmp, repo) = setup_repo_python_callees_chain_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
