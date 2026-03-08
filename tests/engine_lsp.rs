@@ -167,6 +167,22 @@ fn should_run_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP").ok().as_deref() == Some("1")
 }
 
+fn require_strict_lsp_env_gate_for_lane(lane: &str) -> bool {
+    match std::env::var("DIMPACT_E2E_STRICT_LSP") {
+        Ok(v) if v == "1" => true,
+        Ok(v) => {
+            panic!(
+                "fail-fast preflight: lane={} cause=env invalid DIMPACT_E2E_STRICT_LSP={} (expected 1)",
+                lane, v
+            );
+        }
+        Err(_) => {
+            eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
+            false
+        }
+    }
+}
+
 fn should_run_go_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP_GO").ok().as_deref() == Some("1")
         || should_run_strict_lsp_e2e()
@@ -4195,8 +4211,7 @@ fn lsp_engine_strict_python_both_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_callers_chain_is_stable_when_available() {
-    if !should_run_strict_lsp_e2e() {
-        eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
+    if !require_strict_lsp_env_gate_for_lane("rust/callers") {
         return;
     }
     if !has_rust_analyzer() {
@@ -4251,8 +4266,7 @@ fn lsp_engine_strict_callers_chain_is_stable_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_rust_callees_chain_e2e_when_available() {
-    if !should_run_strict_lsp_e2e() {
-        eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
+    if !require_strict_lsp_env_gate_for_lane("rust/callees") {
         return;
     }
     if !has_rust_analyzer() {
@@ -4318,8 +4332,7 @@ fn lsp_engine_strict_rust_callees_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_rust_both_chain_e2e_when_available() {
-    if !should_run_strict_lsp_e2e() {
-        eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
+    if !require_strict_lsp_env_gate_for_lane("rust/both") {
         return;
     }
     if !has_rust_analyzer() {
@@ -4385,8 +4398,7 @@ fn lsp_engine_strict_rust_both_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_methods_chain_resolves_callers_when_available() {
-    if !should_run_strict_lsp_e2e() {
-        eprintln!("skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests");
+    if !require_strict_lsp_env_gate_for_lane("rust/method-callers") {
         return;
     }
     if !has_rust_analyzer() {
