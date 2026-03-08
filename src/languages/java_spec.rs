@@ -683,4 +683,53 @@ public class Main {
             Some("java::util::function::Function")
         );
     }
+
+    #[test]
+    fn java_hard_case_fixture_lambda_method_ref_overload_v73() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/java/analyzer_hard_cases_lambda_methodref_overload.java"
+        ));
+        let ana = SpecJavaAnalyzer::new();
+
+        let syms = ana.symbols_in_file("demo/OverloadLab.java", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "OverloadLab" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(syms.iter().any(|s| {
+            s.name == "run"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "java:demo/OverloadLab.java:method:run:23"
+        }));
+        let parse_count = syms
+            .iter()
+            .filter(|s| s.name == "parse" && matches!(s.kind, SymbolKind::Method))
+            .count();
+        assert!(parse_count >= 3, "expected overloaded parse methods");
+
+        let refs = ana.unresolved_refs("demo/OverloadLab.java", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "parse" && r.qualifier.as_deref() == Some("this") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "parseStatic"
+                && r.qualifier.as_deref() == Some("OverloadLab")
+                && !r.is_method
+        }));
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "parse" && r.qualifier.is_none() && !r.is_method)
+        );
+
+        let imports = ana.imports_in_file("demo/OverloadLab.java", src);
+        assert_eq!(
+            imports.get("Function").map(String::as_str),
+            Some("java::util::function::Function")
+        );
+        assert_eq!(
+            imports.get("BiFunction").map(String::as_str),
+            Some("java::util::function::BiFunction")
+        );
+    }
 }
