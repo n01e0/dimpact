@@ -8,7 +8,8 @@
 
 1. **strict E2E 言語カバレッジ完了**
    - Go / Java / TypeScript / JavaScript / Ruby / Python の strict real-LSP E2E が存在する
-   - callers / callees / both の 3 方向を skip-safe で検証できる
+   - callers / callees / both の 3 方向を実装済み
+   - Phase A 仕様に従い、env/server 起因は fail-fast 基本、残る skip-safe は理由付きで追跡されている
 
 2. **統合回帰の継続安定**
    - `cargo test -q --test engine_lsp` が継続的に green
@@ -23,6 +24,7 @@
 4. **運用ドキュメント整備**
    - README / README_ja に strict E2E 実行条件（言語サーバー + env gate）が反映済み
    - bench 実行手順と注意点（既存 TS/Rust 運用との整合）が反映済み
+   - nightly / CI summary で `skip-safe 残件` と `fail-fast 昇格済み` が明示される
 
 ## 卒業判定時の確認チェックリスト
 
@@ -31,44 +33,47 @@
 - [ ] bench artifact（txt/json）を確認できる
 - [ ] guardrail 失敗ログが不足メトリクスを明示している
 - [ ] README / README_ja の実行条件が最新実装と一致している
+- [ ] strict real-LSP migration summary に `skip-safe 残件` / `fail-fast 昇格済み` が出力される
 
 ## 判定メモ
 
 - 卒業判定は「単発成功」ではなく「継続安定」を重視する。
 - 閾値を急に厳格化せず、小刻み調整で CI 安定性を優先する。
 
-## skip-safe 移行ポリシー（PH65）
+## Phase A 仕様（A1-A10）
 
-strict real-LSP E2E は一律で fail-fast 化せず、言語/方向ごとに段階移行する。
+strict real-LSP E2E の env/server 起因 skip-safe を段階的に fail-fast へ移行する。
 
-### 1) skip-safe を **維持**する条件
+### 1) fail-fast 基本ルール
 
-以下のいずれかを満たすレーンは skip-safe 維持。
+- **server preflight**（`*-lsp` / `gopls` / `jdtls` など）:
+  - 未導入は skip せず fail-fast（cause=server）
+- **env gate**:
+  - 昇格済み callers レーンでは、明示された不正値/無効値を fail-fast（cause=env）
+  - Rust は `A6` 時点で「toward fail-fast」運用（不正値は fail-fast、未設定は opt-in skip 維持）
 
-- `server-missing`（言語サーバー未導入）
-- `env-gate-disabled`（実行ゲート未有効）
+### 2) 段階移行の順序
+
+- callers 優先で昇格（A7）
+- 次に callees / both へ拡張
+- 1PR で広げすぎず、レーン単位で CI 安定を確認
+
+### 3) skip-safe を残す条件（Phase A 時点）
+
+以下は実装課題として理由付きで残し、Phase B で解消する。
+
 - `*-not-reported`（LSP が callers/callees/both を返さない）
 - `*-unavailable`（changed_symbols / impact が環境依存で不安定）
-- nightly で `install/startup/timeout` が継続的に発生
+- 非昇格レーンの env 未設定（opt-in gate）
 
-### 2) skip-safe を **解除（fail-fast 化）**する条件
+### 4) 可視化と追跡
 
-以下を満たしたレーンから fail-fast へ移行。
+- 進捗サマリ生成: `scripts/summarize-strict-e2e-migration-progress.sh`
+- CI: `engine_lsp_regression` が Step Summary に進捗を追記
+- nightly: preflight 後に同サマリを Step Summary へ追記し、
+  `nightly-logs/strict-e2e-migration-summary.md` を保存
 
-1. PH65-1 集計で昇格候補に入っている
-2. 同一レーンで `changed/impacted` の安定性が確認済み
-3. CI 失敗時に原因が `server/capability/logic` で即判別できる
-4. 直近運用で重大な startup/timeout 不安定がない
-
-### 3) 移行順序（段階運用）
-
-- Phase-1: callers レーン優先（最低2言語）
-- Phase-2: callees
-- Phase-3: both
-
-保守性のため、1PRで広げすぎずレーン単位で移行する。
-
-### 4) fail-fast 化後のロールバック条件
+### 5) fail-fast 化後のロールバック条件
 
 fail-fast 化したレーンで以下が連続した場合は一時的に skip-safe へ戻す。
 
