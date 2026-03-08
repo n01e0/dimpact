@@ -92,3 +92,29 @@ impl LanguageAnalyzer for SpecRustAnalyzer {
         RustAnalyzer::new().imports_in_file(path, source)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::SymbolKind;
+
+    #[test]
+    fn rust_hard_case_fixture_trait_dispatch_method_value_generic_v73() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/rust/analyzer_hard_cases_trait_dispatch_method_value_generic.rs"
+        ));
+        let ana = SpecRustAnalyzer::new();
+
+        let syms = ana.symbols_in_file("demo/hard_v73.rs", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "Pipeline" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(syms.iter().any(|s| s.name == "run"));
+
+        let refs = ana.unresolved_refs("demo/hard_v73.rs", src);
+        assert!(refs.iter().any(|r| r.name == "handle" && r.is_method));
+        assert!(refs.iter().any(|r| r.name == "clone" && r.is_method));
+    }
+}
