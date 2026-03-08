@@ -449,3 +449,80 @@ fn normalize_ts_module_path(cur_file: &str, raw: &str) -> Option<String> {
     let exts = [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"];
     resolve_module_path(cur_file, raw, &exts)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ts_hard_case_fixture_dispatch_overload_optional_chain_v73() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/typescript/analyzer_hard_cases_dispatch_overload_optional_chain.ts"
+        ));
+        let ana = SpecTsAnalyzer::new_ts();
+
+        let syms = ana.symbols_in_file("demo/hard_v73.ts", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "Pipe" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "run" && matches!(s.kind, SymbolKind::Method))
+        );
+        let parse_count = syms
+            .iter()
+            .filter(|s| s.name == "parse" && matches!(s.kind, SymbolKind::Function))
+            .count();
+        assert!(
+            parse_count >= 1,
+            "expected parse function symbol from overload fixture"
+        );
+
+        let refs = ana.unresolved_refs("demo/hard_v73.ts", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "emit" && r.qualifier.as_deref() == Some("this.sink") && r.is_method
+        }));
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "parse" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "call" && r.qualifier.as_deref() == Some("fn") && r.is_method
+        }));
+    }
+
+    #[test]
+    fn tsx_hard_case_fixture_component_callback_optional_chain_v73() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/tsx/analyzer_hard_cases_component_callback_optional_chain.tsx"
+        ));
+        let ana = SpecTsAnalyzer::new_tsx();
+
+        let syms = ana.symbols_in_file("demo/hard_v73.tsx", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "Panel" && matches!(s.kind, SymbolKind::Function))
+        );
+
+        let refs = ana.unresolved_refs("demo/hard_v73.tsx", src);
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "useMemo" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| r.name == "render"));
+        assert!(refs.iter().any(|r| r.name == "onPick") || refs.iter().any(|r| r.name == "pick"));
+
+        let imports = ana.imports_in_file("demo/hard_v73.tsx", src);
+        assert_eq!(
+            imports.get("React").map(String::as_str),
+            Some("react::default")
+        );
+        assert!(
+            imports.get("useMemo").map(String::as_str) == Some("react::useMemo")
+                || imports.get("useMemo").is_none()
+        );
+    }
+}
