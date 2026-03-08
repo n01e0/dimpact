@@ -100,6 +100,15 @@ fn has_ruby_lsp_server() -> bool {
         .unwrap_or(false)
 }
 
+fn require_ruby_lsp_server_for_lane(lane: &str) {
+    if !has_ruby_lsp_server() {
+        panic!(
+            "fail-fast preflight: lane={} cause=server ruby-lsp not found",
+            lane
+        );
+    }
+}
+
 fn should_run_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP").ok().as_deref() == Some("1")
 }
@@ -3205,10 +3214,7 @@ fn ruby_real_lsp_e2e_fixture_is_opt_in_gated() {
         );
         return;
     }
-    if !has_ruby_lsp_server() {
-        eprintln!("skip: ruby-lsp not found");
-        return;
-    }
+    require_ruby_lsp_server_for_lane("ruby/preflight-fixture");
 
     let (_tmp, repo) = setup_repo_ruby_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3238,10 +3244,7 @@ fn lsp_engine_strict_ruby_callers_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_ruby_lsp_server() {
-        eprintln!("skip: ruby-lsp not found");
-        return;
-    }
+    require_ruby_lsp_server_for_lane("ruby/callers");
 
     let (_tmp, repo) = setup_repo_ruby_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3313,10 +3316,7 @@ fn lsp_engine_strict_ruby_callees_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_ruby_lsp_server() {
-        eprintln!("skip: ruby-lsp not found");
-        return;
-    }
+    require_ruby_lsp_server_for_lane("ruby/callees");
 
     let (_tmp, repo) = setup_repo_ruby_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3388,10 +3388,7 @@ fn lsp_engine_strict_ruby_both_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_ruby_lsp_server() {
-        eprintln!("skip: ruby-lsp not found");
-        return;
-    }
+    require_ruby_lsp_server_for_lane("ruby/both");
 
     let (_tmp, repo) = setup_repo_ruby_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
