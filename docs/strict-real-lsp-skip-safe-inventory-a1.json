@@ -1,0 +1,313 @@
+{
+  "source": "tests/engine_lsp.rs",
+  "totalSkipPrints": 112,
+  "lanes": {
+    "go/all": {
+      "server-missing": 1
+    },
+    "go/both": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "go/callees": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "go/callers": {
+      "server-missing": 1
+    },
+    "java/all": {
+      "server-missing": 1
+    },
+    "java/both": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "java/callees": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "java/callers": {
+      "server-missing": 1
+    },
+    "javascript/all": {
+      "server-missing": 1
+    },
+    "javascript/both": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "javascript/callees": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "javascript/callers": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callers-impact-unavailable": 2,
+      "callers-not-reported": 1
+    },
+    "python/both": {
+      "changed-symbols-unavailable": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "python/callees": {
+      "changed-symbols-unavailable": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "ruby/all": {
+      "server-missing": 1
+    },
+    "ruby/both": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "ruby/callees": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "ruby/callers": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callers-impact-unavailable": 2,
+      "callers-not-reported": 1
+    },
+    "rust/both": {
+      "env-gate-disabled": 1,
+      "other": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "rust/callees": {
+      "env-gate-disabled": 1,
+      "other": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "rust/callers": {
+      "env-gate-disabled": 2,
+      "other": 2,
+      "strict-lsp-unavailable": 2
+    },
+    "tsx/all": {
+      "server-missing": 1
+    },
+    "tsx/both": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "tsx/callees": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "tsx/callers": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callers-impact-unavailable": 2,
+      "callers-not-reported": 1
+    },
+    "typescript/all": {
+      "server-missing": 1
+    },
+    "typescript/both": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "both-impact-unavailable": 2,
+      "both-not-reported": 1
+    },
+    "typescript/callees": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callees-impact-unavailable": 2,
+      "callees-not-reported": 1
+    },
+    "typescript/callers": {
+      "server-missing": 1,
+      "changed-symbols-unavailable": 1,
+      "callers-impact-unavailable": 2,
+      "callers-not-reported": 1
+    }
+  },
+  "samples": {
+    "go/all": {
+      "server-missing": "skip: gopls not found"
+    },
+    "go/both": {
+      "server-missing": "skip: gopls not found",
+      "changed-symbols-unavailable": "skip: strict Go changed_symbols unavailable in this env: {e}",
+      "both-impact-unavailable": "skip: strict Go both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: Go LSP did not report both-direction impacts in this environment"
+    },
+    "go/callees": {
+      "server-missing": "skip: gopls not found",
+      "changed-symbols-unavailable": "skip: strict Go changed_symbols unavailable in this env: {e}",
+      "callees-impact-unavailable": "skip: strict Go callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: Go LSP did not report callees in this environment"
+    },
+    "go/callers": {
+      "server-missing": "skip: gopls not found"
+    },
+    "java/all": {
+      "server-missing": "skip: jdtls not found"
+    },
+    "java/both": {
+      "server-missing": "skip: jdtls not found",
+      "changed-symbols-unavailable": "skip: strict Java changed_symbols unavailable in this env: {e}",
+      "both-impact-unavailable": "skip: strict Java both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: Java LSP did not report both-direction impacts in this environment"
+    },
+    "java/callees": {
+      "server-missing": "skip: jdtls not found",
+      "changed-symbols-unavailable": "skip: strict Java changed_symbols unavailable in this env: {e}",
+      "callees-impact-unavailable": "skip: strict Java callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: Java LSP did not report callees in this environment"
+    },
+    "java/callers": {
+      "server-missing": "skip: jdtls not found"
+    },
+    "javascript/all": {
+      "server-missing": "skip: typescript-language-server not found"
+    },
+    "javascript/both": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict JavaScript changed_symbols unavailable in this env: {e}",
+      "both-impact-unavailable": "skip: strict JavaScript both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: JavaScript LSP did not report both-direction impacts in this environment"
+    },
+    "javascript/callees": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict JavaScript changed_symbols unavailable in this env: {e}",
+      "callees-impact-unavailable": "skip: strict JavaScript callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: JavaScript LSP did not report callees in this environment"
+    },
+    "javascript/callers": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict JavaScript changed_symbols unavailable in this env: {e}",
+      "callers-impact-unavailable": "skip: strict JavaScript callers impact unavailable in this env: {e}",
+      "callers-not-reported": "skip: JavaScript LSP did not report callers in this environment"
+    },
+    "python/both": {
+      "changed-symbols-unavailable": "skip: strict python changed_symbols unavailable in this env: {e}",
+      "both-impact-unavailable": "skip: strict python both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: python LSP did not report both-direction impacts in this environment"
+    },
+    "python/callees": {
+      "changed-symbols-unavailable": "skip: strict python changed_symbols unavailable in this env: {e}",
+      "callees-impact-unavailable": "skip: strict python callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: python LSP did not report callees in this environment"
+    },
+    "ruby/all": {
+      "server-missing": "skip: ruby-lsp not found"
+    },
+    "ruby/both": {
+      "server-missing": "skip: ruby-lsp not found",
+      "changed-symbols-unavailable": "skip: strict Ruby changed_symbols unavailable in this env: {e}",
+      "both-impact-unavailable": "skip: strict Ruby both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: Ruby LSP did not report both-direction impacts in this environment"
+    },
+    "ruby/callees": {
+      "server-missing": "skip: ruby-lsp not found",
+      "changed-symbols-unavailable": "skip: strict Ruby changed_symbols unavailable in this env: {e}",
+      "callees-impact-unavailable": "skip: strict Ruby callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: Ruby LSP did not report callees in this environment"
+    },
+    "ruby/callers": {
+      "server-missing": "skip: ruby-lsp not found",
+      "changed-symbols-unavailable": "skip: strict Ruby changed_symbols unavailable in this env: {e}",
+      "callers-impact-unavailable": "skip: strict Ruby callers impact unavailable in this env: {e}",
+      "callers-not-reported": "skip: Ruby LSP did not report callers in this environment"
+    },
+    "rust/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests",
+      "other": "skip: rust-analyzer not available",
+      "both-impact-unavailable": "skip: strict rust both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: rust LSP did not report both-direction impacts in this environment"
+    },
+    "rust/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests",
+      "other": "skip: rust-analyzer not available",
+      "callees-impact-unavailable": "skip: strict rust callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: rust LSP did not report callees in this environment"
+    },
+    "rust/callers": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP=1 to run strict LSP e2e tests",
+      "other": "skip: rust-analyzer not available",
+      "strict-lsp-unavailable": "skip: strict LSP unavailable in this environment: {e}"
+    },
+    "tsx/all": {
+      "server-missing": "skip: typescript-language-server not found"
+    },
+    "tsx/both": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict TSX changed_symbols unavailable in this env: {e}",
+      "both-impact-unavailable": "skip: strict TSX both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: TSX LSP did not report both-direction impacts in this environment"
+    },
+    "tsx/callees": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict TSX changed_symbols unavailable in this env: {e}",
+      "callees-impact-unavailable": "skip: strict TSX callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: TSX LSP did not report callees in this environment"
+    },
+    "tsx/callers": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict TSX changed_symbols unavailable in this env: {e}",
+      "callers-impact-unavailable": "skip: strict TSX callers impact unavailable in this env: {e}",
+      "callers-not-reported": "skip: TSX LSP did not report callers in this environment"
+    },
+    "typescript/all": {
+      "server-missing": "skip: typescript-language-server not found"
+    },
+    "typescript/both": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict TypeScript changed_symbols unavailable in this env: {e}",
+      "both-impact-unavailable": "skip: strict TypeScript both impact unavailable in this env: {e}",
+      "both-not-reported": "skip: TypeScript LSP did not report both-direction impacts in this environment"
+    },
+    "typescript/callees": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict TypeScript changed_symbols unavailable in this env: {e}",
+      "callees-impact-unavailable": "skip: strict TypeScript callees impact unavailable in this env: {e}",
+      "callees-not-reported": "skip: TypeScript LSP did not report callees in this environment"
+    },
+    "typescript/callers": {
+      "server-missing": "skip: typescript-language-server not found",
+      "changed-symbols-unavailable": "skip: strict TypeScript changed_symbols unavailable in this env: {e}",
+      "callers-impact-unavailable": "skip: strict TypeScript callers impact unavailable in this env: {e}",
+      "callers-not-reported": "skip: TypeScript LSP did not report callers in this environment"
+    }
+  },
+  "byLanguageTotal": {
+    "go": 12,
+    "java": 12,
+    "javascript": 16,
+    "python": 8,
+    "ruby": 16,
+    "rust": 16,
+    "tsx": 16,
+    "typescript": 16
+  },
+  "note": "A1 inventory: current skip-safe lanes (language x direction x reason)"
+}
