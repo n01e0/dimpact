@@ -458,4 +458,37 @@ import (
                 && r.line == 16
         }));
     }
+
+    #[test]
+    fn go_hard_case_fixture_interface_dispatch_method_value_generic_receiver_v73() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/go/analyzer_hard_cases_interface_dispatch_method_value_generic_receiver.go"
+        ));
+        let ana = SpecGoAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/hard_v73_go_dispatch.go", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "Run"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "go:pkg/hard_v73_go_dispatch.go:method:Run:13"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/hard_v73_go_dispatch.go", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "methodValue" && r.qualifier.is_none() && !r.is_method && r.line == 16
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "Handle"
+                && r.qualifier.as_deref() == Some("b.inner")
+                && r.is_method
+                && r.line == 19
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "Background"
+                && r.qualifier.as_deref() == Some("context")
+                && !r.is_method
+                && r.line == 16
+        }));
+    }
 }
