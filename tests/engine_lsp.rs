@@ -183,6 +183,34 @@ fn require_strict_lsp_env_gate_for_lane(lane: &str) -> bool {
     }
 }
 
+fn require_env_gate_callers_lane(lane: &str, lane_var: &str, hint: &str) -> bool {
+    match std::env::var("DIMPACT_E2E_STRICT_LSP") {
+        Ok(v) if v == "1" => return true,
+        Ok(v) if v == "0" => {}
+        Ok(v) => {
+            panic!(
+                "fail-fast preflight: lane={} cause=env invalid DIMPACT_E2E_STRICT_LSP={} (expected 1 or 0)",
+                lane, v
+            );
+        }
+        Err(_) => {}
+    }
+
+    match std::env::var(lane_var) {
+        Ok(v) if v == "1" => true,
+        Ok(v) => {
+            panic!(
+                "fail-fast preflight: lane={} cause=env invalid {}={} (expected 1; to skip leave unset)",
+                lane, lane_var, v
+            );
+        }
+        Err(_) => {
+            eprintln!("skip: set {} to run strict LSP e2e tests", hint);
+            false
+        }
+    }
+}
+
 fn should_run_go_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP_GO").ok().as_deref() == Some("1")
         || should_run_strict_lsp_e2e()
@@ -2600,10 +2628,11 @@ fn tsx_real_lsp_e2e_fixture_is_opt_in_gated() {
 #[test]
 #[serial]
 fn lsp_engine_strict_tsx_callers_chain_e2e_when_available() {
-    if !should_run_tsx_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "tsx/callers",
+        "DIMPACT_E2E_STRICT_LSP_TSX",
+        "DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_typescript_lsp_server_for_lane("tsx/callers");
@@ -2816,10 +2845,11 @@ fn lsp_engine_strict_tsx_both_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_typescript_callers_chain_e2e_when_available() {
-    if !should_run_typescript_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "typescript/callers",
+        "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT",
+        "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_typescript_lsp_server_for_lane("typescript/callers");
@@ -3062,10 +3092,11 @@ fn javascript_real_lsp_e2e_fixture_is_opt_in_gated() {
 #[test]
 #[serial]
 fn lsp_engine_strict_javascript_callers_chain_e2e_when_available() {
-    if !should_run_javascript_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "javascript/callers",
+        "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT",
+        "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_typescript_lsp_server_for_lane("javascript/callers");
@@ -3308,10 +3339,11 @@ fn ruby_real_lsp_e2e_fixture_is_opt_in_gated() {
 #[test]
 #[serial]
 fn lsp_engine_strict_ruby_callers_chain_e2e_when_available() {
-    if !should_run_ruby_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "ruby/callers",
+        "DIMPACT_E2E_STRICT_LSP_RUBY",
+        "DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_ruby_lsp_server_for_lane("ruby/callers");
@@ -3587,10 +3619,11 @@ fn java_real_lsp_e2e_fixture_is_opt_in_gated() {
 #[test]
 #[serial]
 fn lsp_engine_strict_java_callers_chain_e2e_when_available() {
-    if !should_run_java_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "java/callers",
+        "DIMPACT_E2E_STRICT_LSP_JAVA",
+        "DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_jdtls_for_lane("java/callers");
@@ -3786,10 +3819,11 @@ fn lsp_engine_strict_java_both_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_go_callers_chain_e2e_when_available() {
-    if !should_run_go_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "go/callers",
+        "DIMPACT_E2E_STRICT_LSP_GO",
+        "DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_gopls_for_lane("go/callers");
@@ -4012,10 +4046,11 @@ fn python_real_lsp_e2e_fixture_is_opt_in_gated() {
 #[test]
 #[serial]
 fn lsp_engine_strict_python_callers_chain_e2e_when_available() {
-    if !should_run_python_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "python/callers",
+        "DIMPACT_E2E_STRICT_LSP_PYTHON",
+        "DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_python_lsp_server_for_lane("python/callers");
