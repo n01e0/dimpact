@@ -126,18 +126,23 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
             entries.sort_by_key(|(ln, _)| *ln);
         }
 
-        let re_send_first_arg =
-            regex::Regex::new(r#"(?:^|[^\w])(?:send|public_send)\s*\(\s*([^,\)\n]+)"#).unwrap();
+        let re_send_first_arg = regex::Regex::new(
+            r#"(?:^|[^\w])(?:send|public_send)\s*(?:\(\s*)?([^,\)\n]+)"#,
+        )
+        .unwrap();
+        let re_alias_method_args = regex::Regex::new(
+            r#"(?:^|[^\w])alias_method\s*(?:\(\s*)?([^,\)\n]+)\s*,\s*([^,\)\n]+)"#,
+        )
+        .unwrap();
+        let re_define_method_first =
+            regex::Regex::new(r#"(?:^|[^\w])define_method\s*(?:\(\s*)?([^,\)\n]+)"#)
+                .unwrap();
         let re_symbol_lit = regex::Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)$"#).unwrap();
         let re_string_lit = regex::Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']$"#).unwrap();
         let re_ident = regex::Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).unwrap();
 
-        let resolve_send_target = |call_text: &str, ln: u32| -> Option<String> {
-            let arg_raw = re_send_first_arg
-                .captures(call_text)
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str().trim())?;
-
+        let resolve_dynamic_name = |arg_raw: &str, ln: u32| -> Option<String> {
+            let arg_raw = arg_raw.trim();
             if let Some(cap) = re_symbol_lit.captures(arg_raw) {
                 return cap.get(1).map(|m| m.as_str().to_string());
             }
@@ -169,12 +174,55 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 } else {
                     byte_to_line(&offs, n.start)
                 };
-                if (name == "send" || name == "public_send")
-                    && let Some(callnode) = caps.iter().find(|c| c.name == "call")
-                {
+                if let Some(callnode) = caps.iter().find(|c| c.name == "call") {
                     let text = &source[callnode.start..callnode.end];
-                    if let Some(resolved) = resolve_send_target(text, ln) {
+
+                    if (name == "send" || name == "public_send")
+                        && let Some(arg_raw) = re_send_first_arg
+                            .captures(text)
+                            .and_then(|c| c.get(1))
+                            .map(|m| m.as_str())
+                        && let Some(resolved) = resolve_dynamic_name(arg_raw, ln)
+                    {
                         name = resolved;
+                    }
+
+                    // Conservative edge for alias_method: add refs for both alias and original targets.
+                    if name == "alias_method"
+                        && let Some(cap) = re_alias_method_args.captures(text)
+                    {
+                        for idx in [1usize, 2usize] {
+                            if let Some(arg_raw) = cap.get(idx).map(|m| m.as_str())
+                                && let Some(resolved) = resolve_dynamic_name(arg_raw, ln)
+                            {
+                                out.push(UnresolvedRef {
+                                    name: resolved,
+                                    kind: RefKind::Call,
+                                    file: path.to_string(),
+                                    line: ln,
+                                    qualifier: None,
+                                    is_method: true,
+                                });
+                            }
+                        }
+                    }
+
+                    // Conservative edge for define_method: add ref for defined target name.
+                    if name == "define_method"
+                        && let Some(arg_raw) = re_define_method_first
+                            .captures(text)
+                            .and_then(|c| c.get(1))
+                            .map(|m| m.as_str())
+                        && let Some(resolved) = resolve_dynamic_name(arg_raw, ln)
+                    {
+                        out.push(UnresolvedRef {
+                            name: resolved,
+                            kind: RefKind::Call,
+                            file: path.to_string(),
+                            line: ln,
+                            qualifier: None,
+                            is_method: true,
+                        });
                     }
                 }
                 out.push(UnresolvedRef {
@@ -378,17 +426,19 @@ end
         assert!(syms.iter().any(|s| {
             s.name == "execute"
                 && matches!(s.kind, SymbolKind::Method)
-                && s.id.0 == "ruby:pkg/ruby_dynamic_alias_define.rb:method:execute:17"
+                && s.id.0 == "ruby:pkg/ruby_dynamic_alias_define.rb:method:execute:21"
         }));
 
         let refs = ana.unresolved_refs("pkg/ruby_dynamic_alias_define.rb", src);
         let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
         assert!(names.contains(&"alias_method"));
         assert!(names.contains(&"define_method"));
+        assert!(names.contains(&"original"));
         assert!(names.contains(&"aliased_sym"));
         assert!(names.contains(&"aliased_str"));
         assert!(names.contains(&"defined_sym"));
         assert!(names.contains(&"defined_str"));
+        assert!(names.contains(&"defined_only"));
     }
 
     #[test]

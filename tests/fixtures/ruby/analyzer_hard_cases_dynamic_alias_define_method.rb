@@ -14,6 +14,10 @@ class AliasDefineDynamic
     aliased_str
   end
 
+  define_method(:defined_only) do
+    :noop
+  end
+
   def execute
     defined_sym
     defined_str
