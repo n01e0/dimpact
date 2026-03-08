@@ -303,6 +303,90 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             });
         }
 
+        // Conservative descriptor edge:
+        // If a class attribute is initialized with a descriptor class instance and that class
+        // defines `__get__`, add a fallback edge from `self.<attr>(...)` callsites to
+        // `<DescriptorClass>.__get__`.
+        let lines: Vec<&str> = source.lines().collect();
+        let re_class = Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+            .expect("valid class regex");
+        let re_def_get = Regex::new(r"^\s*def\s+__get__\b").expect("valid __get__ regex");
+        let re_class_attr_ctor = Regex::new(
+            r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        )
+        .expect("valid class attribute ctor regex");
+
+        let mut descriptor_classes: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for i in 0..lines.len() {
+            let line = lines[i];
+            let Some(cap) = re_class.captures(line) else {
+                continue;
+            };
+            let Some(class_name) = cap.get(1).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
+            let end = find_python_block_end(&lines, i);
+            if lines[i + 1..end].iter().any(|l| re_def_get.is_match(l)) {
+                descriptor_classes.insert(class_name);
+            }
+        }
+
+        let mut descriptor_attrs: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for i in 0..lines.len() {
+            let line = lines[i];
+            let class_indent = indentation_width(line);
+            let Some(_class_cap) = re_class.captures(line) else {
+                continue;
+            };
+            let end = find_python_block_end(&lines, i);
+            for l in &lines[i + 1..end] {
+                if indentation_width(l) != class_indent + 4 {
+                    continue;
+                }
+                let Some(cap) = re_class_attr_ctor.captures(l) else {
+                    continue;
+                };
+                let Some(attr) = cap.get(1).map(|m| m.as_str().to_string()) else {
+                    continue;
+                };
+                let Some(ctor) = cap.get(2).map(|m| m.as_str().to_string()) else {
+                    continue;
+                };
+                if descriptor_classes.contains(&ctor) {
+                    descriptor_attrs.insert(attr, ctor);
+                }
+            }
+        }
+
+        if !descriptor_attrs.is_empty() {
+            for r in out.clone() {
+                if !r.is_method || r.qualifier.as_deref() != Some("self") {
+                    continue;
+                }
+                let Some(desc_class) = descriptor_attrs.get(&r.name) else {
+                    continue;
+                };
+                let key = (
+                    r.line,
+                    "__get__".to_string(),
+                    Some(desc_class.clone()),
+                    true,
+                );
+                if !seen.insert(key) {
+                    continue;
+                }
+                out.push(UnresolvedRef {
+                    name: "__get__".to_string(),
+                    kind: RefKind::Call,
+                    file: path.to_string(),
+                    line: r.line,
+                    qualifier: Some(desc_class.clone()),
+                    is_method: true,
+                });
+            }
+        }
+
         out
     }
 
@@ -871,6 +955,9 @@ from pkg.star import *
         );
         assert!(refs.iter().any(|r| {
             r.name == "trim" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "__get__" && r.qualifier.as_deref() == Some("TrimDescriptor") && r.is_method
         }));
         assert!(refs.iter().any(|r| {
             r.name == "emit" && r.qualifier.as_deref() == Some("self.sink.client") && r.is_method
