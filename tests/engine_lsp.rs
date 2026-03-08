@@ -83,6 +83,15 @@ fn has_typescript_lsp_server() -> bool {
         .unwrap_or(false)
 }
 
+fn require_typescript_lsp_server_for_lane(lane: &str) {
+    if !has_typescript_lsp_server() {
+        panic!(
+            "fail-fast preflight: lane={} cause=server typescript-language-server not found",
+            lane
+        );
+    }
+}
+
 fn has_ruby_lsp_server() -> bool {
     Command::new("ruby-lsp")
         .arg("--help")
@@ -2458,10 +2467,7 @@ fn typescript_real_lsp_e2e_fixture_is_opt_in_gated() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("typescript/preflight-fixture");
 
     let (_tmp, repo) = setup_repo_typescript_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2491,10 +2497,7 @@ fn tsx_real_lsp_e2e_fixture_is_opt_in_gated() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("tsx/preflight-fixture");
 
     let (_tmp, repo) = setup_repo_tsx_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2524,10 +2527,7 @@ fn lsp_engine_strict_tsx_callers_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("tsx/callers");
 
     let (_tmp, repo) = setup_repo_tsx_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2599,10 +2599,7 @@ fn lsp_engine_strict_tsx_callees_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("tsx/callees");
 
     let (_tmp, repo) = setup_repo_tsx_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2674,10 +2671,7 @@ fn lsp_engine_strict_tsx_both_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("tsx/both");
 
     let (_tmp, repo) = setup_repo_tsx_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2749,10 +2743,7 @@ fn lsp_engine_strict_typescript_callers_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("typescript/callers");
 
     let (_tmp, repo) = setup_repo_typescript_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2824,10 +2815,7 @@ fn lsp_engine_strict_typescript_callees_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("typescript/callees");
 
     let (_tmp, repo) = setup_repo_typescript_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2899,10 +2887,7 @@ fn lsp_engine_strict_typescript_both_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("typescript/both");
 
     let (_tmp, repo) = setup_repo_typescript_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -2974,10 +2959,7 @@ fn javascript_real_lsp_e2e_fixture_is_opt_in_gated() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("javascript/preflight-fixture");
 
     let (_tmp, repo) = setup_repo_javascript_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3007,10 +2989,7 @@ fn lsp_engine_strict_javascript_callers_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("javascript/callers");
 
     let (_tmp, repo) = setup_repo_javascript_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3082,10 +3061,7 @@ fn lsp_engine_strict_javascript_callees_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("javascript/callees");
 
     let (_tmp, repo) = setup_repo_javascript_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3157,10 +3133,7 @@ fn lsp_engine_strict_javascript_both_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_typescript_lsp_server() {
-        eprintln!("skip: typescript-language-server not found");
-        return;
-    }
+    require_typescript_lsp_server_for_lane("javascript/both");
 
     let (_tmp, repo) = setup_repo_javascript_callees_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
