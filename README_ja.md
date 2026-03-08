@@ -110,9 +110,16 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 `env_logger` を使用。`RUST_LOG=info`（または `debug`/`trace`）で診断ログを有効化。
 
 ## LSP strict E2E テスト
-- strict LSP の E2E テストは、言語サーバー未導入環境での CI ぶれ回避のため opt-in です。
+- strict LSP の E2E テストは env gate による opt-in 運用（言語サーバー未導入環境でもデフォルトCIを安定させるため）。
+- 現在の挙動（Phase A/B 同期済み）:
+  - strict レーンを有効化し server preflight を通過した後の失敗は **fail-fast**（`server` / `capability` / `logic`）として扱う。
+  - `not-reported` / `unavailable` の skip-safe フォールバックは strict real-LSP レーンから除去済み。
+  - 残る skip-safe は運用上の最小残件のみ:
+    - `env-gate-disabled`（opt-in gate 未有効）
+    - `server-missing`（現状は主に `rust-analyzer` 未導入の Rust レーン）
 - Rust strict E2E（`callers` / `callees` / `both`、`rust-analyzer` が必要）:
-  - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+  - 実行: `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+  - gate の意味: 未設定 => skip、`1` => 実行、明示的な不正値 => preflight で fail-fast。
 - strict real-LSP の対象言語: **TypeScript / TSX / JavaScript / Ruby / Go / Java / Python**
 - Go strict E2E（`gopls` が必要）:
   - `DIMPACT_E2E_STRICT_LSP_GO=1 cargo test --test engine_lsp`
@@ -147,10 +154,14 @@ git diff --no-ext-diff | dimpact impact --with-pdg -f dot
 - real-LSP サーバー導入（CI）:
   - `nightly-strict-lsp.yml` で TS/TSX/JS/Python/Go/Java/Ruby の server を導入後に `engine_lsp` strict E2E を実行
   - `bench.yml` で strict-LSP ベンチの各言語ジョブごとに server を導入
+- skip-safe 残件レポート:
+  - 更新: `scripts/summarize-strict-e2e-skips.sh tests/engine_lsp.rs`
+  - 最新成果物: `docs/strict-real-lsp-skip-reasons-v0.4.1.md`
 
 ## 既知の制約
-- Python real-LSP の strict E2E は環境依存のため、best-effort 運用です。
-  - サーバー未導入、または callee/graph 情報が取得できない環境では、失敗ではなく skip になります。
+- strict real-LSP は引き続きホスト/実行環境の前提（server導入、プロジェクト状態、toolchain）に依存します。
+- opt-in env gate はデフォルトCIを軽量化するための運用であり、未有効は actionable failure ではなく運用残件として扱います。
+- レーン有効化＋preflight通過後は fail-fast で判定し、`not-reported` / `unavailable` の skip-safe には戻しません。
 - Python の call 抽出は現在、主要な呼び出し形（`foo()` / `obj.m()` / `self.m()`）を中心に対応しています。
   - 実行時解決が必要な高動的ケースは、現時点では保証対象外です。
 - strict モードでは、phase/方向ごとの capability が不足すると、言語/方向/capability ヒント付きの明示エラーを返します。

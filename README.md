@@ -94,9 +94,16 @@ Logging
 - Uses `env_logger`. Set `RUST_LOG=info` (or `debug|trace`) to see diagnostics.
 
 LSP strict E2E tests
-- Strict LSP E2E tests are opt-in (to avoid flaky CI environments without language servers).
+- Strict LSP E2E tests are opt-in via env gates (to keep default CI stable on hosts without language servers).
+- Current behavior (Phase A/B synced):
+  - once a strict lane is gated on and server preflight passes, failures are treated as **fail-fast** (`server` / `capability` / `logic`).
+  - `not-reported` / `unavailable` skip-safe fallbacks have been removed from strict real-LSP lanes.
+  - remaining skip-safe residual is operational-only:
+    - `env-gate-disabled` (opt-in gate not enabled)
+    - `server-missing` (currently rust lanes without `rust-analyzer`)
 - Rust strict E2E (`callers` / `callees` / `both`, requires `rust-analyzer`):
-  - `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+  - run: `DIMPACT_E2E_STRICT_LSP=1 cargo test --test engine_lsp`
+  - gate semantics: unset => skip, `1` => run, explicit invalid value => fail-fast preflight error.
 - strict real-LSP target languages: **TypeScript / TSX / JavaScript / Ruby / Go / Java / Python**
 - TypeScript strict E2E (requires `typescript-language-server`):
   - `DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 cargo test --test engine_lsp`
@@ -131,10 +138,14 @@ LSP strict E2E tests
 - Real-LSP server setup in CI:
   - `nightly-strict-lsp.yml` installs TS/TSX/JS/Python/Go/Java/Ruby servers before `engine_lsp` strict E2E
   - `bench.yml` installs per-language servers in each strict-LSP benchmark job
+- Skip-safe residual report:
+  - refresh: `scripts/summarize-strict-e2e-skips.sh tests/engine_lsp.rs`
+  - latest artifact: `docs/strict-real-lsp-skip-reasons-v0.4.1.md`
 
 Known limitations
-- Python real-LSP strict E2E is best-effort and environment-dependent.
-  - In environments where the server is unavailable or returns no usable graph/callee info, tests intentionally skip instead of failing.
+- strict real-LSP still depends on host/runtime prerequisites (installed servers, project/toolchain state).
+- opt-in env gates intentionally keep default CI lean; disabled gates are reported as operational residual, not actionable failures.
+- once a lane is gated on and preflight passes, strict paths fail-fast (no skip-safe fallback for `not-reported` / `unavailable`).
 - Python call extraction currently focuses on core call forms (`foo()`, `obj.m()`, `self.m()`).
   - Highly dynamic constructs (for example runtime-resolved calls) are outside current guarantees.
 - Strict mode requires capability support per phase/direction; otherwise it returns explicit strict errors with language/direction/capability hints.
