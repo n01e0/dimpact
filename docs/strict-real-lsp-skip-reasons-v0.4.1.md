@@ -1,119 +1,71 @@
-# strict real-LSP E2E skip reason matrix (PH65-1)
+# strict real-LSP E2E skip-safe residual report (F2)
 
 source: `tests/engine_lsp.rs`
-total skip prints: **95**
+total skip prints: **25**
 
 ## 1) language/direction skip aggregation
 
 | lane | reason | count |
 |---|---|---:|
-| go/all | server-missing | 1 |
-| go/both | both-impact-unavailable | 2 |
-|  | both-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| go/callees | callees-impact-unavailable | 2 |
-|  | callees-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| go/callers | callers-impact-unavailable | 2 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| java/all | server-missing | 1 |
-| java/both | both-impact-unavailable | 2 |
-|  | both-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| java/callees | callees-impact-unavailable | 2 |
-|  | callees-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| java/callers | callers-impact-unavailable | 2 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| javascript/all | server-missing | 1 |
-| javascript/both | both-impact-unavailable | 2 |
-|  | both-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| javascript/callees | callees-impact-unavailable | 2 |
-|  | callees-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| javascript/callers | callers-impact-unavailable | 2 |
-|  | callers-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| python/both | both-impact-unavailable | 2 |
-|  | both-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-| python/callees | callees-impact-unavailable | 2 |
-|  | callees-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-| python/callers | callers-impact-unavailable | 2 |
-|  | changed-symbols-unavailable | 1 |
-| ruby/all | server-missing | 1 |
-| ruby/both | both-impact-unavailable | 2 |
-|  | both-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| ruby/callees | callees-impact-unavailable | 2 |
-|  | callees-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| ruby/callers | callers-impact-unavailable | 2 |
-|  | callers-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| rust/callers | env-gate-disabled | 2 |
-|  | other | 2 |
-|  | strict-lsp-unavailable | 2 |
-| typescript/all | server-missing | 1 |
-| typescript/both | both-impact-unavailable | 2 |
-|  | both-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| typescript/callees | callees-impact-unavailable | 2 |
-|  | callees-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
-| typescript/callers | callers-impact-unavailable | 2 |
-|  | callers-not-reported | 1 |
-|  | changed-symbols-unavailable | 1 |
-|  | server-missing | 1 |
+| go/all | env-gate-disabled | 1 |
+| go/both | env-gate-disabled | 1 |
+| go/callees | env-gate-disabled | 1 |
+| java/all | env-gate-disabled | 1 |
+| java/both | env-gate-disabled | 1 |
+| java/callees | env-gate-disabled | 1 |
+| javascript/all | env-gate-disabled | 1 |
+| javascript/both | env-gate-disabled | 1 |
+| javascript/callees | env-gate-disabled | 1 |
+| python/all | env-gate-disabled | 1 |
+| python/both | env-gate-disabled | 1 |
+| python/callees | env-gate-disabled | 1 |
+| ruby/all | env-gate-disabled | 1 |
+| ruby/both | env-gate-disabled | 1 |
+| ruby/callees | env-gate-disabled | 1 |
+| rust/both | server-missing | 1 |
+| rust/callees | server-missing | 1 |
+| rust/callers | server-missing | 2 |
+| tsx/all | env-gate-disabled | 1 |
+| tsx/both | env-gate-disabled | 1 |
+| tsx/callees | env-gate-disabled | 1 |
+| typescript/all | env-gate-disabled | 1 |
+| typescript/both | env-gate-disabled | 1 |
+| typescript/callees | env-gate-disabled | 1 |
 
-## 2) promotion candidates (fail-fast migration candidates)
+## 2) actionable residual (non-operational)
 
-- `go/callers`: callers lane has no explicit report-gap skip marker in current tests
-- `java/callers`: callers lane has no explicit report-gap skip marker in current tests
-- `python/callers`: callers lane has no explicit report-gap skip marker in current tests
+- lanes: **0**
+- none (0)
 
-## 3) hold candidates
+## 3) minimal residual with reasons (operational prerequisites)
 
-- `go/all`: prioritize callers for phase-1 fail-fast migration
-- `go/both`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `go/callees`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `java/all`: prioritize callers for phase-1 fail-fast migration
-- `java/both`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `java/callees`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `javascript/all`: prioritize callers for phase-1 fail-fast migration
-- `javascript/both`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `javascript/callees`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `javascript/callers`: contains not-reported skip marker; contains unavailable skip marker
-- `python/both`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `python/callees`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `ruby/all`: prioritize callers for phase-1 fail-fast migration
-- `ruby/both`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `ruby/callees`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `ruby/callers`: contains not-reported skip marker; contains unavailable skip marker
-- `rust/callers`: contains unavailable skip marker
-- `typescript/all`: prioritize callers for phase-1 fail-fast migration
-- `typescript/both`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `typescript/callees`: prioritize callers for phase-1 fail-fast migration; contains not-reported skip marker; contains unavailable skip marker
-- `typescript/callers`: contains not-reported skip marker; contains unavailable skip marker
+- lanes: **24**
+- `go/all`: env gate opt-in
+- `go/both`: env gate opt-in
+- `go/callees`: env gate opt-in
+- `java/all`: env gate opt-in
+- `java/both`: env gate opt-in
+- `java/callees`: env gate opt-in
+- `javascript/all`: env gate opt-in
+- `javascript/both`: env gate opt-in
+- `javascript/callees`: env gate opt-in
+- `python/all`: env gate opt-in
+- `python/both`: env gate opt-in
+- `python/callees`: env gate opt-in
+- `ruby/all`: env gate opt-in
+- `ruby/both`: env gate opt-in
+- `ruby/callees`: env gate opt-in
+- `rust/both`: server missing on host
+- `rust/callees`: server missing on host
+- `rust/callers`: server missing on host
+- `tsx/all`: env gate opt-in
+- `tsx/both`: env gate opt-in
+- `tsx/callees`: env gate opt-in
+- `typescript/all`: env gate opt-in
+- `typescript/both`: env gate opt-in
+- `typescript/callees`: env gate opt-in
 
-## 4) screening policy used
+## 4) policy used
 
-- callers lane first (phase-1)
-- `env-gate-disabled` / `server-missing` are treated as operational prerequisites
-- lanes with `*-not-reported` or `*-unavailable` markers are kept in hold set
+- residual is acceptable when only `env-gate-disabled` / `server-missing` remain
+- any other reason is treated as actionable residual
