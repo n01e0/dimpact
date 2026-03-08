@@ -690,4 +690,47 @@ from pkg.star import *
         let im = ana.imports_in_file("pkg/svc.py", src);
         assert_eq!(im.get("w").map(String::as_str), Some("functools::wraps"));
     }
+
+    #[test]
+    fn python_hard_case_fixture_dynamic_getattr_setattr_getattr_dunder() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_dynamic_getattr_setattr_getattribute.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/dynamic.py", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "DynamicAccessor"
+                && matches!(s.kind, SymbolKind::Struct)
+                && s.id.0 == "python:pkg/dynamic.py:struct:DynamicAccessor:1"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "__getattr__"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "python:pkg/dynamic.py:method:__getattr__:5"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "execute"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "python:pkg/dynamic.py:method:execute:10"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/dynamic.py", src);
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "setattr" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "getattr" && r.qualifier.is_none() && !r.is_method)
+        );
+        assert!(refs.iter().any(|r| {
+            r.name == "strip" && r.qualifier.as_deref() == Some("payload") && r.is_method
+        }));
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "lower" && r.qualifier.as_deref() == Some("v") && r.is_method)
+        );
+    }
 }
