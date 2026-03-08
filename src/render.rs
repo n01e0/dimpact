@@ -409,6 +409,7 @@ mod html {
                 let certainty = match e.certainty {
                     crate::ir::reference::EdgeCertainty::Confirmed => "confirmed",
                     crate::ir::reference::EdgeCertainty::Inferred => "inferred",
+                    crate::ir::reference::EdgeCertainty::DynamicFallback => "dynamic_fallback",
                 };
                 edges.push(json!({
                     "data": {
@@ -503,6 +504,7 @@ mod html {
                 let certainty = match e.certainty {
                     crate::ir::reference::EdgeCertainty::Confirmed => "confirmed",
                     crate::ir::reference::EdgeCertainty::Inferred => "inferred",
+                    crate::ir::reference::EdgeCertainty::DynamicFallback => "dynamic_fallback",
                 };
                 buf.push_str(&format!(
                     "<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td></tr>",
