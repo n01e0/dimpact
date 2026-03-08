@@ -39,7 +39,7 @@ for i, line in enumerate(lines, start=1):
 
     if cur_fn:
         brace += line.count("{") - line.count("}")
-        if "eprintln!(" in line and "skip:" in line:
+        if "eprintln!(" in line:
             blob = line
             j = i
             while ");" not in blob and j < len(lines):
@@ -47,11 +47,12 @@ for i, line in enumerate(lines, start=1):
                 blob += lines[j - 1]
             parts = re.findall(r'"([^"]*)"', blob)
             msg = " ".join(parts)
-            entries.append({"fn": cur_fn, "line": i, "message": msg})
+            if "skip:" in msg:
+                entries.append({"fn": cur_fn, "line": i, "message": msg})
         if brace <= 0:
             cur_fn = None
 
-LANGS = ["typescript", "javascript", "ruby", "go", "java", "python", "rust"]
+LANGS = ["tsx", "typescript", "javascript", "ruby", "go", "java", "python", "rust"]
 DIRS = ["callers", "callees", "both"]
 
 
@@ -86,7 +87,15 @@ def reason_key(message: str) -> str:
     m = message.lower()
     if "set dimpact_e2e_strict_lsp" in m:
         return "env-gate-disabled"
-    if "not found" in m and ("server" in m or "-lsp" in m or "gopls" in m or "jdtls" in m):
+    if "rust-analyzer not available" in m:
+        return "server-missing"
+    if "not found" in m and (
+        "server" in m
+        or "-lsp" in m
+        or "gopls" in m
+        or "jdtls" in m
+        or "rust-analyzer" in m
+    ):
         return "server-missing"
     if "changed_symbols unavailable" in m:
         return "changed-symbols-unavailable"
