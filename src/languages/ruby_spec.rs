@@ -286,6 +286,59 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 }
             }
         }
+
+        // Conservative method_missing fallback edge:
+        // if dynamic call names match method_missing naming policy, add an extra edge to `method_missing`.
+        let re_method_missing_def = Regex::new(r"(?m)^\s*def\s+method_missing\b").unwrap();
+        if re_method_missing_def.is_match(source) {
+            let re_method_def =
+                Regex::new(r"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_?!]*)\b").unwrap();
+            let declared_methods: std::collections::HashSet<String> = re_method_def
+                .captures_iter(source)
+                .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+                .collect();
+
+            let re_dyn_prefix = Regex::new(
+                r#"name\.to_s\.start_with\?\(\s*(?:\"([^\"]+)\"|'([^']+)')\s*\)"#,
+            )
+            .unwrap();
+            let dyn_prefixes: Vec<String> = re_dyn_prefix
+                .captures_iter(source)
+                .filter_map(|c| c.get(1).or_else(|| c.get(2)).map(|m| m.as_str().to_string()))
+                .collect();
+
+            let mut seen_method_missing: std::collections::HashSet<u32> = out
+                .iter()
+                .filter(|r| r.name == "method_missing")
+                .map(|r| r.line)
+                .collect();
+
+            for r in out.clone() {
+                if !r.is_method || r.qualifier.is_some() {
+                    continue;
+                }
+                if r.name == "method_missing" || r.name == "respond_to_missing?" {
+                    continue;
+                }
+                if declared_methods.contains(&r.name) {
+                    continue;
+                }
+                if !dyn_prefixes.is_empty() && !dyn_prefixes.iter().any(|p| r.name.starts_with(p)) {
+                    continue;
+                }
+                if seen_method_missing.insert(r.line) {
+                    out.push(UnresolvedRef {
+                        name: "method_missing".to_string(),
+                        kind: RefKind::Call,
+                        file: path.to_string(),
+                        line: r.line,
+                        qualifier: None,
+                        is_method: true,
+                    });
+                }
+            }
+        }
+
         out
     }
 
@@ -473,5 +526,11 @@ end
         assert!(names.contains(&"dyn_alpha"));
         assert!(names.contains(&"from_included"));
         assert!(names.contains(&"around_before"));
+        assert!(refs.iter().any(|r| {
+            r.name == "method_missing"
+                && r.line == 27
+                && r.qualifier.is_none()
+                && r.is_method
+        }));
     }
 }
