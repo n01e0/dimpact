@@ -963,15 +963,28 @@ fn run_impact(
                 println!("{}", dfg_to_dot(&pdg));
                 return Ok(());
             }
+            let confirmed_pairs: std::collections::HashSet<(String, String)> = refs
+                .iter()
+                .map(|r| (r.from.0.clone(), r.to.0.clone()))
+                .collect();
             let pdg_refs: Vec<Reference> = pdg
                 .edges
                 .into_iter()
-                .map(|e| Reference {
-                    from: SymbolId(e.from),
-                    to: SymbolId(e.to),
-                    kind: RefKind::Call,
-                    file: String::new(),
-                    line: 0,
+                .map(|e| {
+                    let pair = (e.from.clone(), e.to.clone());
+                    let certainty = if confirmed_pairs.contains(&pair) {
+                        dimpact::ir::reference::EdgeCertainty::Confirmed
+                    } else {
+                        dimpact::ir::reference::EdgeCertainty::Inferred
+                    };
+                    Reference {
+                        from: SymbolId(e.from),
+                        to: SymbolId(e.to),
+                        kind: RefKind::Call,
+                        file: String::new(),
+                        line: 0,
+                        certainty,
+                    }
                 })
                 .collect();
             let out: ImpactOutput =
@@ -1041,15 +1054,28 @@ fn run_impact(
         if with_propagation {
             PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
         }
+        let confirmed_pairs: std::collections::HashSet<(String, String)> = refs
+            .iter()
+            .map(|r| (r.from.0.clone(), r.to.0.clone()))
+            .collect();
         let pdg_refs: Vec<Reference> = pdg
             .edges
             .into_iter()
-            .map(|e| Reference {
-                from: SymbolId(e.from),
-                to: SymbolId(e.to),
-                kind: RefKind::Call,
-                file: String::new(),
-                line: 0,
+            .map(|e| {
+                let pair = (e.from.clone(), e.to.clone());
+                let certainty = if confirmed_pairs.contains(&pair) {
+                    dimpact::ir::reference::EdgeCertainty::Confirmed
+                } else {
+                    dimpact::ir::reference::EdgeCertainty::Inferred
+                };
+                Reference {
+                    from: SymbolId(e.from),
+                    to: SymbolId(e.to),
+                    kind: RefKind::Call,
+                    file: String::new(),
+                    line: 0,
+                    certainty,
+                }
             })
             .collect();
         let out: ImpactOutput = compute_impact(&seeds, &index, &pdg_refs, &opts);

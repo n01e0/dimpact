@@ -1920,6 +1920,7 @@ fn scan_and_enqueue_callees(
                                                     kind: crate::ir::reference::RefKind::Call,
                                                     file: cur_sym.file.clone(),
                                                     line: li as u32 + 1,
+                                                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
                                                 });
                                                 added += 1;
                                             }
@@ -2052,6 +2053,7 @@ fn enqueue_callers_via_references(
                             kind: crate::ir::reference::RefKind::Call,
                             file: sym_from.file.clone(),
                             line: sym_from.range.start_line,
+                            certainty: crate::ir::reference::EdgeCertainty::Confirmed,
                         });
                     }
                 }
@@ -2188,6 +2190,7 @@ fn scan_callees_symbols(
                                     kind: crate::ir::reference::RefKind::Call,
                                     file: cur_sym.file.clone(),
                                     line: li as u32 + 1,
+                                    certainty: crate::ir::reference::EdgeCertainty::Confirmed,
                                 });
                             }
                         }
@@ -2252,6 +2255,7 @@ fn enqueue_edge(
             kind: crate::ir::reference::RefKind::Call,
             file: from.file.clone(),
             line: from.range.start_line,
+            certainty: crate::ir::reference::EdgeCertainty::Confirmed,
         });
     }
 }
@@ -2399,6 +2403,7 @@ fn lsp_impact_references(
                         kind: crate::ir::reference::RefKind::Call,
                         file: caller.file.clone(),
                         line: caller.range.start_line,
+                        certainty: crate::ir::reference::EdgeCertainty::Confirmed,
                     });
                 }
                 if !nodes.contains(&caller.id.0) {
@@ -2926,6 +2931,7 @@ fn lsp_build_project_graph(
                     kind: crate::ir::reference::RefKind::Call,
                     file: caller.file.clone(),
                     line: caller.range.start_line,
+                    certainty: crate::ir::reference::EdgeCertainty::Confirmed,
                 });
             }
         }

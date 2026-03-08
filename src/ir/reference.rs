@@ -18,12 +18,27 @@ pub struct UnresolvedRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeCertainty {
+    Confirmed,
+    Inferred,
+}
+
+impl Default for EdgeCertainty {
+    fn default() -> Self {
+        Self::Confirmed
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Reference {
     pub from: SymbolId,
     pub to: SymbolId,
     pub kind: RefKind,
     pub file: String,
     pub line: u32,
+    #[serde(default)]
+    pub certainty: EdgeCertainty,
 }
 
 #[derive(Debug, Default, Clone)]
