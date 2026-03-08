@@ -272,4 +272,32 @@ end
         // at least 3 occurrences (a&.m, self.m, and bare m)
         assert!(names.iter().filter(|&&n| n == "m").count() >= 3);
     }
+
+    #[test]
+    fn ruby_dynamic_fixture_send_public_send_symbol_string() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_send_public_send.rb"
+        ));
+        let ana = SpecRubyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/ruby_dynamic.rb", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "target_sym"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "ruby:pkg/ruby_dynamic.rb:method:target_sym:2"
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "target_str"
+                && matches!(s.kind, SymbolKind::Method)
+                && s.id.0 == "ruby:pkg/ruby_dynamic.rb:method:target_str:6"
+        }));
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic.rb", src);
+        // symbol-literal send/public_send is already normalized to method name.
+        assert!(refs.iter().any(|r| r.name == "target_sym"));
+        // string-literal send/public_send currently remains as send/public_send call names.
+        assert!(refs.iter().any(|r| r.name == "send"));
+        assert!(refs.iter().any(|r| r.name == "public_send"));
+    }
 }
