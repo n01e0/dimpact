@@ -163,6 +163,93 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             });
         }
 
+        // Conservative dynamic edge from getattr/setattr string targets.
+        // Example:
+        //   getattr(obj, "build")(...) -> build
+        //   setattr(self, "handler", ...) -> handler
+        let re_assign_str = Regex::new(
+            r#"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*$"#,
+        )
+        .expect("valid python assignment string regex");
+        let mut assigned_string: std::collections::HashMap<String, Vec<(u32, String)>> =
+            std::collections::HashMap::new();
+        for cap in re_assign_str.captures_iter(source) {
+            let Some(full) = cap.get(0) else {
+                continue;
+            };
+            let Some(var) = cap.get(1) else {
+                continue;
+            };
+            let Some(val) = cap.get(2) else {
+                continue;
+            };
+            let ln = byte_to_line(&offs, full.start());
+            assigned_string
+                .entry(var.as_str().to_string())
+                .or_default()
+                .push((ln, val.as_str().to_string()));
+        }
+        for entries in assigned_string.values_mut() {
+            entries.sort_by_key(|(ln, _)| *ln);
+        }
+
+        let re_dyn_attr = Regex::new(
+            r#"(?m)(getattr|setattr)\s*\(\s*([^,\n\)]+)\s*,\s*([\"'][A-Za-z_][A-Za-z0-9_]*[\"']|[A-Za-z_][A-Za-z0-9_]*)"#,
+        )
+        .expect("valid python getattr/setattr regex");
+        let re_str_lit =
+            Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']$"#).expect("valid py str lit regex");
+        let re_ident =
+            Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).expect("valid py ident regex");
+
+        for cap in re_dyn_attr.captures_iter(source) {
+            let Some(full) = cap.get(0) else {
+                continue;
+            };
+            let Some(obj) = cap.get(2) else {
+                continue;
+            };
+            let Some(arg) = cap.get(3) else {
+                continue;
+            };
+
+            let ln = byte_to_line(&offs, full.start());
+            let objq = obj.as_str().trim().replace([' ', '\t', '\n'], "");
+            let qual = if objq.is_empty() { None } else { Some(objq) };
+
+            let arg_raw = arg.as_str().trim();
+            let resolved = if let Some(c) = re_str_lit.captures(arg_raw) {
+                c.get(1).map(|m| m.as_str().to_string())
+            } else if let Some(c) = re_ident.captures(arg_raw) {
+                let var = c.get(1).map(|m| m.as_str()).unwrap_or("");
+                assigned_string.get(var).and_then(|vals| {
+                    vals.iter()
+                        .rev()
+                        .find(|(line, _)| *line <= ln)
+                        .map(|(_, v)| v.clone())
+                })
+            } else {
+                None
+            };
+
+            let Some(name) = resolved else {
+                continue;
+            };
+            let is_method = true;
+            let key = (ln, name.clone(), qual.clone(), is_method);
+            if !seen.insert(key) {
+                continue;
+            }
+            out.push(UnresolvedRef {
+                name,
+                kind: RefKind::Call,
+                file: path.to_string(),
+                line: ln,
+                qualifier: qual,
+                is_method,
+            });
+        }
+
         // Decorator references can appear without explicit call syntax (e.g. @traced).
         // Treat decorator refs as non-method call-like unresolved refs for dependency edges.
         let re_decorator = Regex::new(
@@ -725,6 +812,16 @@ from pkg.star import *
             refs.iter()
                 .any(|r| r.name == "getattr" && r.qualifier.is_none() && !r.is_method)
         );
+        // getattr/setattr dynamic target edge (conservative)
+        assert!(refs.iter().any(|r| {
+            r.name == "bound_handler" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "dyn_method" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "dyn_value" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
         assert!(refs.iter().any(|r| {
             r.name == "strip" && r.qualifier.as_deref() == Some("payload") && r.is_method
         }));
@@ -818,6 +915,12 @@ from pkg.star import *
             refs.iter()
                 .any(|r| r.name == "getattr" && r.qualifier.is_none() && !r.is_method)
         );
+        assert!(refs.iter().any(|r| {
+            r.name == "build" && r.qualifier.as_deref() == Some("mod1") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "make" && r.qualifier.as_deref() == Some("mod2") && r.is_method
+        }));
         assert!(refs.iter().any(|r| {
             r.name == "load" && r.qualifier.as_deref() == Some("loader_mod") && !r.is_method
         }));
