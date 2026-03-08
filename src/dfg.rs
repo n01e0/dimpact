@@ -523,6 +523,24 @@ impl DfgBuilder for RubyDfgBuilder {
 // Insert at PdgBuilder
 use crate::ir::reference::Reference;
 
+/// Per-input impact slice inside a function summary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FunctionInputImpact {
+    pub input_node_id: String,
+    pub impacted_node_ids: Vec<String>,
+}
+
+/// Minimal function summary (input -> impact) derived from PDG data edges.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FunctionSummary {
+    pub function_id: String,
+    pub file: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub inputs: Vec<String>,
+    pub flows: Vec<FunctionInputImpact>,
+}
+
 /// Builder for Program Dependence Graphs by merging DFG and call graph.
 pub struct PdgBuilder;
 
@@ -607,6 +625,116 @@ impl PdgBuilder {
                 }
             }
         }
+    }
+
+    /// Build minimal function summaries (input -> impacted nodes) from PDG data edges.
+    ///
+    /// Input heuristic:
+    /// - in-range def nodes with no incoming in-range data edges.
+    ///
+    /// Impact heuristic:
+    /// - nodes reachable from each input via in-range data edges (excluding the input itself).
+    pub fn build_function_summaries(
+        pdg: &DataFlowGraph,
+        index: &crate::ir::reference::SymbolIndex,
+    ) -> Vec<FunctionSummary> {
+        use crate::ir::SymbolKind;
+        use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+
+        let mut nodes_by_id: HashMap<&str, &DfgNode> = HashMap::new();
+        for n in &pdg.nodes {
+            nodes_by_id.insert(n.id.as_str(), n);
+        }
+
+        let mut out_adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        let mut in_adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        for e in &pdg.edges {
+            if e.kind != DependencyKind::Data {
+                continue;
+            }
+            if nodes_by_id.contains_key(e.from.as_str()) && nodes_by_id.contains_key(e.to.as_str()) {
+                out_adj.entry(e.from.as_str()).or_default().push(e.to.as_str());
+                in_adj.entry(e.to.as_str()).or_default().push(e.from.as_str());
+            }
+        }
+
+        let mut summaries = Vec::new();
+        for s in &index.symbols {
+            if !matches!(s.kind, SymbolKind::Function | SymbolKind::Method) {
+                continue;
+            }
+
+            let in_range_ids: BTreeSet<String> = pdg
+                .nodes
+                .iter()
+                .filter(|n| {
+                    n.file == s.file
+                        && n.line >= s.range.start_line
+                        && n.line <= s.range.end_line
+                        && (n.id.contains(":def:") || n.id.contains(":use:"))
+                })
+                .map(|n| n.id.clone())
+                .collect();
+            if in_range_ids.is_empty() {
+                continue;
+            }
+            let in_range_set: HashSet<&str> = in_range_ids.iter().map(|id| id.as_str()).collect();
+
+            let mut inputs: Vec<String> = in_range_ids
+                .iter()
+                .filter(|id| id.contains(":def:"))
+                .filter(|id| {
+                    in_adj
+                        .get(id.as_str())
+                        .map(|froms| froms.iter().all(|f| !in_range_set.contains(*f)))
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect();
+            inputs.sort();
+            inputs.dedup();
+            if inputs.is_empty() {
+                continue;
+            }
+
+            let mut flows = Vec::new();
+            for input in &inputs {
+                let mut q: VecDeque<&str> = VecDeque::new();
+                let mut seen: HashSet<&str> = HashSet::new();
+                q.push_back(input.as_str());
+                seen.insert(input.as_str());
+
+                let mut impacted: BTreeSet<String> = BTreeSet::new();
+                while let Some(cur) = q.pop_front() {
+                    for next in out_adj.get(cur).cloned().unwrap_or_default() {
+                        if !in_range_set.contains(next) || seen.contains(next) {
+                            continue;
+                        }
+                        seen.insert(next);
+                        q.push_back(next);
+                        if next != input.as_str() {
+                            impacted.insert(next.to_string());
+                        }
+                    }
+                }
+
+                flows.push(FunctionInputImpact {
+                    input_node_id: input.clone(),
+                    impacted_node_ids: impacted.into_iter().collect(),
+                });
+            }
+
+            summaries.push(FunctionSummary {
+                function_id: s.id.0.clone(),
+                file: s.file.clone(),
+                start_line: s.range.start_line,
+                end_line: s.range.end_line,
+                inputs,
+                flows,
+            });
+        }
+
+        summaries
     }
 }
 
@@ -800,6 +928,44 @@ mod pdg_tests {
         // Control edges were not in DFG; here we only check call edges merge
         // The control node should still be present
         assert!(pdg.nodes.iter().any(|n| n.id == "f.rs:ctrl:2:4"));
+    }
+
+    #[test]
+    fn function_summary_minimal_input_to_impact() {
+        use crate::ir::{Symbol, SymbolKind, TextRange};
+
+        let dfg = RustDfgBuilder::build(
+            "f.rs",
+            "fn foo(a: i32) -> i32 {\n    let b = a;\n    return b;\n}\n",
+        );
+        let pdg = PdgBuilder::build(&dfg, &[]);
+
+        let foo = Symbol {
+            id: SymbolId::new("rust", "f.rs", &SymbolKind::Function, "foo", 1),
+            name: "foo".to_string(),
+            kind: SymbolKind::Function,
+            file: "f.rs".to_string(),
+            range: TextRange {
+                start_line: 1,
+                end_line: 4,
+            },
+            language: "rust".to_string(),
+        };
+        let index = crate::ir::reference::SymbolIndex::build(vec![foo]);
+
+        let summaries = PdgBuilder::build_function_summaries(&pdg, &index);
+        assert_eq!(summaries.len(), 1);
+        let s = &summaries[0];
+        assert_eq!(s.function_id, "rust:f.rs:fn:foo:1");
+        assert!(s.inputs.iter().any(|id| id.ends_with(":def:a:1")));
+
+        let flow = s
+            .flows
+            .iter()
+            .find(|f| f.input_node_id.ends_with(":def:a:1"))
+            .expect("flow for input a");
+        assert!(flow.impacted_node_ids.iter().any(|id| id.ends_with(":def:b:2")));
+        assert!(flow.impacted_node_ids.iter().any(|id| id.ends_with(":use:b:3")));
     }
 }
 
