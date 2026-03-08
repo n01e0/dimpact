@@ -75,6 +75,24 @@ fn has_jdtls() -> bool {
         .unwrap_or(false)
 }
 
+fn require_gopls_for_lane(lane: &str) {
+    if !has_gopls() {
+        panic!(
+            "fail-fast preflight: lane={} cause=server gopls not found",
+            lane
+        );
+    }
+}
+
+fn require_jdtls_for_lane(lane: &str) {
+    if !has_jdtls() {
+        panic!(
+            "fail-fast preflight: lane={} cause=server jdtls not found",
+            lane
+        );
+    }
+}
+
 fn has_typescript_lsp_server() -> bool {
     Command::new("typescript-language-server")
         .arg("--help")
@@ -3460,10 +3478,7 @@ fn go_real_lsp_e2e_fixture_is_opt_in_gated() {
         );
         return;
     }
-    if !has_gopls() {
-        eprintln!("skip: gopls not found");
-        return;
-    }
+    require_gopls_for_lane("go/preflight-fixture");
 
     let (_tmp, repo) = setup_repo_go_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3493,10 +3508,7 @@ fn java_real_lsp_e2e_fixture_is_opt_in_gated() {
         );
         return;
     }
-    if !has_jdtls() {
-        eprintln!("skip: jdtls not found");
-        return;
-    }
+    require_jdtls_for_lane("java/preflight-fixture");
 
     let (_tmp, repo) = setup_repo_java_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3529,10 +3541,7 @@ fn lsp_engine_strict_java_callers_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_jdtls() {
-        eprintln!("skip: jdtls not found");
-        return;
-    }
+    require_jdtls_for_lane("java/callers");
 
     let (_tmp, repo) = setup_repo_java_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3587,10 +3596,7 @@ fn lsp_engine_strict_java_callees_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_jdtls() {
-        eprintln!("skip: jdtls not found");
-        return;
-    }
+    require_jdtls_for_lane("java/callees");
 
     let (_tmp, repo) = setup_repo_java_callees_chain_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3662,10 +3668,7 @@ fn lsp_engine_strict_java_both_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_jdtls() {
-        eprintln!("skip: jdtls not found");
-        return;
-    }
+    require_jdtls_for_lane("java/both");
 
     let (_tmp, repo) = setup_repo_java_both_chain_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3737,10 +3740,7 @@ fn lsp_engine_strict_go_callers_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_gopls() {
-        eprintln!("skip: gopls not found");
-        return;
-    }
+    require_gopls_for_lane("go/callers");
 
     let (_tmp, repo) = setup_repo_go_real_lsp_e2e_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3795,10 +3795,7 @@ fn lsp_engine_strict_go_callees_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_gopls() {
-        eprintln!("skip: gopls not found");
-        return;
-    }
+    require_gopls_for_lane("go/callees");
 
     let (_tmp, repo) = setup_repo_go_callees_chain_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
@@ -3870,10 +3867,7 @@ fn lsp_engine_strict_go_both_chain_e2e_when_available() {
         );
         return;
     }
-    if !has_gopls() {
-        eprintln!("skip: gopls not found");
-        return;
-    }
+    require_gopls_for_lane("go/both");
 
     let (_tmp, repo) = setup_repo_go_both_chain_fixture();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
