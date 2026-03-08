@@ -469,6 +469,77 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             }
         }
 
+        // Conservative dynamic import edge from importlib.import_module / import_module alias calls.
+        let re_call_importlib =
+            Regex::new(r#"(?m)\bimportlib\.import_module\s*\(\s*([^,\)\n]+)"#).unwrap();
+        let re_str_lit = Regex::new(r#"^[\"']([^\"']+)[\"']$"#).unwrap();
+        let re_fstr_lit = Regex::new(r#"^f[\"']([^\"']+)[\"']$"#).unwrap();
+
+        let parse_dynamic_import_target = |arg_raw: &str| -> Option<String> {
+            let raw = arg_raw.trim();
+
+            let module_raw = if let Some(cap) = re_str_lit.captures(raw) {
+                cap.get(1).map(|m| m.as_str().to_string())
+            } else if let Some(cap) = re_fstr_lit.captures(raw) {
+                let body = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                let mut static_prefix = body.split('{').next().unwrap_or("").trim().to_string();
+                while static_prefix.ends_with('.') {
+                    static_prefix.pop();
+                }
+                if static_prefix.is_empty() {
+                    None
+                } else {
+                    Some(static_prefix)
+                }
+            } else {
+                None
+            }?;
+
+            let resolved = if module_raw.starts_with('.') {
+                resolve_from_import_module(&from_mod, &module_raw)
+            } else {
+                module_raw.replace('.', "::")
+            };
+            if resolved.is_empty() {
+                None
+            } else {
+                Some(resolved)
+            }
+        };
+
+        for cap in re_call_importlib.captures_iter(source) {
+            let Some(arg) = cap.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
+            if let Some(module_path) = parse_dynamic_import_target(arg) {
+                map.insert(format!("__glob__{}", module_path.clone()), module_path);
+            }
+        }
+
+        let import_module_aliases: Vec<String> = map
+            .iter()
+            .filter_map(|(k, v)| {
+                if v == "importlib::import_module" {
+                    Some(k.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for alias in import_module_aliases {
+            let pat = format!(r"(?m)\b{}\s*\(\s*([^,\)\n]+)", regex::escape(&alias));
+            let re_call_alias = Regex::new(&pat).unwrap();
+            for cap in re_call_alias.captures_iter(source) {
+                let Some(arg) = cap.get(1).map(|m| m.as_str()) else {
+                    continue;
+                };
+                if let Some(module_path) = parse_dynamic_import_target(arg) {
+                    map.insert(format!("__glob__{}", module_path.clone()), module_path);
+                }
+            }
+        }
+
         map
     }
 }
@@ -1023,6 +1094,15 @@ from pkg.star import *
             Some("pkg::sub::plugins::loader")
         );
         assert_eq!(im.get("registry").map(String::as_str), Some("pkg::core::registry"));
+        // conservative dynamic import edges
+        assert_eq!(
+            im.get("__glob__pkg::sub::plugins").map(String::as_str),
+            Some("pkg::sub::plugins")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::plugins::common").map(String::as_str),
+            Some("pkg::plugins::common")
+        );
     }
 }
 
