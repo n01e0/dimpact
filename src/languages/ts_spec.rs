@@ -522,7 +522,7 @@ mod tests {
         );
         assert!(
             imports.get("useMemo").map(String::as_str) == Some("react::useMemo")
-                || imports.get("useMemo").is_none()
+                || !imports.contains_key("useMemo")
         );
     }
 }
