@@ -58,8 +58,8 @@ impl DfgBuilder for RustDfgBuilder {
         // Initialize DFG containers
         let mut nodes: Vec<DfgNode> = Vec::new();
         let mut edges: Vec<DfgEdge> = Vec::new();
-        // Map variable name -> definition node IDs
-        let mut def_ids_by_name: HashMap<String, Vec<String>> = HashMap::new();
+        // SSA-like ordered definition records: variable -> [(line, def_id)]
+        let mut def_records_by_name: HashMap<String, Vec<(u32, String)>> = HashMap::new();
         // Map variable name -> set of line numbers where it's defined
         let mut def_lines_by_name: HashMap<String, HashSet<u32>> = HashMap::new();
         let mut seen_node_ids: HashSet<String> = HashSet::new();
@@ -100,11 +100,11 @@ impl DfgBuilder for RustDfgBuilder {
                                             file: path.to_string(),
                                             line: sl,
                                         });
+                                        def_records_by_name
+                                            .entry(name.to_string())
+                                            .or_default()
+                                            .push((sl, node_id.clone()));
                                     }
-                                    def_ids_by_name
-                                        .entry(name.to_string())
-                                        .or_default()
-                                        .push(node_id);
                                 }
                             }
                         }
@@ -125,11 +125,11 @@ impl DfgBuilder for RustDfgBuilder {
                                     file: path.to_string(),
                                     line: sl,
                                 });
+                                def_records_by_name
+                                    .entry(name.to_string())
+                                    .or_default()
+                                    .push((sl, node_id.clone()));
                             }
-                            def_ids_by_name
-                                .entry(name.to_string())
-                                .or_default()
-                                .push(node_id);
                         }
                     }
                 }
@@ -161,11 +161,11 @@ impl DfgBuilder for RustDfgBuilder {
                             file: path.to_string(),
                             line: line_no,
                         });
+                        def_records_by_name
+                            .entry(name.to_string())
+                            .or_default()
+                            .push((line_no, node_id.clone()));
                     }
-                    def_ids_by_name
-                        .entry(name.to_string())
-                        .or_default()
-                        .push(node_id.clone());
                     // Track definition line
                     def_lines_by_name
                         .entry(name.to_string())
@@ -174,7 +174,12 @@ impl DfgBuilder for RustDfgBuilder {
                 }
             }
         }
-        // Second pass: collect uses and link to defs
+        for records in def_records_by_name.values_mut() {
+            records.sort_by_key(|(line, _)| *line);
+        }
+        let control_ranges = collect_control_ranges_rust(source);
+
+        // Second pass: collect uses and link to reaching defs (SSA-like)
         for (idx, line) in source.lines().enumerate() {
             let line_no = (idx + 1) as u32;
             for token in line.split(|c: char| !c.is_alphanumeric() && c != '_') {
@@ -188,7 +193,13 @@ impl DfgBuilder for RustDfgBuilder {
                 {
                     continue;
                 }
-                if let Some(def_ids) = def_ids_by_name.get(token) {
+                let reaching = reaching_def_ids_ssa_like(
+                    token,
+                    line_no,
+                    &def_records_by_name,
+                    &control_ranges,
+                );
+                if !reaching.is_empty() {
                     let node_id = format!("{}:use:{}:{}", path, token, line_no);
                     if seen_node_ids.insert(node_id.clone()) {
                         nodes.push(DfgNode {
@@ -198,9 +209,9 @@ impl DfgBuilder for RustDfgBuilder {
                             line: line_no,
                         });
                     }
-                    for def_id in def_ids {
+                    for def_id in reaching {
                         edges.push(DfgEdge {
-                            from: def_id.clone(),
+                            from: def_id,
                             to: node_id.clone(),
                             kind: DependencyKind::Data,
                         });
@@ -208,42 +219,25 @@ impl DfgBuilder for RustDfgBuilder {
                 }
             }
         }
-        // Now extract control dependencies via Tree-Sitter control queries
-        // Load Rust spec and compile control query
-        let spec = crate::ts_core::load_rust_spec();
-        let compiled =
-            crate::ts_core::compile_queries_rust(&spec).expect("compile rust control queries");
-        // Query for control nodes
-        if let Some(ctrl_q) = &compiled.control {
-            let runner = crate::ts_core::QueryRunner::new_rust();
-            let offs = crate::languages::util::line_offsets(source);
-            // number of data nodes before control nodes are added
-            let data_node_count = nodes.len();
-            for caps in runner.run_captures(source, ctrl_q) {
-                if let Some(c0) = caps.first() {
-                    let start_ln = crate::languages::util::byte_to_line(&offs, c0.start);
-                    let end_ln =
-                        crate::languages::util::byte_to_line(&offs, c0.end.saturating_sub(1));
-                    let ctrl_id = format!("{}:ctrl:{}:{}", path, start_ln, end_ln);
-                    // add control node if new
-                    if seen_node_ids.insert(ctrl_id.clone()) {
-                        nodes.push(DfgNode {
-                            id: ctrl_id.clone(),
-                            name: "control".to_string(),
-                            file: path.to_string(),
-                            line: start_ln,
-                        });
-                    }
-                    // add control edges to existing data nodes within block
-                    for nd in &nodes[..data_node_count] {
-                        if nd.line >= start_ln && nd.line <= end_ln {
-                            edges.push(DfgEdge {
-                                from: ctrl_id.clone(),
-                                to: nd.id.clone(),
-                                kind: DependencyKind::Control,
-                            });
-                        }
-                    }
+        // Add control dependency nodes/edges from precomputed control ranges.
+        let data_node_count = nodes.len();
+        for (start_ln, end_ln) in &control_ranges {
+            let ctrl_id = format!("{}:ctrl:{}:{}", path, start_ln, end_ln);
+            if seen_node_ids.insert(ctrl_id.clone()) {
+                nodes.push(DfgNode {
+                    id: ctrl_id.clone(),
+                    name: "control".to_string(),
+                    file: path.to_string(),
+                    line: *start_ln,
+                });
+            }
+            for nd in &nodes[..data_node_count] {
+                if nd.line >= *start_ln && nd.line <= *end_ln {
+                    edges.push(DfgEdge {
+                        from: ctrl_id.clone(),
+                        to: nd.id.clone(),
+                        kind: DependencyKind::Control,
+                    });
                 }
             }
         }
@@ -261,10 +255,11 @@ impl DfgBuilder for RubyDfgBuilder {
         // Initialize DFG containers
         let mut nodes: Vec<DfgNode> = Vec::new();
         let mut edges: Vec<DfgEdge> = Vec::new();
-        let mut def_ids_by_name: HashMap<String, Vec<String>> = HashMap::new();
+        let mut def_records_by_name: HashMap<String, Vec<(u32, String)>> = HashMap::new();
         let mut def_lines_by_name: HashMap<String, HashSet<u32>> = HashMap::new();
         let mut seen_node_ids: HashSet<String> = HashSet::new();
-        let reserved = ["if", "else", "end", "return", "def", "class", "module"];
+        let reserved = ["if", "else", "elsif", "end", "return", "def", "class", "module"];
+
         // Parse parameters via regex
         let fn_re = Regex::new(r"def\s+\w+\s*\(([^)]*)\)").unwrap();
         for (idx, line) in source.lines().enumerate() {
@@ -288,11 +283,11 @@ impl DfgBuilder for RubyDfgBuilder {
                                 file: path.to_string(),
                                 line: line_no,
                             });
+                            def_records_by_name
+                                .entry(name.to_string())
+                                .or_default()
+                                .push((line_no, node_id));
                         }
-                        def_ids_by_name
-                            .entry(name.to_string())
-                            .or_default()
-                            .push(node_id.clone());
                         def_lines_by_name
                             .entry(name.to_string())
                             .or_default()
@@ -301,7 +296,13 @@ impl DfgBuilder for RubyDfgBuilder {
                 }
             }
         }
-        // Capture assignments and their RHS uses
+
+        for records in def_records_by_name.values_mut() {
+            records.sort_by_key(|(line, _)| *line);
+        }
+        let control_ranges = collect_control_ranges_ruby(source);
+
+        // Capture assignments and their RHS uses, then define LHS (SSA-like ordering).
         let assign_re =
             Regex::new(r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
         for (idx, line) in source.lines().enumerate() {
@@ -309,26 +310,10 @@ impl DfgBuilder for RubyDfgBuilder {
             if let Some(cap) = assign_re.captures(line) {
                 let lhs = cap.get(1).unwrap().as_str();
                 let rhs = cap.get(2).unwrap().as_str();
-                // LHS definition
-                let def_id = format!("{}:def:{}:{}", path, lhs, line_no);
-                if seen_node_ids.insert(def_id.clone()) {
-                    nodes.push(DfgNode {
-                        id: def_id.clone(),
-                        name: lhs.to_string(),
-                        file: path.to_string(),
-                        line: line_no,
-                    });
-                }
-                def_ids_by_name
-                    .entry(lhs.to_string())
-                    .or_default()
-                    .push(def_id.clone());
-                def_lines_by_name
-                    .entry(lhs.to_string())
-                    .or_default()
-                    .insert(line_no);
-                // RHS use dependency
-                if let Some(def_ids) = def_ids_by_name.get(rhs) {
+
+                let reaching_rhs =
+                    reaching_def_ids_ssa_like(rhs, line_no, &def_records_by_name, &control_ranges);
+                if !reaching_rhs.is_empty() {
                     let use_id = format!("{}:use:{}:{}", path, rhs, line_no);
                     if seen_node_ids.insert(use_id.clone()) {
                         nodes.push(DfgNode {
@@ -338,47 +323,73 @@ impl DfgBuilder for RubyDfgBuilder {
                             line: line_no,
                         });
                     }
-                    for def_id in def_ids {
+                    for def_id in reaching_rhs {
                         edges.push(DfgEdge {
-                            from: def_id.clone(),
+                            from: def_id,
                             to: use_id.clone(),
                             kind: DependencyKind::Data,
                         });
                     }
                 }
+
+                // LHS definition
+                let def_id = format!("{}:def:{}:{}", path, lhs, line_no);
+                if seen_node_ids.insert(def_id.clone()) {
+                    nodes.push(DfgNode {
+                        id: def_id.clone(),
+                        name: lhs.to_string(),
+                        file: path.to_string(),
+                        line: line_no,
+                    });
+                    def_records_by_name
+                        .entry(lhs.to_string())
+                        .or_default()
+                        .push((line_no, def_id.clone()));
+                }
+                def_lines_by_name
+                    .entry(lhs.to_string())
+                    .or_default()
+                    .insert(line_no);
             }
         }
+
+        for records in def_records_by_name.values_mut() {
+            records.sort_by_key(|(line, _)| *line);
+        }
+
         // Capture return uses
         let return_re = Regex::new(r"return\s+([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
         for (idx, line) in source.lines().enumerate() {
             let line_no = (idx + 1) as u32;
             if let Some(cap) = return_re.captures(line) {
                 let name = cap.get(1).unwrap().as_str();
-                let node_id = format!("{}:use:{}:{}", path, name, line_no);
-                if !def_lines_by_name
+                if def_lines_by_name
                     .get(name)
                     .is_some_and(|s| s.contains(&line_no))
                 {
-                    if seen_node_ids.insert(node_id.clone()) {
-                        nodes.push(DfgNode {
-                            id: node_id.clone(),
-                            name: name.to_string(),
-                            file: path.to_string(),
-                            line: line_no,
-                        });
-                    }
-                    if let Some(def_ids) = def_ids_by_name.get(name) {
-                        for def_id in def_ids {
-                            edges.push(DfgEdge {
-                                from: def_id.clone(),
-                                to: node_id.clone(),
-                                kind: DependencyKind::Data,
-                            });
-                        }
-                    }
+                    continue;
+                }
+                let node_id = format!("{}:use:{}:{}", path, name, line_no);
+                if seen_node_ids.insert(node_id.clone()) {
+                    nodes.push(DfgNode {
+                        id: node_id.clone(),
+                        name: name.to_string(),
+                        file: path.to_string(),
+                        line: line_no,
+                    });
+                }
+                let reaching =
+                    reaching_def_ids_ssa_like(name, line_no, &def_records_by_name, &control_ranges);
+                for def_id in reaching {
+                    edges.push(DfgEdge {
+                        from: def_id,
+                        to: node_id.clone(),
+                        kind: DependencyKind::Data,
+                    });
                 }
             }
         }
+
         // Capture general uses beyond return (assignments, method calls, etc.)
         for (idx, line) in source.lines().enumerate() {
             let line_no = (idx + 1) as u32;
@@ -393,94 +404,57 @@ impl DfgBuilder for RubyDfgBuilder {
                 {
                     continue;
                 }
-                if let Some(def_ids) = def_ids_by_name.get(token) {
-                    let use_id = format!("{}:use:{}:{}", path, token, line_no);
-                    if seen_node_ids.insert(use_id.clone()) {
-                        nodes.push(DfgNode {
-                            id: use_id.clone(),
-                            name: token.to_string(),
-                            file: path.to_string(),
-                            line: line_no,
-                        });
-                    }
-                    for def_id in def_ids {
-                        edges.push(DfgEdge {
-                            from: def_id.clone(),
-                            to: use_id.clone(),
-                            kind: DependencyKind::Data,
-                        });
-                    }
-                }
-            }
-        }
-        // Generic uses: catch variable usages beyond return
-        for (idx, line) in source.lines().enumerate() {
-            let line_no = (idx + 1) as u32;
-            for token in line.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                if token.is_empty() || reserved.contains(&token) {
+                let reaching = reaching_def_ids_ssa_like(
+                    token,
+                    line_no,
+                    &def_records_by_name,
+                    &control_ranges,
+                );
+                if reaching.is_empty() {
                     continue;
                 }
-                // Skip if defined on this line
-                if def_lines_by_name
-                    .get(token)
-                    .is_some_and(|s| s.contains(&line_no))
-                {
-                    continue;
+                let use_id = format!("{}:use:{}:{}", path, token, line_no);
+                if seen_node_ids.insert(use_id.clone()) {
+                    nodes.push(DfgNode {
+                        id: use_id.clone(),
+                        name: token.to_string(),
+                        file: path.to_string(),
+                        line: line_no,
+                    });
                 }
-                if let Some(def_ids) = def_ids_by_name.get(token) {
-                    let use_id = format!("{}:use:{}:{}", path, token, line_no);
-                    if seen_node_ids.insert(use_id.clone()) {
-                        nodes.push(DfgNode {
-                            id: use_id.clone(),
-                            name: token.to_string(),
-                            file: path.to_string(),
-                            line: line_no,
-                        });
-                    }
-                    for def_id in def_ids {
-                        edges.push(DfgEdge {
-                            from: def_id.clone(),
-                            to: use_id.clone(),
-                            kind: DependencyKind::Data,
-                        });
-                    }
+                for def_id in reaching {
+                    edges.push(DfgEdge {
+                        from: def_id,
+                        to: use_id.clone(),
+                        kind: DependencyKind::Data,
+                    });
                 }
             }
         }
-        // Now extract control dependencies via Tree-Sitter
-        let spec = crate::ts_core::load_ruby_spec();
-        let compiled =
-            crate::ts_core::compile_queries_ruby(&spec).expect("compile ruby control queries");
-        if let Some(ctrl_q) = &compiled.control {
-            let runner = crate::ts_core::QueryRunner::new_ruby();
-            let offs = crate::languages::util::line_offsets(source);
-            let data_count = nodes.len();
-            for caps in runner.run_captures(source, ctrl_q) {
-                if let Some(c0) = caps.first() {
-                    let start_ln = crate::languages::util::byte_to_line(&offs, c0.start);
-                    let end_ln =
-                        crate::languages::util::byte_to_line(&offs, c0.end.saturating_sub(1));
-                    let ctrl_id = format!("{}:ctrl:{}:{}", path, start_ln, end_ln);
-                    if seen_node_ids.insert(ctrl_id.clone()) {
-                        nodes.push(DfgNode {
-                            id: ctrl_id.clone(),
-                            name: "control".to_string(),
-                            file: path.to_string(),
-                            line: start_ln,
-                        });
-                    }
-                    for nd in &nodes[..data_count] {
-                        if nd.line >= start_ln && nd.line <= end_ln {
-                            edges.push(DfgEdge {
-                                from: ctrl_id.clone(),
-                                to: nd.id.clone(),
-                                kind: DependencyKind::Control,
-                            });
-                        }
-                    }
+
+        // Add control dependency nodes/edges from precomputed control ranges.
+        let data_count = nodes.len();
+        for (start_ln, end_ln) in &control_ranges {
+            let ctrl_id = format!("{}:ctrl:{}:{}", path, start_ln, end_ln);
+            if seen_node_ids.insert(ctrl_id.clone()) {
+                nodes.push(DfgNode {
+                    id: ctrl_id.clone(),
+                    name: "control".to_string(),
+                    file: path.to_string(),
+                    line: *start_ln,
+                });
+            }
+            for nd in &nodes[..data_count] {
+                if nd.line >= *start_ln && nd.line <= *end_ln {
+                    edges.push(DfgEdge {
+                        from: ctrl_id.clone(),
+                        to: nd.id.clone(),
+                        kind: DependencyKind::Control,
+                    });
                 }
             }
         }
+
         DataFlowGraph { nodes, edges }
     }
 }
@@ -572,6 +546,114 @@ impl PdgBuilder {
             }
         }
     }
+}
+
+fn collect_control_ranges_rust(source: &str) -> Vec<(u32, u32)> {
+    let spec = crate::ts_core::load_rust_spec();
+    let compiled = match crate::ts_core::compile_queries_rust(&spec) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let Some(ctrl_q) = &compiled.control else {
+        return Vec::new();
+    };
+
+    let runner = crate::ts_core::QueryRunner::new_rust();
+    let offs = crate::languages::util::line_offsets(source);
+    let mut out = Vec::new();
+    for caps in runner.run_captures(source, ctrl_q) {
+        if let Some(c0) = caps.first() {
+            let start_ln = crate::languages::util::byte_to_line(&offs, c0.start);
+            let end_ln = crate::languages::util::byte_to_line(&offs, c0.end.saturating_sub(1));
+            out.push((start_ln, end_ln));
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn collect_control_ranges_ruby(source: &str) -> Vec<(u32, u32)> {
+    let spec = crate::ts_core::load_ruby_spec();
+    let compiled = match crate::ts_core::compile_queries_ruby(&spec) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let Some(ctrl_q) = &compiled.control else {
+        return Vec::new();
+    };
+
+    let runner = crate::ts_core::QueryRunner::new_ruby();
+    let offs = crate::languages::util::line_offsets(source);
+    let mut out = Vec::new();
+    for caps in runner.run_captures(source, ctrl_q) {
+        if let Some(c0) = caps.first() {
+            let start_ln = crate::languages::util::byte_to_line(&offs, c0.start);
+            let end_ln = crate::languages::util::byte_to_line(&offs, c0.end.saturating_sub(1));
+            out.push((start_ln, end_ln));
+        }
+    }
+
+    // Text fallback for if/elsif/else...end ranges to stabilize branch merges.
+    let mut if_stack: Vec<u32> = Vec::new();
+    for (idx, raw) in source.lines().enumerate() {
+        let line_no = (idx + 1) as u32;
+        let t = raw.trim_start();
+        if t.starts_with("if ") || t == "if" || t.starts_with("unless ") || t == "unless" {
+            if_stack.push(line_no);
+            continue;
+        }
+        if t.starts_with("end") && let Some(start_ln) = if_stack.pop() {
+            out.push((start_ln, line_no));
+        }
+    }
+
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn reaching_def_ids_ssa_like(
+    name: &str,
+    use_line: u32,
+    def_records_by_name: &std::collections::HashMap<String, Vec<(u32, String)>>,
+    control_ranges: &[(u32, u32)],
+) -> Vec<String> {
+    let Some(records) = def_records_by_name.get(name) else {
+        return Vec::new();
+    };
+
+    let mut prior: Vec<(u32, String)> = records
+        .iter()
+        .filter(|(line, _)| *line < use_line)
+        .cloned()
+        .collect();
+    if prior.is_empty() {
+        return Vec::new();
+    }
+    prior.sort_by_key(|(line, _)| *line);
+
+    let latest_line = prior.last().map(|(line, _)| *line).unwrap_or(0);
+    let mut selected: std::collections::BTreeSet<String> = prior
+        .iter()
+        .filter(|(line, _)| *line == latest_line)
+        .map(|(_, id)| id.clone())
+        .collect();
+
+    // SSA-like + branch stabilization:
+    // if the latest reaching def is inside a completed control range before this use,
+    // include all defs of the symbol from the same control range (if/else merge approximation).
+    for (start, end) in control_ranges {
+        if *end < use_line && latest_line >= *start && latest_line <= *end {
+            for (line, id) in &prior {
+                if *line >= *start && *line <= *end {
+                    selected.insert(id.clone());
+                }
+            }
+        }
+    }
+
+    selected.into_iter().collect()
 }
 
 #[cfg(test)]
@@ -689,15 +771,19 @@ mod tests {
             "expected >=2 definitions of x, got {}",
             defs.len()
         );
-        // Expect use edges for x
-        let uses: Vec<_> = dfg
+        // SSA-like expectation: use at line 4 should connect to latest reaching def (line 3)
+        let use_id = "f.rs:use:x:4";
+        let incoming: Vec<_> = dfg
             .edges
             .iter()
-            .filter(|e| e.kind == DependencyKind::Data && e.to.contains(":use:x:"))
+            .filter(|e| e.kind == DependencyKind::Data && e.to == use_id)
+            .map(|e| e.from.clone())
             .collect();
+        assert_eq!(incoming.len(), 1, "expected one reaching def for x@line4");
         assert!(
-            !uses.is_empty(),
-            "expected data dependency edges for x usage"
+            incoming[0].ends_with(":def:x:3"),
+            "expected latest def at line 3, got {}",
+            incoming[0]
         );
     }
 
@@ -776,6 +862,33 @@ mod tests {
                 "control edge should originate from control node"
             );
         }
+    }
+
+    #[test]
+    fn rust_reaching_defs_branch_join_includes_both_branch_defs() {
+        let src = "let x = 0;\nif cond {\n    x = 1;\n} else {\n    x = 2;\n}\nlet y = x;\n";
+        let dfg = RustDfgBuilder::build("f.rs", src);
+
+        let use_id = "f.rs:use:x:7";
+        let incoming: std::collections::BTreeSet<_> = dfg
+            .edges
+            .iter()
+            .filter(|e| e.kind == DependencyKind::Data && e.to == use_id)
+            .map(|e| e.from.clone())
+            .collect();
+
+        assert!(
+            incoming.iter().any(|id| id.ends_with(":def:x:3")),
+            "expected then-branch def to reach join"
+        );
+        assert!(
+            incoming.iter().any(|id| id.ends_with(":def:x:5")),
+            "expected else-branch def to reach join"
+        );
+        assert!(
+            !incoming.iter().any(|id| id.ends_with(":def:x:1")),
+            "initial def should be shadowed by branch defs"
+        );
     }
 
     #[test]
