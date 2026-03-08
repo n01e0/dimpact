@@ -127,6 +127,7 @@ mod impact_render_tests {
                 kind: RefKind::Call,
                 file: "f.rs".into(),
                 line: 2,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
             },
             Reference {
                 from: b.id.clone(),
@@ -134,6 +135,7 @@ mod impact_render_tests {
                 kind: RefKind::Call,
                 file: "f.rs".into(),
                 line: 3,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
             },
         ];
         let out = ImpactOutput {
@@ -404,11 +406,16 @@ mod html {
 
             let mut edges = Vec::new();
             for e in &self.out.edges {
+                let certainty = match e.certainty {
+                    crate::ir::reference::EdgeCertainty::Confirmed => "confirmed",
+                    crate::ir::reference::EdgeCertainty::Inferred => "inferred",
+                };
                 edges.push(json!({
                     "data": {
                         "id": format!("{}->{}", e.from.0, e.to.0),
                         "source": e.from.0,
                         "target": e.to.0,
+                        "certainty": certainty,
                     }
                 }));
 
@@ -490,13 +497,18 @@ mod html {
                 return String::new();
             }
             let mut buf = String::from(
-                "<div class=\"sec card\"><h2>Edges</h2><table><thead><tr><th>From</th><th>To</th></tr></thead><tbody>",
+                "<div class=\"sec card\"><h2>Edges</h2><table><thead><tr><th>From</th><th>To</th><th>Certainty</th></tr></thead><tbody>",
             );
             for e in &self.out.edges {
+                let certainty = match e.certainty {
+                    crate::ir::reference::EdgeCertainty::Confirmed => "confirmed",
+                    crate::ir::reference::EdgeCertainty::Inferred => "inferred",
+                };
                 buf.push_str(&format!(
-                    "<tr><td><code>{}</code></td><td><code>{}</code></td></tr>",
+                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td></tr>",
                     h(&e.from.0),
-                    h(&e.to.0)
+                    h(&e.to.0),
+                    h(certainty)
                 ));
             }
             buf.push_str("</tbody></table></div>");
