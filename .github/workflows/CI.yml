@@ -192,16 +192,7 @@ jobs:
             if [ -f precision-regression-report.json ]; then
               echo
               echo "### Totals"
-              python3 - <<'PY'
-import json
-from pathlib import Path
-p = Path('precision-regression-report.json')
-if p.exists():
-    j = json.loads(p.read_text())
-    t = j.get('totals', {})
-    print(f"- FN: {t.get('fn', 'n/a')} (threshold={j.get('fnThreshold', 'n/a')})")
-    print(f"- FP: {t.get('fp', 'n/a')} (threshold={j.get('fpThreshold', 'n/a')})")
-PY
+              python3 -c "import json, pathlib; p=pathlib.Path('precision-regression-report.json'); j=json.loads(p.read_text()) if p.exists() else {}; t=j.get('totals', {}); print(f'- FN: {t.get(\"fn\", \"n/a\")} (threshold={j.get(\"fnThreshold\", \"n/a\")})'); print(f'- FP: {t.get(\"fp\", \"n/a\")} (threshold={j.get(\"fpThreshold\", \"n/a\")})')"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload precision regression artifacts
