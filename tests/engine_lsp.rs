@@ -2658,31 +2658,14 @@ fn lsp_engine_strict_tsx_callers_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TSX callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("tsx/callers", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("tsx/callers", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("tsx/callers", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
@@ -2691,11 +2674,11 @@ fn lsp_engine_strict_tsx_callers_chain_e2e_when_available() {
         names1, names2,
         "strict TSX LSP callers result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: TSX LSP did not report callers in this environment");
-        return;
-    }
-    assert!(names1.contains("View") || names1.contains("App"));
+    assert!(
+        names1.contains("View") || names1.contains("App"),
+        "fail-fast: lane=tsx/callers phase=assertion cause=logic expected impacted caller 'View' or 'App', got {:?}",
+        names1
+    );
 }
 
 #[test]
@@ -2875,31 +2858,14 @@ fn lsp_engine_strict_typescript_callers_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let changed = match engine.changed_symbols(&files, dimpact::LanguageMode::Auto) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript changed_symbols unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Auto, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict TypeScript callers impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let changed_res = engine.changed_symbols(&files, dimpact::LanguageMode::Auto);
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Auto, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let changed = fail_fast_with_triage("typescript/callers", "changed_symbols", changed_res);
+    let out1 = fail_fast_with_triage("typescript/callers", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("typescript/callers", "impact#2", out2_res);
 
     assert!(changed.changed_symbols.iter().any(|s| s.name == "bar"));
     let names1 = impacted_name_set(&out1);
@@ -2908,11 +2874,11 @@ fn lsp_engine_strict_typescript_callers_chain_e2e_when_available() {
         names1, names2,
         "strict TypeScript LSP callers result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: TypeScript LSP did not report callers in this environment");
-        return;
-    }
-    assert!(names1.contains("foo"));
+    assert!(
+        names1.contains("foo"),
+        "fail-fast: lane=typescript/callers phase=assertion cause=logic expected impacted caller 'foo', got {:?}",
+        names1
+    );
 }
 
 #[test]
