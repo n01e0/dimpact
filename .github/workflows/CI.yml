@@ -171,6 +171,11 @@ jobs:
           restore-keys: ${{ runner.os }}
       - name: Run engine_lsp regression test suite
         run: cargo test -q --test engine_lsp
+      - name: Summarize strict real-LSP migration status (skip-safe/fail-fast)
+        if: always()
+        run: |
+          bash scripts/summarize-strict-e2e-migration-progress.sh tests/engine_lsp.rs > strict-e2e-migration-summary.md
+          cat strict-e2e-migration-summary.md >> "$GITHUB_STEP_SUMMARY"
 
   lsp_graduation_check:
     runs-on: ubuntu-latest

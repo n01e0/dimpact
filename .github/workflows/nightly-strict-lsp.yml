@@ -305,6 +305,14 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Summarize strict real-LSP migration status (skip-safe/fail-fast)
+        if: always()
+        run: |
+          set -euo pipefail
+          PROGRESS_MD="$NIGHTLY_LOG_DIR/strict-e2e-migration-summary.md"
+          bash scripts/summarize-strict-e2e-migration-progress.sh tests/engine_lsp.rs "$PROGRESS_MD"
+          cat "$PROGRESS_MD" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run strict real-LSP engine_lsp suite (env-gated)
         id: strict_e2e_initial
         continue-on-error: true
