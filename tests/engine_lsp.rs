@@ -4210,23 +4210,25 @@ fn lsp_engine_strict_callers_chain_is_stable_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict LSP unavailable in this environment: {e}");
-            return;
-        }
-    };
-    let out2 = engine
-        .impact(&files, dimpact::LanguageMode::Rust, &opts)
-        .expect("second strict LSP run should succeed");
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Rust, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Rust, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let out1 = fail_fast_with_triage("rust/callers", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("rust/callers", "impact#2", out2_res);
 
     let names1 = impacted_name_set(&out1);
     let names2 = impacted_name_set(&out2);
-    assert!(names1.contains("foo"));
-    assert!(names1.contains("main"));
+    assert!(
+        names1.contains("foo"),
+        "fail-fast: lane=rust/callers phase=assertion cause=logic expected impacted caller 'foo', got {:?}",
+        names1
+    );
+    assert!(
+        names1.contains("main"),
+        "fail-fast: lane=rust/callers phase=assertion cause=logic expected impacted caller 'main', got {:?}",
+        names1
+    );
     assert_eq!(names1, names2, "strict LSP result should be stable");
 }
 
@@ -4265,23 +4267,12 @@ fn lsp_engine_strict_rust_callees_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict rust callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict rust callees impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Rust, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Rust, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let out1 = fail_fast_with_triage("rust/callees", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("rust/callees", "impact#2", out2_res);
 
     let names1 = impacted_name_set(&out1);
     let names2 = impacted_name_set(&out2);
@@ -4289,11 +4280,11 @@ fn lsp_engine_strict_rust_callees_chain_e2e_when_available() {
         names1, names2,
         "strict rust LSP callees result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: rust LSP did not report callees in this environment");
-        return;
-    }
-    assert!(names1.contains("bar") || names1.contains("baz"));
+    assert!(
+        names1.contains("bar") || names1.contains("baz"),
+        "fail-fast: lane=rust/callees phase=assertion cause=logic expected impacted callee 'bar' or 'baz', got {:?}",
+        names1
+    );
 }
 
 #[test]
@@ -4331,23 +4322,12 @@ fn lsp_engine_strict_rust_both_chain_e2e_when_available() {
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let out1 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict rust both impact unavailable in this env: {e}");
-            return;
-        }
-    };
-    let out2 = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict rust both impact unavailable in this env: {e}");
-            return;
-        }
-    };
+    let out1_res = engine.impact(&files, dimpact::LanguageMode::Rust, &opts);
+    let out2_res = engine.impact(&files, dimpact::LanguageMode::Rust, &opts);
     std::env::set_current_dir(cwd).unwrap();
+
+    let out1 = fail_fast_with_triage("rust/both", "impact#1", out1_res);
+    let out2 = fail_fast_with_triage("rust/both", "impact#2", out2_res);
 
     let names1 = impacted_name_set(&out1);
     let names2 = impacted_name_set(&out2);
@@ -4355,11 +4335,11 @@ fn lsp_engine_strict_rust_both_chain_e2e_when_available() {
         names1, names2,
         "strict rust LSP both result should be stable"
     );
-    if names1.is_empty() {
-        eprintln!("skip: rust LSP did not report both-direction impacts in this environment");
-        return;
-    }
-    assert!(names1.contains("bar") || names1.contains("baz") || names1.contains("main"));
+    assert!(
+        names1.contains("bar") || names1.contains("baz") || names1.contains("main"),
+        "fail-fast: lane=rust/both phase=assertion cause=logic expected impacted symbols to include bar/baz/main, got {:?}",
+        names1
+    );
 }
 
 #[test]
@@ -4411,16 +4391,15 @@ fn main() { let s = S; s.foo(); }
 
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&repo).unwrap();
-    let out = match engine.impact(&files, dimpact::LanguageMode::Rust, &opts) {
-        Ok(v) => v,
-        Err(e) => {
-            std::env::set_current_dir(cwd).unwrap();
-            eprintln!("skip: strict LSP unavailable in this environment: {e}");
-            return;
-        }
-    };
+    let out_res = engine.impact(&files, dimpact::LanguageMode::Rust, &opts);
     std::env::set_current_dir(cwd).unwrap();
 
+    let out = fail_fast_with_triage("rust/method-callers", "impact#1", out_res);
+
     let names = impacted_name_set(&out);
-    assert!(names.contains("foo"), "method caller should be detected");
+    assert!(
+        names.contains("foo"),
+        "fail-fast: lane=rust/method-callers phase=assertion cause=logic expected impacted caller 'foo', got {:?}",
+        names
+    );
 }
