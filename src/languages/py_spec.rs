@@ -1660,4 +1660,76 @@ class Service:
             Some("pkg::sub::ext")
         );
     }
+
+    #[test]
+    fn python_hard_case_fixture_monkeypatch_metaclass_protocol() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/dynamic_protocol_meta.py", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "MetaRouter" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "SupportsRun" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "Service" && matches!(s.kind, SymbolKind::Struct))
+        );
+
+        let refs = ana.unresolved_refs("pkg/dynamic_protocol_meta.py", src);
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "runtime_checkable" && r.qualifier.is_none() && !r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| { r.name == "setattr" && r.qualifier.is_none() && !r.is_method }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "run" && r.qualifier.as_deref() == Some("RuntimePatch") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "run" && r.qualifier.as_deref() == Some("obj") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "build" && r.qualifier.as_deref() == Some("Service") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+
+        let im = ana.imports_in_file("pkg/dynamic_protocol_meta.py", src);
+        assert_eq!(
+            im.get("Protocol").map(String::as_str),
+            Some("typing::Protocol")
+        );
+        assert_eq!(
+            im.get("runtime_checkable").map(String::as_str),
+            Some("typing::runtime_checkable")
+        );
+    }
 }
