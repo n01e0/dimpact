@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Kind of dependency edge in data/control flow graph.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyKind {
     /// Data dependence (definition → use).
@@ -546,6 +546,18 @@ pub struct FunctionSummary {
 /// Builder for Program Dependence Graphs by merging DFG and call graph.
 pub struct PdgBuilder;
 
+fn push_unique_edge(
+    pdg: &mut DataFlowGraph,
+    seen_edges: &mut std::collections::HashSet<(String, String, DependencyKind)>,
+    from: String,
+    to: String,
+    kind: DependencyKind,
+) {
+    if seen_edges.insert((from.clone(), to.clone(), kind.clone())) {
+        pdg.edges.push(DfgEdge { from, to, kind });
+    }
+}
+
 impl PdgBuilder {
     /// Build a PDG by combining the data/control flow graph and call references.
     pub fn build(dfg: &DataFlowGraph, refs: &[Reference]) -> DataFlowGraph {
@@ -590,6 +602,13 @@ impl PdgBuilder {
                 defs_by_loc.entry(key).or_default().push(n.id.clone());
             }
         }
+
+        let mut seen_edges: std::collections::HashSet<(String, String, DependencyKind)> = pdg
+            .edges
+            .iter()
+            .map(|e| (e.from.clone(), e.to.clone(), e.kind.clone()))
+            .collect();
+
         // Precompute minimal function summaries and map by callee symbol ID.
         let summaries = Self::build_function_summaries(pdg, index);
         let mut summary_by_fn: std::collections::HashMap<String, FunctionSummary> =
@@ -601,54 +620,71 @@ impl PdgBuilder {
         // 1) Call-site bridges + summary-connected inter-procedural bridges
         for r in refs {
             let key = (r.file.clone(), r.line);
-            if let Some(uses) = uses_by_loc.get(&key) {
-                for u in uses {
-                    pdg.edges.push(DfgEdge {
-                        from: u.clone(),
-                        to: r.to.0.clone(),
-                        kind: DependencyKind::Data,
-                    });
-                }
+            let callsite_uses = uses_by_loc.get(&key).cloned().unwrap_or_default();
+            let callsite_defs = defs_by_loc.get(&key).cloned().unwrap_or_default();
+
+            for u in &callsite_uses {
+                push_unique_edge(
+                    pdg,
+                    &mut seen_edges,
+                    u.clone(),
+                    r.to.0.clone(),
+                    DependencyKind::Data,
+                );
             }
-            if let Some(defs) = defs_by_loc.get(&key) {
-                for d in defs {
-                    pdg.edges.push(DfgEdge {
-                        from: r.to.0.clone(),
-                        to: d.clone(),
-                        kind: DependencyKind::Data,
-                    });
-                }
+            for d in &callsite_defs {
+                push_unique_edge(
+                    pdg,
+                    &mut seen_edges,
+                    r.to.0.clone(),
+                    d.clone(),
+                    DependencyKind::Data,
+                );
             }
 
             // Connect call-site propagation through callee summary (input -> impacted).
             if let Some(summary) = summary_by_fn.get(&r.to.0) {
-                let callsite_uses = uses_by_loc.get(&key).cloned().unwrap_or_default();
-                let callsite_defs = defs_by_loc.get(&key).cloned().unwrap_or_default();
-
-                let mut impacted_union: std::collections::BTreeSet<String> =
-                    std::collections::BTreeSet::new();
+                let mut summary_connected = false;
                 for flow in &summary.flows {
+                    if flow.impacted_node_ids.is_empty() {
+                        continue;
+                    }
+                    summary_connected = true;
+
+                    for u in &callsite_uses {
+                        push_unique_edge(
+                            pdg,
+                            &mut seen_edges,
+                            u.clone(),
+                            flow.input_node_id.clone(),
+                            DependencyKind::Data,
+                        );
+                    }
                     for impacted in &flow.impacted_node_ids {
-                        impacted_union.insert(impacted.clone());
+                        for d in &callsite_defs {
+                            push_unique_edge(
+                                pdg,
+                                &mut seen_edges,
+                                impacted.clone(),
+                                d.clone(),
+                                DependencyKind::Data,
+                            );
+                        }
                     }
                 }
 
-                for input in &summary.inputs {
+                // Direct summary bridge at call-site: args/use -> assigned defs.
+                if summary_connected {
                     for u in &callsite_uses {
-                        pdg.edges.push(DfgEdge {
-                            from: u.clone(),
-                            to: input.clone(),
-                            kind: DependencyKind::Data,
-                        });
-                    }
-                }
-                for impacted in &impacted_union {
-                    for d in &callsite_defs {
-                        pdg.edges.push(DfgEdge {
-                            from: impacted.clone(),
-                            to: d.clone(),
-                            kind: DependencyKind::Data,
-                        });
+                        for d in &callsite_defs {
+                            push_unique_edge(
+                                pdg,
+                                &mut seen_edges,
+                                u.clone(),
+                                d.clone(),
+                                DependencyKind::Data,
+                            );
+                        }
                     }
                 }
             }
@@ -658,14 +694,22 @@ impl PdgBuilder {
             if !matches!(s.kind, SymbolKind::Function | SymbolKind::Method) {
                 continue;
             }
-            for n in &pdg.nodes {
-                if n.file == s.file && n.line >= s.range.start_line && n.line <= s.range.end_line {
-                    pdg.edges.push(DfgEdge {
-                        from: s.id.0.clone(),
-                        to: n.id.clone(),
-                        kind: DependencyKind::Data,
-                    });
-                }
+            let in_span_node_ids: Vec<String> = pdg
+                .nodes
+                .iter()
+                .filter(|n| {
+                    n.file == s.file && n.line >= s.range.start_line && n.line <= s.range.end_line
+                })
+                .map(|n| n.id.clone())
+                .collect();
+            for node_id in in_span_node_ids {
+                push_unique_edge(
+                    pdg,
+                    &mut seen_edges,
+                    s.id.0.clone(),
+                    node_id,
+                    DependencyKind::Data,
+                );
             }
         }
     }
@@ -1078,6 +1122,9 @@ mod pdg_tests {
         }));
         assert!(pdg.edges.iter().any(|e| {
             e.kind == DependencyKind::Data && e.from == "f.rs:use:a:2" && e.to == "f.rs:def:y:10"
+        }));
+        assert!(pdg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data && e.from == "f.rs:use:x:10" && e.to == "f.rs:def:y:10"
         }));
     }
 
