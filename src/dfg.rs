@@ -884,14 +884,26 @@ fn reaching_def_ids_ssa_like(
 
     // SSA-like + branch stabilization:
     // if the latest reaching def is inside a completed control range before this use,
-    // include all defs of the symbol from the same control range (if/else merge approximation).
+    // include all defs of the symbol from that control range (branch-merge approximation).
+    // Additionally, when only one def is found in that range, include the last pre-range def
+    // to model partial assignment paths (e.g. `if cond { x = ... }` without `else`).
     for (start, end) in control_ranges {
-        if *end < use_line && latest_line >= *start && latest_line <= *end {
-            for (line, id) in &prior {
-                if *line >= *start && *line <= *end {
-                    selected.insert(id.clone());
-                }
+        if *end >= use_line || latest_line < *start || latest_line > *end {
+            continue;
+        }
+
+        let mut in_range_defs: Vec<&String> = Vec::new();
+        for (line, id) in &prior {
+            if *line >= *start && *line <= *end {
+                selected.insert(id.clone());
+                in_range_defs.push(id);
             }
+        }
+
+        if in_range_defs.len() <= 1
+            && let Some((_, pre_id)) = prior.iter().rev().find(|(line, _)| *line < *start)
+        {
+            selected.insert(pre_id.clone());
         }
     }
 
@@ -1291,6 +1303,29 @@ mod tests {
     }
 
     #[test]
+    fn rust_reaching_defs_partial_branch_keeps_pre_branch_def() {
+        let src = "let x = 0;\nif cond {\n    x = 1;\n}\nlet y = x;\n";
+        let dfg = RustDfgBuilder::build("f.rs", src);
+
+        let use_id = "f.rs:use:x:5";
+        let incoming: std::collections::BTreeSet<_> = dfg
+            .edges
+            .iter()
+            .filter(|e| e.kind == DependencyKind::Data && e.to == use_id)
+            .map(|e| e.from.clone())
+            .collect();
+
+        assert!(
+            incoming.iter().any(|id| id.ends_with(":def:x:3")),
+            "branch def should reach join"
+        );
+        assert!(
+            incoming.iter().any(|id| id.ends_with(":def:x:1")),
+            "pre-branch def should remain for non-taken path"
+        );
+    }
+
+    #[test]
     fn ruby_alias_assignment_adds_def_to_def_edge() {
         let src = "a = seed\nb = a\nreturn b\n";
         let dfg = RubyDfgBuilder::build("test.rb", src);
@@ -1322,6 +1357,29 @@ mod tests {
                 && e.from.ends_with(":def:a:1")
                 && e.to.ends_with(":def:c:4")
         }));
+    }
+
+    #[test]
+    fn ruby_reaching_defs_partial_branch_keeps_pre_branch_def() {
+        let src = "a = seed\nif cond\n  a = other\nend\nb = a\n";
+        let dfg = RubyDfgBuilder::build("test.rb", src);
+
+        let use_id = "test.rb:use:a:5";
+        let incoming: std::collections::BTreeSet<_> = dfg
+            .edges
+            .iter()
+            .filter(|e| e.kind == DependencyKind::Data && e.to == use_id)
+            .map(|e| e.from.clone())
+            .collect();
+
+        assert!(
+            incoming.iter().any(|id| id.ends_with(":def:a:3")),
+            "branch def should reach join"
+        );
+        assert!(
+            incoming.iter().any(|id| id.ends_with(":def:a:1")),
+            "pre-branch def should remain for non-taken path"
+        );
     }
 
     #[test]
