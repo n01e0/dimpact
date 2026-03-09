@@ -1098,6 +1098,69 @@ end
     }
 
     #[test]
+    fn ruby_dynamic_fixture_resolver_combo_regression() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_resolver_combo.rb"
+        ));
+        let ana = SpecRubyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic_resolver_combo.rb", src);
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]", r.name, r.line, q),
+                None => format!("{}@{}", r.name, r.line),
+            })
+            .collect();
+
+        assert!(names.contains(&"base_alias"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"base_defined"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"included_api"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"mixed_from_prepend"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"class_api"), "refs={refs_dbg:?}");
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "included_api" && r.line == 47 && r.qualifier.is_some() && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "mixed_from_prepend"
+                    && r.line == 48
+                    && r.qualifier.is_some()
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "class_api" && r.line == 49 && r.qualifier.is_some() && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "method_missing" && r.line == 50 && r.qualifier.is_none() && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "respond_to_missing?"
+                    && r.line == 50
+                    && r.qualifier.is_none()
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(!names.contains(&"send"), "refs={refs_dbg:?}");
+        assert!(!names.contains(&"public_send"), "refs={refs_dbg:?}");
+    }
+
+    #[test]
     fn ruby_extend_module_connects_to_call_inference_via_qualified_ref() {
         let src = r#"module ClassMixin
   def class_api
