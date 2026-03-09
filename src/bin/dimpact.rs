@@ -956,6 +956,11 @@ fn run_impact(
                 }
             }
             let mut pdg = PdgBuilder::build(&combined, &refs);
+            let base_pairs: std::collections::HashSet<(String, String)> = pdg
+                .edges
+                .iter()
+                .map(|e| (e.from.clone(), e.to.clone()))
+                .collect();
             if with_propagation {
                 PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
             }
@@ -965,8 +970,23 @@ fn run_impact(
             }
             let confirmed_pairs: std::collections::HashSet<(String, String)> = refs
                 .iter()
+                .filter(|r| {
+                    matches!(
+                        r.certainty,
+                        dimpact::ir::reference::EdgeCertainty::Confirmed
+                    )
+                })
                 .map(|r| (r.from.0.clone(), r.to.0.clone()))
                 .collect();
+            let dynamic_pairs: std::collections::HashSet<(String, String)> = if with_propagation {
+                pdg.edges
+                    .iter()
+                    .map(|e| (e.from.clone(), e.to.clone()))
+                    .filter(|pair| !base_pairs.contains(pair))
+                    .collect()
+            } else {
+                std::collections::HashSet::new()
+            };
             let pdg_refs: Vec<Reference> = pdg
                 .edges
                 .into_iter()
@@ -974,6 +994,8 @@ fn run_impact(
                     let pair = (e.from.clone(), e.to.clone());
                     let certainty = if confirmed_pairs.contains(&pair) {
                         dimpact::ir::reference::EdgeCertainty::Confirmed
+                    } else if dynamic_pairs.contains(&pair) {
+                        dimpact::ir::reference::EdgeCertainty::DynamicFallback
                     } else {
                         dimpact::ir::reference::EdgeCertainty::Inferred
                     };
@@ -1051,13 +1073,33 @@ fn run_impact(
             }
         }
         let mut pdg = PdgBuilder::build(&combined, &refs);
+        let base_pairs: std::collections::HashSet<(String, String)> = pdg
+            .edges
+            .iter()
+            .map(|e| (e.from.clone(), e.to.clone()))
+            .collect();
         if with_propagation {
             PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
         }
         let confirmed_pairs: std::collections::HashSet<(String, String)> = refs
             .iter()
+            .filter(|r| {
+                matches!(
+                    r.certainty,
+                    dimpact::ir::reference::EdgeCertainty::Confirmed
+                )
+            })
             .map(|r| (r.from.0.clone(), r.to.0.clone()))
             .collect();
+        let dynamic_pairs: std::collections::HashSet<(String, String)> = if with_propagation {
+            pdg.edges
+                .iter()
+                .map(|e| (e.from.clone(), e.to.clone()))
+                .filter(|pair| !base_pairs.contains(pair))
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
         let pdg_refs: Vec<Reference> = pdg
             .edges
             .into_iter()
@@ -1065,6 +1107,8 @@ fn run_impact(
                 let pair = (e.from.clone(), e.to.clone());
                 let certainty = if confirmed_pairs.contains(&pair) {
                     dimpact::ir::reference::EdgeCertainty::Confirmed
+                } else if dynamic_pairs.contains(&pair) {
+                    dimpact::ir::reference::EdgeCertainty::DynamicFallback
                 } else {
                     dimpact::ir::reference::EdgeCertainty::Inferred
                 };
