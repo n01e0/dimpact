@@ -730,17 +730,36 @@ impl PdgBuilder {
             }
             let in_range_set: HashSet<&str> = in_range_ids.iter().map(|id| id.as_str()).collect();
 
-            let mut inputs: Vec<String> = in_range_ids
+            let mut param_like_inputs: Vec<String> = in_range_ids
                 .iter()
                 .filter(|id| id.contains(":def:"))
                 .filter(|id| {
-                    in_adj
+                    nodes_by_id
                         .get(id.as_str())
-                        .map(|froms| froms.iter().all(|f| !in_range_set.contains(*f)))
-                        .unwrap_or(true)
+                        .is_some_and(|n| n.line == s.range.start_line)
                 })
                 .cloned()
                 .collect();
+            param_like_inputs.sort();
+            param_like_inputs.dedup();
+
+            let mut inputs: Vec<String> = if !param_like_inputs.is_empty() {
+                // Prefer parameter-like defs on function start line as summary inputs.
+                param_like_inputs
+            } else {
+                // Fallback: entry defs with no incoming in-range data edges.
+                in_range_ids
+                    .iter()
+                    .filter(|id| id.contains(":def:"))
+                    .filter(|id| {
+                        in_adj
+                            .get(id.as_str())
+                            .map(|froms| froms.iter().all(|f| !in_range_set.contains(*f)))
+                            .unwrap_or(true)
+                    })
+                    .cloned()
+                    .collect()
+            };
             inputs.sort();
             inputs.dedup();
             if inputs.is_empty() {
@@ -1105,6 +1124,71 @@ mod pdg_tests {
             flow.impacted_node_ids
                 .iter()
                 .any(|id| id.ends_with(":use:b:3"))
+        );
+    }
+
+    #[test]
+    fn function_summary_prefers_parameter_inputs_over_local_roots() {
+        use crate::ir::{Symbol, SymbolKind, TextRange};
+
+        let dfg = RustDfgBuilder::build(
+            "f.rs",
+            "fn foo(a: i32) -> i32 {\n    let seed = 1;\n    let b = a + seed;\n    return b;\n}\n",
+        );
+        let pdg = PdgBuilder::build(&dfg, &[]);
+
+        let foo = Symbol {
+            id: SymbolId::new("rust", "f.rs", &SymbolKind::Function, "foo", 1),
+            name: "foo".to_string(),
+            kind: SymbolKind::Function,
+            file: "f.rs".to_string(),
+            range: TextRange {
+                start_line: 1,
+                end_line: 5,
+            },
+            language: "rust".to_string(),
+        };
+        let index = crate::ir::reference::SymbolIndex::build(vec![foo]);
+
+        let summaries = PdgBuilder::build_function_summaries(&pdg, &index);
+        let s = summaries.first().expect("summary for foo");
+
+        assert!(s.inputs.iter().any(|id| id.ends_with(":def:a:1")));
+        assert!(
+            !s.inputs.iter().any(|id| id.ends_with(":def:seed:2")),
+            "parameter-style input selection should suppress local root defs"
+        );
+    }
+
+    #[test]
+    fn function_summary_falls_back_to_root_defs_without_params() {
+        use crate::ir::{Symbol, SymbolKind, TextRange};
+
+        let dfg = RustDfgBuilder::build(
+            "f.rs",
+            "fn bar() -> i32 {\n    let seed = 1;\n    let out = seed;\n    return out;\n}\n",
+        );
+        let pdg = PdgBuilder::build(&dfg, &[]);
+
+        let bar = Symbol {
+            id: SymbolId::new("rust", "f.rs", &SymbolKind::Function, "bar", 1),
+            name: "bar".to_string(),
+            kind: SymbolKind::Function,
+            file: "f.rs".to_string(),
+            range: TextRange {
+                start_line: 1,
+                end_line: 5,
+            },
+            language: "rust".to_string(),
+        };
+        let index = crate::ir::reference::SymbolIndex::build(vec![bar]);
+
+        let summaries = PdgBuilder::build_function_summaries(&pdg, &index);
+        let s = summaries.first().expect("summary for bar");
+
+        assert!(
+            s.inputs.iter().any(|id| id.ends_with(":def:seed:2")),
+            "fallback root-def input should remain for parameterless function"
         );
     }
 }
