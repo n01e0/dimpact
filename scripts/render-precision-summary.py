@@ -55,6 +55,25 @@ def main() -> int:
                 f"changed={fp_ds.get('changed', 'n/a')}, impacted={fp_ds.get('impacted', 'n/a')})"
             )
 
+    if report.get("gateStatus") == "failed":
+        failed_langs = report.get("failedLanguages", [])
+        if failed_langs:
+            print("\n### Gate failures")
+            for row in failed_langs:
+                th = row.get("threshold", {})
+                delta = row.get("delta", {})
+                print(
+                    f"- {row.get('lang')}: "
+                    f"FN={row.get('fn')} (th={th.get('fn')}, delta={delta.get('fn')}), "
+                    f"FP={row.get('fp')} (th={th.get('fp')}, delta={delta.get('fp')})"
+                )
+        repro = report.get("reproductionCommand")
+        if repro:
+            print("\n### Reproduce gate failure")
+            print("```bash")
+            print(repro)
+            print("```")
+
     cases = report.get("cases", [])
     hotspots = [
         c
