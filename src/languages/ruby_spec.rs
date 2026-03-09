@@ -291,6 +291,108 @@ fn extract_first_send_like_arg(text: &str, method_name: &str) -> Option<String> 
     extract_call_args(text, method_name, 1).into_iter().next()
 }
 
+fn extract_ruby_const_path(arg_raw: &str) -> Option<String> {
+    let mut s = arg_raw.trim();
+    while s.starts_with('(') && s.ends_with(')') && s.len() >= 2 {
+        s = s[1..s.len() - 1].trim();
+    }
+    if let Some(rest) = s.strip_prefix("::") {
+        s = rest;
+    }
+    if s.is_empty() {
+        return None;
+    }
+    let seg_ok = |seg: &str| {
+        let mut chars = seg.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        first.is_ascii_uppercase() && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    if s.split("::").all(seg_ok) {
+        Some(s.to_string())
+    } else {
+        None
+    }
+}
+
+fn snake_case_ruby_const_segment(seg: &str) -> String {
+    let mut out = String::new();
+    let mut prev_is_lower_or_digit = false;
+    for ch in seg.chars() {
+        if ch.is_ascii_uppercase() {
+            if prev_is_lower_or_digit {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_is_lower_or_digit = false;
+        } else {
+            out.push(ch);
+            prev_is_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+    out
+}
+
+fn ruby_module_hints(const_path: &str) -> Vec<String> {
+    let raw = const_path.trim().trim_start_matches("::");
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![raw.to_string()];
+    out.push(raw.replace("::", "/"));
+
+    let snake_segments: Vec<String> = raw.split("::").map(snake_case_ruby_const_segment).collect();
+    if !snake_segments.is_empty() {
+        out.push(snake_segments.join("::"));
+        out.push(snake_segments.join("/"));
+    }
+
+    let mut dedup = std::collections::HashSet::new();
+    out.into_iter()
+        .filter(|h| dedup.insert(h.clone()))
+        .collect()
+}
+
+fn collect_module_methods_by_hint(
+    source: &str,
+) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
+    let lines: Vec<&str> = source.lines().collect();
+    let re_module =
+        Regex::new(r"^\s*module\s+([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)").unwrap();
+    let re_def = Regex::new(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_?!]*)\b").unwrap();
+
+    let mut map: std::collections::HashMap<String, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+
+    for (start_idx, line) in lines.iter().enumerate() {
+        let Some(cap) = re_module.captures(line) else {
+            continue;
+        };
+        let Some(mod_name) = cap.get(1).map(|m| m.as_str()) else {
+            continue;
+        };
+        let end_idx = find_ruby_block_end(&lines, start_idx);
+        let mut methods: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for inner in lines.iter().take(end_idx + 1).skip(start_idx + 1) {
+            if let Some(def_cap) = re_def.captures(inner)
+                && let Some(m) = def_cap.get(1)
+            {
+                methods.insert(m.as_str().to_string());
+            }
+        }
+        if methods.is_empty() {
+            continue;
+        }
+
+        for hint in ruby_module_hints(mod_name) {
+            map.entry(hint).or_default().extend(methods.iter().cloned());
+        }
+    }
+
+    map
+}
+
 impl LanguageAnalyzer for SpecRubyAnalyzer {
     fn language(&self) -> &'static str {
         "ruby"
@@ -363,6 +465,8 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
     fn unresolved_refs(&self, path: &str, source: &str) -> Vec<UnresolvedRef> {
         let mut out = Vec::new();
         let offs = line_offsets(source);
+        let module_methods_by_hint = collect_module_methods_by_hint(source);
+        let mut mixin_hints: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // Track simple assignment chains for send/public_send argument tracing.
         // Examples:
@@ -451,6 +555,16 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                         && let Some(resolved) = resolve_dynamic_name(&arg_raw, ln)
                     {
                         name = resolved;
+                    }
+
+                    if name == "include" || name == "extend" || name == "prepend" {
+                        for arg_raw in extract_call_args(text, &name, 8) {
+                            if let Some(mod_path) = extract_ruby_const_path(&arg_raw) {
+                                for hint in ruby_module_hints(&mod_path) {
+                                    mixin_hints.insert(hint);
+                                }
+                            }
+                        }
                     }
 
                     // Conservative edge for alias_method: add refs for both alias and original targets.
@@ -548,12 +662,58 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
             }
         }
 
+        // Bridge include/extend/prepend resolution to call inference:
+        // if a call name matches methods found on mixin modules, emit a qualified ref
+        // so resolver scoring can prefer the corresponding module path.
+        if !mixin_hints.is_empty() && !module_methods_by_hint.is_empty() {
+            let mut seen_qualified: std::collections::HashSet<(u32, String, String)> = out
+                .iter()
+                .filter_map(|r| {
+                    r.qualifier
+                        .as_ref()
+                        .map(|q| (r.line, r.name.clone(), q.clone()))
+                })
+                .collect();
+
+            for r in out.clone() {
+                if !r.is_method || r.qualifier.is_some() {
+                    continue;
+                }
+                if r.name == "include"
+                    || r.name == "extend"
+                    || r.name == "prepend"
+                    || r.name == "method_missing"
+                    || r.name == "respond_to_missing?"
+                {
+                    continue;
+                }
+
+                for hint in &mixin_hints {
+                    let Some(methods) = module_methods_by_hint.get(hint) else {
+                        continue;
+                    };
+                    if !methods.contains(&r.name) {
+                        continue;
+                    }
+                    if seen_qualified.insert((r.line, r.name.clone(), hint.clone())) {
+                        out.push(UnresolvedRef {
+                            name: r.name.clone(),
+                            kind: RefKind::Call,
+                            file: path.to_string(),
+                            line: r.line,
+                            qualifier: Some(hint.clone()),
+                            is_method: true,
+                        });
+                    }
+                }
+            }
+        }
+
         // Conservative dynamic-dispatch fallback edges:
         // when unresolved call names match the method_missing/respond_to_missing? naming policy,
         // add fallback refs so downstream impact analysis can keep dynamic paths visible.
         let re_method_missing_def = Regex::new(r"(?m)^\s*def\s+method_missing\b").unwrap();
-        let re_respond_to_missing_def =
-            Regex::new(r"(?m)^\s*def\s+respond_to_missing\?").unwrap();
+        let re_respond_to_missing_def = Regex::new(r"(?m)^\s*def\s+respond_to_missing\?").unwrap();
         let has_method_missing = re_method_missing_def.is_match(source);
         let has_respond_to_missing = re_respond_to_missing_def.is_match(source);
         if has_method_missing || has_respond_to_missing {
@@ -907,9 +1067,18 @@ end
         assert!(names.contains(&"dyn_alpha"));
         assert!(names.contains(&"from_included"));
         assert!(names.contains(&"around_before"));
+        assert!(refs.iter().any(|r| {
+            r.name == "from_included" && r.line == 28 && r.qualifier.is_some() && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "around_before" && r.line == 29 && r.qualifier.is_some() && r.is_method
+        }));
         let refs_dbg: Vec<_> = refs
             .iter()
-            .map(|r| format!("{}@{}", r.name, r.line))
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]", r.name, r.line, q),
+                None => format!("{}@{}", r.name, r.line),
+            })
             .collect();
         assert!(
             refs.iter().any(|r| {
@@ -919,10 +1088,37 @@ end
         );
         assert!(
             refs.iter().any(|r| {
-                r.name == "respond_to_missing?" && r.line == 27 && r.qualifier.is_none() && r.is_method
+                r.name == "respond_to_missing?"
+                    && r.line == 27
+                    && r.qualifier.is_none()
+                    && r.is_method
             }),
             "refs={refs_dbg:?}"
         );
+    }
+
+    #[test]
+    fn ruby_extend_module_connects_to_call_inference_via_qualified_ref() {
+        let src = r#"module ClassMixin
+  def class_api
+    :ok
+  end
+end
+
+class UsesExtend
+  extend ClassMixin
+
+  def execute
+    self.class_api
+  end
+end
+"#;
+        let ana = SpecRubyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/ruby_extend_inference.rb", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "class_api" && r.line == 11 && r.qualifier.is_some() && r.is_method
+        }));
     }
 
     #[test]
