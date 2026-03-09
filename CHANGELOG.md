@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.5.0 - draft
+
+_Change range: `v0.4.1..HEAD`._
+
+### Major changes
+- Added confidence-threshold filtering controls for impact traversal/output:
+  - `--min-confidence confirmed|inferred|dynamic-fallback`
+  - `--exclude-dynamic-fallback`
+- Reflected confidence filtering results in outputs:
+  - JSON/YAML now include `confidence_filter` metadata when filtering is active
+  - CLI logs include filtered-edge summary (`kept/input`)
+- Extended PDG pipeline for higher precision and explainability:
+  - lightweight alias propagation improvements (assignment chains / reassignments)
+  - stabilized SSA-like branch join behavior for def-use
+  - minimal function summary (`input -> impacted`) implementation
+  - inter-procedural propagation connected to function summaries
+  - PDG-path certainty unified to `confirmed/inferred`
+- Expanded dynamic-language resolvers and hard fixtures:
+  - Ruby: stronger `send/public_send`, `alias_method/define_method`, `method_missing/respond_to_missing?`, mixin and DSL hash-dispatch inference
+  - Python: stronger `getattr/setattr`, descriptor/decorator-chain, importlib dynamic import, monkey-patch/metaclass/protocol dynamic cases
+- Strengthened hard corpus coverage for Go/Java dynamic dispatch patterns and cross-language precision regression fixtures.
+
+### Operational changes
+- Added strict-LSP oracle diff comparison script:
+  - `scripts/compare-impact-vs-lsp-oracle.sh`
+- Precision gate evolved from global-only thresholds to per-language threshold control:
+  - `DIMPACT_PRECISION_FN_MAX_BY_LANG`
+  - `DIMPACT_PRECISION_FP_MAX_BY_LANG`
+- CI precision summary now reports:
+  - confidence distribution
+  - per-language FN/FP changed-vs-impacted breakdown
+  - per-language threshold deltas
+  - gate-failure reproduction command
+- Regression guardrails were reinforced with additional fixture-backed checks and release-prep test/clippy execution (`engine_lsp`, full `cargo test -q`, `clippy -D warnings`).
+
+### Notes
+- Dynamic-heavy Ruby/Python lanes now support language-specific threshold tuning while keeping stricter zero-threshold policy for TS/TSX/Rust/Go/Java lanes.
+- Confidence filtering preserves default behavior when no filter flags are provided; filtering is opt-in.
+
 ## 0.4.1 - draft
 
 ### Major changes
