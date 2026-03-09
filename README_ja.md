@@ -61,6 +61,11 @@ dimpact id --name foo -f json
   - `--seed-json <json|string|path|->` JSON 文字列・ファイル・stdin を受け付け
   - シード指定時は言語をシードから判定（混在はエラー）
 - 出力形式: `-f json|yaml|dot|html`
+  - confidence フィルタ（`--min-confidence` / `--exclude-dynamic-fallback`）適用時、JSON/YAML 出力に `confidence_filter` ブロックが追加されます:
+    - `min_confidence`
+    - `exclude_dynamic_fallback`
+    - `input_edge_count`
+    - `kept_edge_count`
 
 ### Impact オプション（`impact` サブコマンド）
 - `--direction callers|callees|both` : 方向 (既定: callers)

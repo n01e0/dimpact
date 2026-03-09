@@ -45,6 +45,11 @@ CLI Overview
   - `--seed-json <json|string|path|->` accepts array of strings or objects
   - When seeds are present, language is inferred from seeds (mixed languages error)
 - Output formats: `-f json|yaml|dot|html`
+  - When confidence filtering is applied (`--min-confidence` and/or `--exclude-dynamic-fallback`), JSON/YAML output includes a `confidence_filter` block with:
+    - `min_confidence`
+    - `exclude_dynamic_fallback`
+    - `input_edge_count`
+    - `kept_edge_count`
   
 - Impact Options (subcommand `impact`):
   - `--direction callers|callees|both` : traversal direction (default: callers)
