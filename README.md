@@ -180,6 +180,9 @@ Usage Examples
     - Go/Java jobs are additive guardrails using fixed heavy diff fixtures (not a replacement for Rust baseline runs).
     - Threshold values are language/fixture specific; do not compare absolute counts across Rust vs Go/Java.
     - Keep tuning policy conservative (small step updates) to avoid destabilizing existing TS/Rust CI behavior.
+- Compare output diff with strict LSP as oracle:
+  - `scripts/compare-impact-vs-lsp-oracle.sh --base origin/main --direction callers --lang rust --report-json /tmp/oracle-diff.json`
+  - fixed diff file + fail on mismatch: `scripts/compare-impact-vs-lsp-oracle.sh --diff-file /tmp/dimpact.diff --lang rust --with-edges --fail-on-diff`
 - Seed via Symbol IDs (no diff needed):
   - `dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json`
 - Seed via JSON file:
