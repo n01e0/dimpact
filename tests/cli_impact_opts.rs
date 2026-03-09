@@ -1,3 +1,4 @@
+use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -212,4 +213,71 @@ fn cli_impact_exclude_dynamic_fallback_matches_min_confidence_inferred() {
     let edges_a = va["edges"].as_array().unwrap().len();
     let edges_b = vb["edges"].as_array().unwrap().len();
     assert_eq!(edges_a, edges_b);
+}
+
+#[test]
+fn cli_impact_json_reports_confidence_filter_summary() {
+    let (_tmp, repo) = setup_repo_triple();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--exclude-dynamic-fallback")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("confidence filter applied"));
+
+    let v: serde_json::Value = serde_json::from_slice(assert.get_output().stdout.as_ref()).unwrap();
+    let cf = &v["confidence_filter"];
+    assert_eq!(cf["exclude_dynamic_fallback"], true);
+    assert!(
+        cf["input_edge_count"].as_u64().unwrap_or(0) >= cf["kept_edge_count"].as_u64().unwrap_or(0)
+    );
+}
+
+#[test]
+fn cli_impact_yaml_reports_confidence_filter_summary() {
+    let (_tmp, repo) = setup_repo_triple();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--min-confidence")
+        .arg("inferred")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("yaml")
+        .write_stdin(diff)
+        .assert()
+        .success();
+
+    let v: serde_yaml::Value = serde_yaml::from_slice(assert.get_output().stdout.as_ref()).unwrap();
+    let cf = v
+        .get("confidence_filter")
+        .and_then(|x| x.as_mapping())
+        .expect("confidence_filter mapping in yaml output");
+    let min_key = serde_yaml::Value::from("min_confidence");
+    let exclude_key = serde_yaml::Value::from("exclude_dynamic_fallback");
+    assert_eq!(cf.get(&min_key).and_then(|x| x.as_str()), Some("inferred"));
+    assert_eq!(cf.get(&exclude_key).and_then(|x| x.as_bool()), Some(false));
 }
