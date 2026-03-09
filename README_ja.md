@@ -207,6 +207,11 @@ scripts/bench-impact-engines.sh --diff-file bench-fixtures/java-heavy.diff --run
 # - 閾値は言語/fixture ごとに別管理し、Rust と Go/Java の絶対件数を直接比較しない
 # - 閾値調整は小刻みに行い、既存 TS/Rust CI の安定性を優先する
 
+# strict LSP を oracle とした差分比較（候補エンジンとの差分）
+scripts/compare-impact-vs-lsp-oracle.sh --base origin/main --direction callers --lang rust --report-json /tmp/oracle-diff.json
+# 固定 diff + 差分があれば失敗
+scripts/compare-impact-vs-lsp-oracle.sh --diff-file /tmp/dimpact.diff --lang rust --with-edges --fail-on-diff
+
 # Symbol ID でシードし、diff 不要で影響解析
 dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json
 
