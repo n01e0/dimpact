@@ -417,6 +417,7 @@ mod html {
                         "source": e.from.0,
                         "target": e.to.0,
                         "certainty": certainty,
+                        "confidence": certainty,
                     }
                 }));
 
