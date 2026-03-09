@@ -322,9 +322,24 @@ for r in results:
 lang_totals = {}
 for r in results:
     lang = r["lang"]
-    t = lang_totals.setdefault(lang, {"fn": 0, "fp": 0, "cases": []})
+    t = lang_totals.setdefault(
+        lang,
+        {
+            "fn": 0,
+            "fp": 0,
+            "fn_changed": 0,
+            "fn_impacted": 0,
+            "fp_changed": 0,
+            "fp_impacted": 0,
+            "cases": [],
+        },
+    )
     t["fn"] += r["fn"]["total"]
     t["fp"] += r["fp"]["total"]
+    t["fn_changed"] += r["diffSummary"]["fn"]["changed"]
+    t["fn_impacted"] += r["diffSummary"]["fn"]["impacted"]
+    t["fp_changed"] += r["diffSummary"]["fp"]["changed"]
+    t["fp_impacted"] += r["diffSummary"]["fp"]["impacted"]
     t["cases"].append(r["name"])
 
 lang_thresholds = {}
@@ -347,8 +362,24 @@ report = {
         lang: {
             "fn": lang_totals[lang]["fn"],
             "fp": lang_totals[lang]["fp"],
-            "cases": sorted(lang_totals[lang]["cases"]),
+            "diffSummary": {
+                "fn": {
+                    "changed": lang_totals[lang]["fn_changed"],
+                    "impacted": lang_totals[lang]["fn_impacted"],
+                    "total": lang_totals[lang]["fn"],
+                },
+                "fp": {
+                    "changed": lang_totals[lang]["fp_changed"],
+                    "impacted": lang_totals[lang]["fp_impacted"],
+                    "total": lang_totals[lang]["fp"],
+                },
+            },
             "threshold": lang_thresholds[lang],
+            "thresholdDiff": {
+                "fn": lang_totals[lang]["fn"] - lang_thresholds[lang]["fn"],
+                "fp": lang_totals[lang]["fp"] - lang_thresholds[lang]["fp"],
+            },
+            "cases": sorted(lang_totals[lang]["cases"]),
         }
         for lang in sorted(lang_totals)
     },
@@ -389,7 +420,9 @@ for lang in sorted(lang_totals):
     th = lang_thresholds[lang]
     lt = lang_totals[lang]
     print(
-        f"  - {lang}: fn={lt['fn']} (th={th['fn']}) fp={lt['fp']} (th={th['fp']})"
+        f"  - {lang}: "
+        f"fn={lt['fn']} (th={th['fn']}, delta={lt['fn'] - th['fn']}, changed={lt['fn_changed']}, impacted={lt['fn_impacted']}) "
+        f"fp={lt['fp']} (th={th['fp']}, delta={lt['fp'] - th['fp']}, changed={lt['fp_changed']}, impacted={lt['fp_impacted']})"
     )
 
 for r in results:
