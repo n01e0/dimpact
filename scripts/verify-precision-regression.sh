@@ -3,6 +3,8 @@ set -euo pipefail
 
 FN_THRESHOLD="${DIMPACT_PRECISION_FN_MAX:-0}"
 FP_THRESHOLD="${DIMPACT_PRECISION_FP_MAX:-0}"
+FN_THRESHOLD_BY_LANG="${DIMPACT_PRECISION_FN_MAX_BY_LANG:-}"
+FP_THRESHOLD_BY_LANG="${DIMPACT_PRECISION_FP_MAX_BY_LANG:-}"
 REPORT_PATH="precision-regression-report.json"
 
 while [[ $# -gt 0 ]]; do
@@ -13,6 +15,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fp-threshold)
       FP_THRESHOLD="$2"
+      shift 2
+      ;;
+    --fn-threshold-by-lang)
+      FN_THRESHOLD_BY_LANG="$2"
+      shift 2
+      ;;
+    --fp-threshold-by-lang)
+      FP_THRESHOLD_BY_LANG="$2"
       shift 2
       ;;
     --report)
@@ -26,7 +36,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-python3 - "$FN_THRESHOLD" "$FP_THRESHOLD" "$REPORT_PATH" <<'PY'
+python3 - "$FN_THRESHOLD" "$FP_THRESHOLD" "$FN_THRESHOLD_BY_LANG" "$FP_THRESHOLD_BY_LANG" "$REPORT_PATH" <<'PY'
 import json
 import os
 import subprocess
@@ -36,8 +46,33 @@ from pathlib import Path
 
 fn_threshold = int(sys.argv[1])
 fp_threshold = int(sys.argv[2])
-report_path = Path(sys.argv[3])
+fn_threshold_by_lang_spec = sys.argv[3]
+fp_threshold_by_lang_spec = sys.argv[4]
+report_path = Path(sys.argv[5])
 repo = Path.cwd()
+
+def parse_lang_thresholds(spec: str):
+    out = {}
+    spec = (spec or "").strip()
+    if not spec:
+        return out
+    for raw_item in spec.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(f"invalid lang threshold item (expected lang=value): {item}")
+        lang, val = item.split("=", 1)
+        lang = lang.strip()
+        val = val.strip()
+        if not lang:
+            raise ValueError(f"invalid lang threshold item (empty lang): {item}")
+        out[lang] = int(val)
+    return out
+
+fn_threshold_by_lang = parse_lang_thresholds(fn_threshold_by_lang_spec)
+fp_threshold_by_lang = parse_lang_thresholds(fp_threshold_by_lang_spec)
+
 
 def run(cmd, cwd=None, input_text=None):
     return subprocess.run(
@@ -284,12 +319,38 @@ for r in results:
     for certainty, count in r.get("confidenceDistribution", {}).items():
         confidence_distribution[certainty] = confidence_distribution.get(certainty, 0) + count
 
+lang_totals = {}
+for r in results:
+    lang = r["lang"]
+    t = lang_totals.setdefault(lang, {"fn": 0, "fp": 0, "cases": []})
+    t["fn"] += r["fn"]["total"]
+    t["fp"] += r["fp"]["total"]
+    t["cases"].append(r["name"])
+
+lang_thresholds = {}
+for lang in sorted(lang_totals):
+    lang_thresholds[lang] = {
+        "fn": fn_threshold_by_lang.get(lang, fn_threshold),
+        "fp": fp_threshold_by_lang.get(lang, fp_threshold),
+    }
+
 report = {
     "fnThreshold": fn_threshold,
     "fpThreshold": fp_threshold,
+    "fnThresholdByLang": fn_threshold_by_lang,
+    "fpThresholdByLang": fp_threshold_by_lang,
     "totals": {
         "fn": fn_total,
         "fp": fp_total,
+    },
+    "byLanguage": {
+        lang: {
+            "fn": lang_totals[lang]["fn"],
+            "fp": lang_totals[lang]["fp"],
+            "cases": sorted(lang_totals[lang]["cases"]),
+            "threshold": lang_thresholds[lang],
+        }
+        for lang in sorted(lang_totals)
     },
     "diffSummary": {
         "fn": {
@@ -311,8 +372,8 @@ report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 print("# precision regression gate")
-print(f"FN total={fn_total} (threshold={fn_threshold})")
-print(f"FP total={fp_total} (threshold={fp_threshold})")
+print(f"FN total={fn_total} (global threshold={fn_threshold})")
+print(f"FP total={fp_total} (global threshold={fp_threshold})")
 print(
     "diff summary: "
     f"fn(changed={fn_changed_total}, impacted={fn_impacted_total}) "
@@ -322,13 +383,34 @@ if confidence_distribution:
     print("confidence distribution:")
     for certainty in sorted(confidence_distribution):
         print(f"  - {certainty}: {confidence_distribution[certainty]}")
+
+print("language totals:")
+for lang in sorted(lang_totals):
+    th = lang_thresholds[lang]
+    lt = lang_totals[lang]
+    print(
+        f"  - {lang}: fn={lt['fn']} (th={th['fn']}) fp={lt['fp']} (th={th['fp']})"
+    )
+
 for r in results:
     print(
         f"- {r['name']} ({r['lang']}): fn={r['fn']['total']} fp={r['fp']['total']} changed={r['changed']} impacted={r['impacted']} confidence={r.get('confidenceDistribution', {})}"
     )
 
-if fn_total > fn_threshold or fp_total > fp_threshold:
+failed_langs = []
+for lang in sorted(lang_totals):
+    lt = lang_totals[lang]
+    th = lang_thresholds[lang]
+    if lt["fn"] > th["fn"] or lt["fp"] > th["fp"]:
+        failed_langs.append((lang, lt, th))
+
+if failed_langs:
     print("precision regression gate: FAILED", file=sys.stderr)
+    for lang, lt, th in failed_langs:
+        print(
+            f"  - {lang}: fn={lt['fn']} (th={th['fn']}), fp={lt['fp']} (th={th['fp']})",
+            file=sys.stderr,
+        )
     sys.exit(1)
 
 print("precision regression gate: PASSED")

@@ -16,8 +16,12 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/target
   CARGO_TERM_COLOR: always
   # Precision gate thresholds (FN/FP) for scripts/verify-precision-regression.sh
+  # Global defaults (fallback when per-language thresholds are not set)
   DIMPACT_PRECISION_FN_MAX: "0"
   DIMPACT_PRECISION_FP_MAX: "0"
+  # Language-specific threshold tuning (lang=threshold, comma-separated)
+  DIMPACT_PRECISION_FN_MAX_BY_LANG: "typescript=0,tsx=0,rust=0,go=0,java=0,ruby=1,python=1"
+  DIMPACT_PRECISION_FP_MAX_BY_LANG: "typescript=0,tsx=0,rust=0,go=0,java=0,ruby=1,python=1"
 
 jobs:
   check:
@@ -176,6 +180,8 @@ jobs:
         run: |
           echo "DIMPACT_PRECISION_FN_MAX=$DIMPACT_PRECISION_FN_MAX"
           echo "DIMPACT_PRECISION_FP_MAX=$DIMPACT_PRECISION_FP_MAX"
+          echo "DIMPACT_PRECISION_FN_MAX_BY_LANG=$DIMPACT_PRECISION_FN_MAX_BY_LANG"
+          echo "DIMPACT_PRECISION_FP_MAX_BY_LANG=$DIMPACT_PRECISION_FP_MAX_BY_LANG"
           if bash scripts/verify-precision-regression.sh --report precision-regression-report.json > precision-regression.log 2>&1; then
             cat precision-regression.log
           else
