@@ -37,6 +37,17 @@ def main() -> int:
         for certainty in sorted(confidence):
             print(f"- {certainty}: {confidence[certainty]}")
 
+    by_language = report.get("byLanguage", {})
+    if by_language:
+        print("\n### By language thresholds")
+        for lang in sorted(by_language):
+            row = by_language[lang] or {}
+            th = row.get("threshold", {})
+            print(
+                f"- {lang}: fn={row.get('fn', 'n/a')} (th={th.get('fn', 'n/a')}), "
+                f"fp={row.get('fp', 'n/a')} (th={th.get('fp', 'n/a')})"
+            )
+
     cases = report.get("cases", [])
     hotspots = [
         c
