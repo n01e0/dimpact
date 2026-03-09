@@ -23,6 +23,7 @@ pub enum EdgeCertainty {
     #[default]
     Confirmed,
     Inferred,
+    DynamicFallback,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
