@@ -126,6 +126,24 @@ cases = [
         "expected_changed": {"Run"},
         "expected_impacted": set(),
     },
+    {
+        "name": "ruby-hard-v79",
+        "lang": "ruby",
+        "file": "demo/a.rb",
+        "fixture": "tests/fixtures/ruby/analyzer_hard_cases_dynamic_send_public_send.rb",
+        "replace": [(":ok", ":ok2", 1)],
+        "expected_changed": {"DynamicDispatch", "target_sym"},
+        "expected_impacted": {"execute"},
+    },
+    {
+        "name": "python-hard-v79",
+        "lang": "python",
+        "file": "demo/a.py",
+        "fixture": "tests/fixtures/python/analyzer_hard_cases_dynamic_getattr_setattr_getattribute.py",
+        "replace": [("payload.strip()", "payload.rstrip()", -1)],
+        "expected_changed": {"DynamicAccessor", "__getattr__"},
+        "expected_impacted": {"__init__", "execute"},
+    },
 ]
 
 def run_case(case):

@@ -146,6 +146,18 @@ fn changed_impacted_golden_baseline_matrix_v73() {
         "return b.inner.Handle(context.Background()) // tweak",
     );
 
+    let ruby_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_send_public_send.rb"
+    ));
+    let ruby_after = ruby_before.replacen(":ok", ":ok2", 1);
+
+    let python_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/python/analyzer_hard_cases_dynamic_getattr_setattr_getattribute.py"
+    ));
+    let python_after = python_before.replace("payload.strip()", "payload.rstrip()");
+
     let cases = vec![
         (
             "typescript",
@@ -186,6 +198,22 @@ fn changed_impacted_golden_baseline_matrix_v73() {
             go_after.as_str(),
             BTreeSet::from(["Run".to_string()]),
             BTreeSet::new(),
+        ),
+        (
+            "ruby",
+            "demo/a.rb",
+            ruby_before,
+            ruby_after.as_str(),
+            BTreeSet::from(["DynamicDispatch".to_string(), "target_sym".to_string()]),
+            BTreeSet::from(["execute".to_string()]),
+        ),
+        (
+            "python",
+            "demo/a.py",
+            python_before,
+            python_after.as_str(),
+            BTreeSet::from(["DynamicAccessor".to_string(), "__getattr__".to_string()]),
+            BTreeSet::from(["__init__".to_string(), "execute".to_string()]),
         ),
     ];
 
