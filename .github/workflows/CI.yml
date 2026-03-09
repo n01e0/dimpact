@@ -15,6 +15,9 @@ concurrency:
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/target
   CARGO_TERM_COLOR: always
+  # Precision gate thresholds (FN/FP) for scripts/verify-precision-regression.sh
+  DIMPACT_PRECISION_FN_MAX: "0"
+  DIMPACT_PRECISION_FP_MAX: "0"
 
 jobs:
   check:
@@ -171,7 +174,9 @@ jobs:
           restore-keys: ${{ runner.os }}
       - name: Run precision regression gate (FN/FP threshold)
         run: |
-          if bash scripts/verify-precision-regression.sh --fn-threshold 0 --fp-threshold 0 --report precision-regression-report.json > precision-regression.log 2>&1; then
+          echo "DIMPACT_PRECISION_FN_MAX=$DIMPACT_PRECISION_FN_MAX"
+          echo "DIMPACT_PRECISION_FP_MAX=$DIMPACT_PRECISION_FP_MAX"
+          if bash scripts/verify-precision-regression.sh --report precision-regression-report.json > precision-regression.log 2>&1; then
             cat precision-regression.log
           else
             cat precision-regression.log
