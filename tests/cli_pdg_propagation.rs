@@ -73,3 +73,45 @@ fn pdg_propagation_adds_var_to_callee_edge() {
     // Roughly ensure there's an edge into the callee symbol ID
     assert!(stdout.contains("\"rust:f.rs:fn:callee:1\""));
 }
+
+#[test]
+fn pdg_path_assigns_confirmed_or_inferred_confidence_only() {
+    let (_tmp, repo) = setup_repo();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("impact")
+        .arg("--with-pdg")
+        .arg("--with-propagation")
+        .arg("--with-edges")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 output");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("json output");
+    let edges = v["edges"].as_array().expect("edges array");
+    assert!(!edges.is_empty(), "expected non-empty edges");
+
+    let certainties: std::collections::BTreeSet<String> = edges
+        .iter()
+        .filter_map(|e| e["certainty"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    assert!(
+        certainties
+            .iter()
+            .all(|c| c == "confirmed" || c == "inferred"),
+        "unexpected certainty values: {:?}",
+        certainties
+    );
+    assert!(
+        !certainties.contains("dynamic_fallback"),
+        "PDG path should not emit dynamic_fallback certainty"
+    );
+}
