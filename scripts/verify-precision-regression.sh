@@ -144,6 +144,15 @@ cases = [
         "expected_changed": {"DynamicAccessor", "__getattr__"},
         "expected_impacted": {"__init__", "execute"},
     },
+    {
+        "name": "python-hard-v50-monkey",
+        "lang": "python",
+        "file": "demo/a.py",
+        "fixture": "tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol.py",
+        "replace": [("payload.strip().upper()", "payload.strip().lower()", -1)],
+        "expected_changed": {"patched_run"},
+        "expected_impacted": {"install_patch", "execute"},
+    },
 ]
 
 def run_case(case):

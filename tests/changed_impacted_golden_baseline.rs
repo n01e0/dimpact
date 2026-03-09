@@ -85,7 +85,8 @@ fn run_changed_and_impacted(
         .write_stdin(String::from_utf8(diff2.stdout).unwrap())
         .assert()
         .success();
-    let impact_json: Value = serde_json::from_slice(impact_assert.get_output().stdout.as_ref()).unwrap();
+    let impact_json: Value =
+        serde_json::from_slice(impact_assert.get_output().stdout.as_ref()).unwrap();
 
     let impacted_names: BTreeSet<String> = impact_json["impacted_symbols"]
         .as_array()
@@ -158,6 +159,13 @@ fn changed_impacted_golden_baseline_matrix_v73() {
     ));
     let python_after = python_before.replace("payload.strip()", "payload.rstrip()");
 
+    let python_monkey_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol.py"
+    ));
+    let python_monkey_after =
+        python_monkey_before.replace("payload.strip().upper()", "payload.strip().lower()");
+
     let cases = vec![
         (
             "typescript",
@@ -214,6 +222,14 @@ fn changed_impacted_golden_baseline_matrix_v73() {
             python_after.as_str(),
             BTreeSet::from(["DynamicAccessor".to_string(), "__getattr__".to_string()]),
             BTreeSet::from(["__init__".to_string(), "execute".to_string()]),
+        ),
+        (
+            "python",
+            "demo/monkey.py",
+            python_monkey_before,
+            python_monkey_after.as_str(),
+            BTreeSet::from(["patched_run".to_string()]),
+            BTreeSet::from(["install_patch".to_string(), "execute".to_string()]),
         ),
     ];
 

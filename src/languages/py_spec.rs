@@ -198,6 +198,10 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             r#"(?m)(getattr|setattr)\s*\(\s*([^,\n\)]+)\s*,\s*([\"'][A-Za-z_][A-Za-z0-9_]*[\"']|[A-Za-z_][A-Za-z0-9_]*)"#,
         )
         .expect("valid python getattr/setattr regex");
+        let re_setattr_bind = Regex::new(
+            r#"(?m)setattr\s*\(\s*([^,\n\)]+)\s*,\s*([\"'][A-Za-z_][A-Za-z0-9_]*[\"']|[A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)"#,
+        )
+        .expect("valid python setattr binder regex");
         let re_str_lit =
             Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']$"#).expect("valid py str lit regex");
         let re_ident = Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).expect("valid py ident regex");
@@ -246,6 +250,33 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 file: path.to_string(),
                 line: ln,
                 qualifier: qual,
+                is_method,
+            });
+        }
+
+        // Conservative monkey-patch binder edge from setattr(..., <name>, <callable_ident>).
+        // Example:
+        //   setattr(RuntimePatch, attr_name, patched_run)
+        // Emit ref to patched callable so changed callable bodies impact patch installers/callers.
+        for cap in re_setattr_bind.captures_iter(source) {
+            let Some(full) = cap.get(0) else {
+                continue;
+            };
+            let Some(bound_ident) = cap.get(3).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
+            let ln = byte_to_line(&offs, full.start());
+            let is_method = false;
+            let key = (ln, bound_ident.clone(), None, is_method);
+            if !seen.insert(key) {
+                continue;
+            }
+            out.push(UnresolvedRef {
+                name: bound_ident,
+                kind: RefKind::Call,
+                file: path.to_string(),
+                line: ln,
+                qualifier: None,
                 is_method,
             });
         }
@@ -1853,6 +1884,11 @@ class Service:
             refs.iter().any(|r| {
                 r.name == "run" && r.qualifier.as_deref() == Some("RuntimePatch") && r.is_method
             }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "patched_run" && r.qualifier.is_none() && !r.is_method),
             "refs={refs_dbg:?}"
         );
         assert!(
