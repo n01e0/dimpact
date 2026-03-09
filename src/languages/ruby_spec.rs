@@ -548,10 +548,15 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
             }
         }
 
-        // Conservative method_missing fallback edge:
-        // if dynamic call names match method_missing naming policy, add an extra edge to `method_missing`.
+        // Conservative dynamic-dispatch fallback edges:
+        // when unresolved call names match the method_missing/respond_to_missing? naming policy,
+        // add fallback refs so downstream impact analysis can keep dynamic paths visible.
         let re_method_missing_def = Regex::new(r"(?m)^\s*def\s+method_missing\b").unwrap();
-        if re_method_missing_def.is_match(source) {
+        let re_respond_to_missing_def =
+            Regex::new(r"(?m)^\s*def\s+respond_to_missing\?").unwrap();
+        let has_method_missing = re_method_missing_def.is_match(source);
+        let has_respond_to_missing = re_respond_to_missing_def.is_match(source);
+        if has_method_missing || has_respond_to_missing {
             let re_method_def = Regex::new(r"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_?!]*)\b").unwrap();
             let declared_methods: std::collections::HashSet<String> = re_method_def
                 .captures_iter(source)
@@ -575,6 +580,11 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 .filter(|r| r.name == "method_missing")
                 .map(|r| r.line)
                 .collect();
+            let mut seen_respond_to_missing: std::collections::HashSet<u32> = out
+                .iter()
+                .filter(|r| r.name == "respond_to_missing?")
+                .map(|r| r.line)
+                .collect();
 
             for r in out.clone() {
                 if !r.is_method || r.qualifier.is_some() {
@@ -589,9 +599,21 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 if !dyn_prefixes.is_empty() && !dyn_prefixes.iter().any(|p| r.name.starts_with(p)) {
                     continue;
                 }
-                if seen_method_missing.insert(r.line) {
+
+                if has_method_missing && seen_method_missing.insert(r.line) {
                     out.push(UnresolvedRef {
                         name: "method_missing".to_string(),
+                        kind: RefKind::Call,
+                        file: path.to_string(),
+                        line: r.line,
+                        qualifier: None,
+                        is_method: true,
+                    });
+                }
+
+                if has_respond_to_missing && seen_respond_to_missing.insert(r.line) {
+                    out.push(UnresolvedRef {
+                        name: "respond_to_missing?".to_string(),
                         kind: RefKind::Call,
                         file: path.to_string(),
                         line: r.line,
@@ -885,8 +907,46 @@ end
         assert!(names.contains(&"dyn_alpha"));
         assert!(names.contains(&"from_included"));
         assert!(names.contains(&"around_before"));
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| format!("{}@{}", r.name, r.line))
+            .collect();
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "method_missing" && r.line == 27 && r.qualifier.is_none() && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "respond_to_missing?" && r.line == 27 && r.qualifier.is_none() && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+    }
+
+    #[test]
+    fn ruby_respond_to_missing_only_adds_fallback_edge() {
+        let src = r#"class RespondOnly
+  def respond_to_missing?(name, include_private = false)
+    name.to_s.start_with?("dyn_") || super
+  end
+
+  def execute
+    dyn_beta
+  end
+end
+"#;
+        let ana = SpecRubyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic_respond_only.rb", src);
         assert!(refs.iter().any(|r| {
-            r.name == "method_missing" && r.line == 27 && r.qualifier.is_none() && r.is_method
+            r.name == "respond_to_missing?" && r.line == 7 && r.qualifier.is_none() && r.is_method
         }));
+        assert!(
+            !refs
+                .iter()
+                .any(|r| r.name == "method_missing" && r.line == 7)
+        );
     }
 }
