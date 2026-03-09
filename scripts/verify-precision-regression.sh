@@ -39,6 +39,7 @@ done
 python3 - "$FN_THRESHOLD" "$FP_THRESHOLD" "$FN_THRESHOLD_BY_LANG" "$FP_THRESHOLD_BY_LANG" "$REPORT_PATH" <<'PY'
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -349,6 +350,38 @@ for lang in sorted(lang_totals):
         "fp": fp_threshold_by_lang.get(lang, fp_threshold),
     }
 
+failed_langs = []
+for lang in sorted(lang_totals):
+    lt = lang_totals[lang]
+    th = lang_thresholds[lang]
+    if lt["fn"] > th["fn"] or lt["fp"] > th["fp"]:
+        failed_langs.append(
+            {
+                "lang": lang,
+                "fn": lt["fn"],
+                "fp": lt["fp"],
+                "threshold": th,
+                "delta": {"fn": lt["fn"] - th["fn"], "fp": lt["fp"] - th["fp"]},
+            }
+        )
+
+repro_parts = [
+    f"DIMPACT_PRECISION_FN_MAX={shlex.quote(str(fn_threshold))}",
+    f"DIMPACT_PRECISION_FP_MAX={shlex.quote(str(fp_threshold))}",
+]
+if fn_threshold_by_lang_spec:
+    repro_parts.append(
+        f"DIMPACT_PRECISION_FN_MAX_BY_LANG={shlex.quote(fn_threshold_by_lang_spec)}"
+    )
+if fp_threshold_by_lang_spec:
+    repro_parts.append(
+        f"DIMPACT_PRECISION_FP_MAX_BY_LANG={shlex.quote(fp_threshold_by_lang_spec)}"
+    )
+repro_parts.append("bash scripts/verify-precision-regression.sh --report /tmp/precision-regression-report.json")
+reproduction_command = " ".join(repro_parts)
+
+gate_status = "failed" if failed_langs else "passed"
+
 report = {
     "fnThreshold": fn_threshold,
     "fpThreshold": fp_threshold,
@@ -396,6 +429,9 @@ report = {
         },
     },
     "confidenceDistribution": confidence_distribution,
+    "gateStatus": gate_status,
+    "failedLanguages": failed_langs,
+    "reproductionCommand": reproduction_command,
     "cases": results,
 }
 
@@ -430,20 +466,16 @@ for r in results:
         f"- {r['name']} ({r['lang']}): fn={r['fn']['total']} fp={r['fp']['total']} changed={r['changed']} impacted={r['impacted']} confidence={r.get('confidenceDistribution', {})}"
     )
 
-failed_langs = []
-for lang in sorted(lang_totals):
-    lt = lang_totals[lang]
-    th = lang_thresholds[lang]
-    if lt["fn"] > th["fn"] or lt["fp"] > th["fp"]:
-        failed_langs.append((lang, lt, th))
-
 if failed_langs:
     print("precision regression gate: FAILED", file=sys.stderr)
-    for lang, lt, th in failed_langs:
+    for row in failed_langs:
+        th = row["threshold"]
         print(
-            f"  - {lang}: fn={lt['fn']} (th={th['fn']}), fp={lt['fp']} (th={th['fp']})",
+            f"  - {row['lang']}: fn={row['fn']} (th={th['fn']}), fp={row['fp']} (th={th['fp']})",
             file=sys.stderr,
         )
+    print("reproduction command:", file=sys.stderr)
+    print(f"  {reproduction_command}", file=sys.stderr)
     sys.exit(1)
 
 print("precision regression gate: PASSED")
