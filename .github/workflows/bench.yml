@@ -71,7 +71,7 @@ jobs:
 
       - name: Upload benchmark artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-impact-engines
           path: |
@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload Go benchmark artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-go-strict-lsp
           path: |
@@ -212,7 +212,7 @@ jobs:
 
       - name: Upload Java benchmark artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-java-strict-lsp
           path: |
@@ -349,7 +349,7 @@ jobs:
 
       - name: Upload Python benchmark artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-python-strict-lsp
           path: |
@@ -416,7 +416,7 @@ jobs:
 
       - name: Upload TypeScript benchmark artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-typescript-strict-lsp
           path: |
@@ -481,7 +481,7 @@ jobs:
 
       - name: Upload JavaScript benchmark artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-javascript-strict-lsp
           path: |
@@ -546,7 +546,7 @@ jobs:
 
       - name: Upload Ruby benchmark artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-ruby-strict-lsp
           path: |
