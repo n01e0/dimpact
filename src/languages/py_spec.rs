@@ -643,15 +643,54 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             }
         }
 
-        // Conservative dynamic import edge from importlib.import_module / import_module alias calls.
+        // Conservative dynamic import edges from importlib-style loaders.
+        let offs = line_offsets(source);
         let re_call_importlib =
             Regex::new(r#"(?m)\bimportlib\.import_module\s*\(\s*([^,\)\n]+)"#).unwrap();
         let re_str_lit = Regex::new(r#"^[\"']([^\"']+)[\"']$"#).unwrap();
         let re_fstr_lit = Regex::new(r#"^f[\"']([^\"']+)[\"']$"#).unwrap();
+        let re_ident = Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).unwrap();
+        let re_assign_expr = Regex::new(
+            r#"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*|f?[\"'][^\n]+[\"'])\s*(?:#.*)?$"#,
+        )
+        .unwrap();
 
-        let parse_dynamic_import_target = |arg_raw: &str| -> Option<String> {
+        let mut assigned_module_exprs: std::collections::HashMap<String, Vec<(u32, String)>> =
+            std::collections::HashMap::new();
+        for cap in re_assign_expr.captures_iter(source) {
+            let Some(full) = cap.get(0) else {
+                continue;
+            };
+            let Some(var) = cap.get(1).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
+            let Some(rhs) = cap.get(2).map(|m| m.as_str().trim().to_string()) else {
+                continue;
+            };
+            let ln = byte_to_line(&offs, full.start());
+            assigned_module_exprs
+                .entry(var)
+                .or_default()
+                .push((ln, rhs));
+        }
+        for vals in assigned_module_exprs.values_mut() {
+            vals.sort_by_key(|(ln, _)| *ln);
+        }
+
+        fn parse_dynamic_import_target(
+            arg_raw: &str,
+            line: u32,
+            from_mod: &str,
+            re_str_lit: &Regex,
+            re_fstr_lit: &Regex,
+            re_ident: &Regex,
+            assigned_module_exprs: &std::collections::HashMap<String, Vec<(u32, String)>>,
+            depth: u8,
+        ) -> Option<String> {
+            if depth == 0 {
+                return None;
+            }
             let raw = arg_raw.trim();
-
             let module_raw = if let Some(cap) = re_str_lit.captures(raw) {
                 cap.get(1).map(|m| m.as_str().to_string())
             } else if let Some(cap) = re_fstr_lit.captures(raw) {
@@ -665,12 +704,28 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 } else {
                     Some(static_prefix)
                 }
+            } else if let Some(cap) = re_ident.captures(raw) {
+                let var = cap.get(1).map(|m| m.as_str())?;
+                let rhs = assigned_module_exprs
+                    .get(var)
+                    .and_then(|vals| vals.iter().rev().find(|(ln, _)| *ln <= line))
+                    .map(|(_, rhs)| rhs.clone())?;
+                return parse_dynamic_import_target(
+                    &rhs,
+                    line,
+                    from_mod,
+                    re_str_lit,
+                    re_fstr_lit,
+                    re_ident,
+                    assigned_module_exprs,
+                    depth - 1,
+                );
             } else {
                 None
             }?;
 
             let resolved = if module_raw.starts_with('.') {
-                resolve_from_import_module(&from_mod, &module_raw)
+                resolve_from_import_module(from_mod, &module_raw)
             } else {
                 module_raw.replace('.', "::")
             };
@@ -679,38 +734,106 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             } else {
                 Some(resolved)
             }
-        };
+        }
+
+        let add_dynamic_import_edge =
+            |map: &mut std::collections::HashMap<String, String>, ln: u32, arg: &str| {
+                if let Some(module_path) = parse_dynamic_import_target(
+                    arg,
+                    ln,
+                    &from_mod,
+                    &re_str_lit,
+                    &re_fstr_lit,
+                    &re_ident,
+                    &assigned_module_exprs,
+                    4,
+                ) {
+                    map.insert(format!("__glob__{}", module_path.clone()), module_path);
+                }
+            };
 
         for cap in re_call_importlib.captures_iter(source) {
+            let Some(full) = cap.get(0) else {
+                continue;
+            };
             let Some(arg) = cap.get(1).map(|m| m.as_str()) else {
                 continue;
             };
-            if let Some(module_path) = parse_dynamic_import_target(arg) {
-                map.insert(format!("__glob__{}", module_path.clone()), module_path);
-            }
+            let ln = byte_to_line(&offs, full.start());
+            add_dynamic_import_edge(&mut map, ln, arg);
         }
 
-        let import_module_aliases: Vec<String> = map
+        let import_module_fn_aliases: Vec<String> = map
             .iter()
-            .filter_map(|(k, v)| {
-                if v == "importlib::import_module" {
-                    Some(k.clone())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|(k, v)| (v == "importlib::import_module").then_some(k.clone()))
             .collect();
-
-        for alias in import_module_aliases {
+        for alias in import_module_fn_aliases {
             let pat = format!(r"(?m)\b{}\s*\(\s*([^,\)\n]+)", regex::escape(&alias));
             let re_call_alias = Regex::new(&pat).unwrap();
             for cap in re_call_alias.captures_iter(source) {
+                let Some(full) = cap.get(0) else {
+                    continue;
+                };
                 let Some(arg) = cap.get(1).map(|m| m.as_str()) else {
                     continue;
                 };
-                if let Some(module_path) = parse_dynamic_import_target(arg) {
-                    map.insert(format!("__glob__{}", module_path.clone()), module_path);
-                }
+                let ln = byte_to_line(&offs, full.start());
+                add_dynamic_import_edge(&mut map, ln, arg);
+            }
+        }
+
+        let importlib_module_aliases: Vec<String> = map
+            .iter()
+            .filter_map(|(k, v)| (v == "importlib").then_some(k.clone()))
+            .collect();
+        for alias in importlib_module_aliases {
+            let pat = format!(
+                r"(?m)\b{}\.import_module\s*\(\s*([^,\)\n]+)",
+                regex::escape(&alias)
+            );
+            let re_call_alias = Regex::new(&pat).unwrap();
+            for cap in re_call_alias.captures_iter(source) {
+                let Some(full) = cap.get(0) else {
+                    continue;
+                };
+                let Some(arg) = cap.get(1).map(|m| m.as_str()) else {
+                    continue;
+                };
+                let ln = byte_to_line(&offs, full.start());
+                add_dynamic_import_edge(&mut map, ln, arg);
+            }
+        }
+
+        let re_call_dunder_import = Regex::new(r#"(?m)\b__import__\s*\(\s*([^,\)\n]+)"#).unwrap();
+        for cap in re_call_dunder_import.captures_iter(source) {
+            let Some(full) = cap.get(0) else {
+                continue;
+            };
+            let Some(arg) = cap.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
+            let ln = byte_to_line(&offs, full.start());
+            add_dynamic_import_edge(&mut map, ln, arg);
+        }
+
+        let dunder_aliases: Vec<String> = map
+            .iter()
+            .filter_map(|(k, v)| {
+                (v == "builtins::__import__" || v == "__import__").then_some(k.clone())
+            })
+            .collect();
+        for alias in dunder_aliases {
+            let pat = format!(r"(?m)\b{}\s*\(\s*([^,\)\n]+)", regex::escape(&alias));
+            let re_call_alias = Regex::new(&pat).unwrap();
+            for cap in re_call_alias.captures_iter(source) {
+                let Some(full) = cap.get(0) else {
+                    continue;
+                };
+                let Some(arg) = cap.get(1).map(|m| m.as_str()) else {
+                    continue;
+                };
+                let ln = byte_to_line(&offs, full.start());
+                add_dynamic_import_edge(&mut map, ln, arg);
             }
         }
 
@@ -1048,6 +1171,50 @@ from pkg.star import *
             im.get("__glob__pkg::sub::plugins").map(String::as_str),
             Some("pkg::sub::plugins")
         );
+        assert_eq!(
+            im.get("__glob__plugins::extra").map(String::as_str),
+            Some("plugins::extra")
+        );
+    }
+
+    #[test]
+    fn imports_in_file_conservative_dynamic_import_handles_aliases_and_dunder() {
+        let src = r#"import importlib as il
+from builtins import __import__ as dyn_import
+
+
+def run(name):
+    target = ".plugins.runtime"
+    mod_a = il.import_module(target)
+
+    common_mod = "pkg.plugins.common"
+    mod_b = dyn_import(common_mod)
+
+    dynamic_target = f".ext.{name}"
+    mod_c = __import__(dynamic_target)
+    return mod_a, mod_b, mod_c
+"#;
+        let ana = SpecPyAnalyzer::new();
+        let im = ana.imports_in_file("pkg/sub/main.py", src);
+
+        assert_eq!(im.get("il").map(String::as_str), Some("importlib"));
+        assert_eq!(
+            im.get("dyn_import").map(String::as_str),
+            Some("builtins::__import__")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::sub::plugins::runtime")
+                .map(String::as_str),
+            Some("pkg::sub::plugins::runtime")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::plugins::common").map(String::as_str),
+            Some("pkg::plugins::common")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::sub::ext").map(String::as_str),
+            Some("pkg::sub::ext")
+        );
     }
 
     #[test]
@@ -1077,11 +1244,14 @@ class Service:
             })
             .collect();
 
-        assert!(refs.iter().any(|r| {
-            r.name == "__get__"
-                && r.qualifier.as_deref() == Some("UpperDescriptor")
-                && r.is_method
-        }), "refs={refs_dbg:?}");
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "__get__"
+                    && r.qualifier.as_deref() == Some("UpperDescriptor")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
     }
 
     #[test]
