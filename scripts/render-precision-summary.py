@@ -39,13 +39,20 @@ def main() -> int:
 
     by_language = report.get("byLanguage", {})
     if by_language:
-        print("\n### By language thresholds")
+        print("\n### By language FN/FP diffs")
         for lang in sorted(by_language):
             row = by_language[lang] or {}
             th = row.get("threshold", {})
+            diff = row.get("thresholdDiff", {})
+            ds = row.get("diffSummary", {})
+            fn_ds = ds.get("fn", {})
+            fp_ds = ds.get("fp", {})
             print(
-                f"- {lang}: fn={row.get('fn', 'n/a')} (th={th.get('fn', 'n/a')}), "
-                f"fp={row.get('fp', 'n/a')} (th={th.get('fp', 'n/a')})"
+                f"- {lang}: "
+                f"FN={row.get('fn', 'n/a')} (th={th.get('fn', 'n/a')}, delta={diff.get('fn', 'n/a')}, "
+                f"changed={fn_ds.get('changed', 'n/a')}, impacted={fn_ds.get('impacted', 'n/a')}) | "
+                f"FP={row.get('fp', 'n/a')} (th={th.get('fp', 'n/a')}, delta={diff.get('fp', 'n/a')}, "
+                f"changed={fp_ds.get('changed', 'n/a')}, impacted={fp_ds.get('impacted', 'n/a')})"
             )
 
     cases = report.get("cases", [])
