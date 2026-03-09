@@ -8,7 +8,7 @@ use dimpact::dfg::{DataFlowGraph, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
 use dimpact::dfg_to_dot;
 use dimpact::engine::{AutoPolicy, EngineKind, make_engine_with_auto_policy};
 use dimpact::ir::SymbolId;
-use dimpact::ir::reference::{RefKind, Reference};
+use dimpact::ir::reference::{EdgeCertainty, RefKind, Reference, SymbolIndex};
 use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{DiffParseError, parse_unified_diff};
 use dimpact::{ImpactDirection, ImpactOptions, ImpactOutput};
@@ -68,6 +68,72 @@ enum AutoPolicyOpt {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+enum ConfidenceOpt {
+    Confirmed,
+    Inferred,
+    #[value(alias = "dynamic_fallback")]
+    DynamicFallback,
+}
+
+impl ConfidenceOpt {
+    fn min_rank(self) -> u8 {
+        match self {
+            Self::DynamicFallback => 0,
+            Self::Inferred => 1,
+            Self::Confirmed => 2,
+        }
+    }
+}
+
+fn certainty_rank(certainty: EdgeCertainty) -> u8 {
+    match certainty {
+        EdgeCertainty::DynamicFallback => 0,
+        EdgeCertainty::Inferred => 1,
+        EdgeCertainty::Confirmed => 2,
+    }
+}
+
+fn meets_min_confidence(certainty: EdgeCertainty, min: ConfidenceOpt) -> bool {
+    certainty_rank(certainty) >= min.min_rank()
+}
+
+fn apply_min_confidence_filter(
+    out: ImpactOutput,
+    opts: &ImpactOptions,
+    min_confidence: Option<ConfidenceOpt>,
+    keep_edges_in_output: bool,
+) -> ImpactOutput {
+    let Some(min_confidence) = min_confidence else {
+        return out;
+    };
+
+    let filtered_refs: Vec<Reference> = out
+        .edges
+        .iter()
+        .filter(|r| meets_min_confidence(r.certainty.clone(), min_confidence))
+        .cloned()
+        .collect();
+
+    let mut symbols: Vec<dimpact::ir::Symbol> = Vec::new();
+    symbols.extend(out.changed_symbols.clone());
+    symbols.extend(out.impacted_symbols.clone());
+
+    let index = SymbolIndex::build(symbols);
+    let mut recompute_opts = opts.clone();
+    recompute_opts.with_edges = Some(true);
+    let mut filtered = compute_impact(
+        &out.changed_symbols,
+        &index,
+        &filtered_refs,
+        &recompute_opts,
+    );
+    if !keep_edges_in_output {
+        filtered.edges.clear();
+    }
+    filtered
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum KindOpt {
     #[value(alias = "function")]
     Fn,
@@ -115,6 +181,12 @@ struct Args {
     /// Include reference edges in impact output
     #[arg(long = "with-edges", default_value_t = false)]
     with_edges: bool,
+    /// Minimum edge confidence used for impact traversal/output filtering.
+    /// confirmed: only confirmed edges
+    /// inferred: confirmed + inferred
+    /// dynamic-fallback: all edges
+    #[arg(long = "min-confidence", value_enum)]
+    min_confidence: Option<ConfidenceOpt>,
     /// Ignore directories (relative prefixes). Repeatable.
     #[arg(long = "ignore-dir")]
     ignore_dir: Vec<String>,
@@ -180,6 +252,12 @@ enum Command {
         max_depth: Option<usize>,
         #[arg(long = "with-edges", default_value_t = false)]
         with_edges: bool,
+        /// Minimum edge confidence used for impact traversal/output filtering.
+        /// confirmed: only confirmed edges
+        /// inferred: confirmed + inferred
+        /// dynamic-fallback: all edges
+        #[arg(long = "min-confidence", value_enum)]
+        min_confidence: Option<ConfidenceOpt>,
         /// Use PDG-based dependence analysis
         #[arg(long = "with-pdg", default_value_t = false)]
         with_pdg: bool,
@@ -311,6 +389,7 @@ fn main() -> anyhow::Result<()> {
                 direction,
                 max_depth,
                 with_edges,
+                min_confidence,
                 with_pdg,
                 with_propagation,
                 engine,
@@ -326,6 +405,7 @@ fn main() -> anyhow::Result<()> {
                 direction,
                 max_depth,
                 with_edges,
+                min_confidence,
                 with_pdg,
                 with_propagation,
                 engine,
@@ -381,6 +461,7 @@ fn main() -> anyhow::Result<()> {
                 args.direction,
                 args.max_depth,
                 args.with_edges,
+                args.min_confidence,
                 false,
                 false,
                 args.engine,
@@ -721,6 +802,7 @@ fn run_impact(
     dir_opt: DirectionOpt,
     max_depth: Option<usize>,
     with_edges: bool,
+    min_confidence: Option<ConfidenceOpt>,
     with_pdg: bool,
     with_propagation: bool,
     engine_opt: EngineOpt,
@@ -778,10 +860,11 @@ fn run_impact(
         DirectionOpt::Callees => ImpactDirection::Callees,
         DirectionOpt::Both => ImpactDirection::Both,
     };
+    let compute_with_edges = with_edges || min_confidence.is_some();
     let opts = ImpactOptions {
         direction,
         max_depth: max_depth.or(Some(100)),
-        with_edges: Some(with_edges),
+        with_edges: Some(compute_with_edges),
         ignore_dirs: ignore_dir.clone(),
     };
     let ekind = match engine_opt {
@@ -841,18 +924,33 @@ fn run_impact(
                     o.direction = ImpactDirection::Callers;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callers,
-                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
+                        output: apply_min_confidence_filter(
+                            compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
+                            &o,
+                            min_confidence,
+                            with_edges,
+                        ),
                     });
                     let mut o2 = opts.clone();
                     o2.direction = ImpactDirection::Callees;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callees,
-                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
+                        output: apply_min_confidence_filter(
+                            compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
+                            &o2,
+                            min_confidence,
+                            with_edges,
+                        ),
                     });
                 } else {
                     impacts.push(PerSeedImpact {
                         direction: opts.direction,
-                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
+                        output: apply_min_confidence_filter(
+                            compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
+                            &opts,
+                            min_confidence,
+                            with_edges,
+                        ),
                     });
                 }
                 grouped.push(PerSeedOutput {
@@ -880,18 +978,33 @@ fn run_impact(
                     o.direction = ImpactDirection::Callers;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callers,
-                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
+                        output: apply_min_confidence_filter(
+                            compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
+                            &o,
+                            min_confidence,
+                            with_edges,
+                        ),
                     });
                     let mut o2 = opts.clone();
                     o2.direction = ImpactDirection::Callees;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callees,
-                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
+                        output: apply_min_confidence_filter(
+                            compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
+                            &o2,
+                            min_confidence,
+                            with_edges,
+                        ),
                     });
                 } else {
                     impacts.push(PerSeedImpact {
                         direction: opts.direction,
-                        output: compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
+                        output: apply_min_confidence_filter(
+                            compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
+                            &opts,
+                            min_confidence,
+                            with_edges,
+                        ),
                     });
                 }
                 grouped.push(PerSeedOutput {
@@ -913,13 +1026,14 @@ fn run_impact(
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
         log::info!(
-            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} pdg={} ignore_dirs={:?}",
+            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} pdg={} ignore_dirs={:?}",
             ekind,
             files.len(),
             lang,
             direction,
             opts.max_depth,
-            with_edges,
+            compute_with_edges,
+            min_confidence,
             with_pdg,
             opts.ignore_dirs
         );
@@ -993,8 +1107,12 @@ fn run_impact(
                     }
                 })
                 .collect();
-            let out: ImpactOutput =
-                compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts);
+            let out: ImpactOutput = apply_min_confidence_filter(
+                compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts),
+                &opts,
+                min_confidence,
+                with_edges,
+            );
             match fmt {
                 OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
                 OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
@@ -1003,7 +1121,12 @@ fn run_impact(
             }
             return Ok(());
         }
-        let out: ImpactOutput = engine.impact(&files, lang, &opts)?;
+        let out: ImpactOutput = apply_min_confidence_filter(
+            engine.impact(&files, lang, &opts)?,
+            &opts,
+            min_confidence,
+            with_edges,
+        );
         match fmt {
             OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
             OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
@@ -1014,13 +1137,14 @@ fn run_impact(
     }
 
     log::info!(
-        "mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={} ignore_dirs={:?}",
+        "mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} ignore_dirs={:?}",
         ekind,
         seeds.len(),
         lang,
         direction,
         opts.max_depth,
-        with_edges,
+        compute_with_edges,
+        min_confidence,
         opts.ignore_dirs
     );
     if with_pdg || with_propagation {
@@ -1090,7 +1214,12 @@ fn run_impact(
                 }
             })
             .collect();
-        let out: ImpactOutput = compute_impact(&seeds, &index, &pdg_refs, &opts);
+        let out: ImpactOutput = apply_min_confidence_filter(
+            compute_impact(&seeds, &index, &pdg_refs, &opts),
+            &opts,
+            min_confidence,
+            with_edges,
+        );
         match fmt {
             OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
             OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),
@@ -1100,7 +1229,12 @@ fn run_impact(
         return Ok(());
     }
 
-    let out: ImpactOutput = engine.impact_from_symbols(&seeds, lang, &opts)?;
+    let out: ImpactOutput = apply_min_confidence_filter(
+        engine.impact_from_symbols(&seeds, lang, &opts)?,
+        &opts,
+        min_confidence,
+        with_edges,
+    );
     match fmt {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&out)?),
         OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&out)?),

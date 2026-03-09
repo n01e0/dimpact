@@ -100,3 +100,54 @@ fn cli_impact_max_depth_limits() {
         .collect();
     assert!(!names.contains(&"c"));
 }
+
+#[test]
+fn cli_impact_min_confidence_filters_inferred_edges() {
+    let (_tmp, repo) = setup_repo_triple();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff.clone())
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(assert.get_output().stdout.as_ref()).unwrap();
+    let impacted = v["impacted_symbols"].as_array().unwrap();
+    assert!(!impacted.is_empty());
+
+    let mut strict = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let strict_assert = strict
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--min-confidence")
+        .arg("confirmed")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff)
+        .assert()
+        .success();
+    let v2: serde_json::Value =
+        serde_json::from_slice(strict_assert.get_output().stdout.as_ref()).unwrap();
+    let impacted2 = v2["impacted_symbols"].as_array().unwrap();
+    let edges2 = v2["edges"].as_array().unwrap();
+
+    assert!(impacted2.is_empty());
+    assert!(edges2.is_empty());
+}
