@@ -1552,4 +1552,117 @@ class Service:
             Some("pkg::plugins::common")
         );
     }
+
+    #[test]
+    fn python_hard_case_fixture_dynamic_resolver_combo_regression() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_dynamic_resolver_combo.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/sub/combo.py", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "DynamicResolverCombo" && matches!(s.kind, SymbolKind::Struct))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "run" && matches!(s.kind, SymbolKind::Method))
+        );
+
+        let refs = ana.unresolved_refs("pkg/sub/combo.py", src);
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "traced" && r.line == 35 && r.qualifier.is_none() && !r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "bound_handler" && r.qualifier.as_deref() == Some("self") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "dyn_handler" && r.qualifier.as_deref() == Some("self") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "__get__"
+                    && r.qualifier.as_deref() == Some("NormalizeDescriptor")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "__getattribute__"
+                    && r.qualifier.as_deref() == Some("DynamicResolverCombo")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "__getattr__"
+                    && r.qualifier.as_deref() == Some("DynamicResolverCombo")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "build" && r.qualifier.as_deref() == Some("mod_a") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "make" && r.qualifier.as_deref() == Some("mod_b") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "create" && r.qualifier.as_deref() == Some("mod_c") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+
+        let im = ana.imports_in_file("pkg/sub/combo.py", src);
+        assert_eq!(im.get("il").map(String::as_str), Some("importlib"));
+        assert_eq!(
+            im.get("imod").map(String::as_str),
+            Some("importlib::import_module")
+        );
+        assert_eq!(
+            im.get("dyn_import").map(String::as_str),
+            Some("builtins::__import__")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::sub::plugins::runtime")
+                .map(String::as_str),
+            Some("pkg::sub::plugins::runtime")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::plugins::common").map(String::as_str),
+            Some("pkg::plugins::common")
+        );
+        assert_eq!(
+            im.get("__glob__pkg::sub::ext").map(String::as_str),
+            Some("pkg::sub::ext")
+        );
+    }
 }
