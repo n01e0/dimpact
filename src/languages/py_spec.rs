@@ -199,8 +199,7 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
         .expect("valid python getattr/setattr regex");
         let re_str_lit =
             Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']$"#).expect("valid py str lit regex");
-        let re_ident =
-            Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).expect("valid py ident regex");
+        let re_ident = Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).expect("valid py ident regex");
 
         for cap in re_dyn_attr.captures_iter(source) {
             let Some(full) = cap.get(0) else {
@@ -308,15 +307,15 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
         // defines `__get__`, add a fallback edge from `self.<attr>(...)` callsites to
         // `<DescriptorClass>.__get__`.
         let lines: Vec<&str> = source.lines().collect();
-        let re_class = Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\b")
-            .expect("valid class regex");
+        let re_class =
+            Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\b").expect("valid class regex");
         let re_def_get = Regex::new(r"^\s*def\s+__get__\b").expect("valid __get__ regex");
-        let re_class_attr_ctor = Regex::new(
-            r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(",
-        )
-        .expect("valid class attribute ctor regex");
+        let re_class_attr_ctor =
+            Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+                .expect("valid class attribute ctor regex");
 
-        let mut descriptor_classes: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut descriptor_classes: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for i in 0..lines.len() {
             let line = lines[i];
             let Some(cap) = re_class.captures(line) else {
@@ -384,6 +383,125 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                     qualifier: Some(desc_class.clone()),
                     is_method: true,
                 });
+            }
+        }
+
+        // Conservative dynamic attribute fallback edges:
+        // for unresolved self.<attr>(...) call sites inside classes that define
+        // __getattr__ / __getattribute__, add inferred fallback refs to those dunder methods.
+        #[derive(Clone)]
+        struct ClassInfo {
+            name: String,
+            start_line: u32,
+            end_line: u32,
+            methods: std::collections::HashSet<String>,
+            has_getattr: bool,
+            has_getattribute: bool,
+        }
+
+        let re_method_def =
+            Regex::new(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\b").expect("valid python method regex");
+        let mut class_infos: Vec<ClassInfo> = Vec::new();
+        for i in 0..lines.len() {
+            let Some(cap) = re_class.captures(lines[i]) else {
+                continue;
+            };
+            let Some(class_name) = cap.get(1).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
+
+            let start_line = (i as u32) + 1;
+            let end_idx = find_python_block_end(&lines, i);
+            let end_line = end_idx as u32;
+            let class_indent = indentation_width(lines[i]);
+            let mut methods = std::collections::HashSet::new();
+
+            for line in lines.iter().take(end_idx).skip(i + 1) {
+                if indentation_width(line) <= class_indent {
+                    continue;
+                }
+                if let Some(def_cap) = re_method_def.captures(line)
+                    && let Some(method_name) = def_cap.get(1)
+                {
+                    methods.insert(method_name.as_str().to_string());
+                }
+            }
+
+            if methods.is_empty() {
+                continue;
+            }
+
+            let has_getattr = methods.contains("__getattr__");
+            let has_getattribute = methods.contains("__getattribute__");
+            if has_getattr || has_getattribute {
+                class_infos.push(ClassInfo {
+                    name: class_name,
+                    start_line,
+                    end_line,
+                    methods,
+                    has_getattr,
+                    has_getattribute,
+                });
+            }
+        }
+
+        if !class_infos.is_empty() {
+            for r in out.clone() {
+                if !r.is_method || r.qualifier.as_deref() != Some("self") {
+                    continue;
+                }
+                if r.name == "__getattr__" || r.name == "__getattribute__" {
+                    continue;
+                }
+
+                let class_ctx = class_infos
+                    .iter()
+                    .filter(|c| r.line >= c.start_line && r.line <= c.end_line)
+                    .max_by_key(|c| c.start_line);
+                let Some(class_ctx) = class_ctx else {
+                    continue;
+                };
+                if class_ctx.methods.contains(&r.name) {
+                    continue;
+                }
+
+                if class_ctx.has_getattribute {
+                    let key = (
+                        r.line,
+                        "__getattribute__".to_string(),
+                        Some(class_ctx.name.clone()),
+                        true,
+                    );
+                    if seen.insert(key) {
+                        out.push(UnresolvedRef {
+                            name: "__getattribute__".to_string(),
+                            kind: RefKind::Call,
+                            file: path.to_string(),
+                            line: r.line,
+                            qualifier: Some(class_ctx.name.clone()),
+                            is_method: true,
+                        });
+                    }
+                }
+
+                if class_ctx.has_getattr {
+                    let key = (
+                        r.line,
+                        "__getattr__".to_string(),
+                        Some(class_ctx.name.clone()),
+                        true,
+                    );
+                    if seen.insert(key) {
+                        out.push(UnresolvedRef {
+                            name: "__getattr__".to_string(),
+                            kind: RefKind::Call,
+                            file: path.to_string(),
+                            line: r.line,
+                            qualifier: Some(class_ctx.name.clone()),
+                            is_method: true,
+                        });
+                    }
+                }
             }
         }
 
@@ -978,12 +1096,71 @@ from pkg.star import *
             r.name == "dyn_value" && r.qualifier.as_deref() == Some("self") && r.is_method
         }));
         assert!(refs.iter().any(|r| {
+            r.name == "__getattr__"
+                && r.line == 13
+                && r.qualifier.as_deref() == Some("DynamicAccessor")
+                && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
             r.name == "strip" && r.qualifier.as_deref() == Some("payload") && r.is_method
         }));
         assert!(
             refs.iter()
                 .any(|r| r.name == "lower" && r.qualifier.as_deref() == Some("v") && r.is_method)
         );
+    }
+
+    #[test]
+    fn unresolved_refs_adds_getattribute_getattr_fallback_edges_for_dynamic_self_calls() {
+        let src = r#"class DynamicAttr:
+    def __getattribute__(self, name):
+        return super().__getattribute__(name)
+
+    def __getattr__(self, name):
+        if name == "dyn_call":
+            return lambda payload: payload.strip()
+        raise AttributeError(name)
+
+    def run(self, payload):
+        setter_name = "dyn_field"
+        setattr(self, setter_name, payload)
+        getattr(self, "dyn_call")(payload)
+        self.unknown_method(payload)
+"#;
+
+        let ana = SpecPyAnalyzer::new();
+        let refs = ana.unresolved_refs("pkg/dynamic_attr.py", src);
+
+        assert!(refs.iter().any(|r| {
+            r.name == "dyn_field" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "dyn_call" && r.qualifier.as_deref() == Some("self") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "__getattribute__"
+                && r.line == 13
+                && r.qualifier.as_deref() == Some("DynamicAttr")
+                && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "__getattr__"
+                && r.line == 13
+                && r.qualifier.as_deref() == Some("DynamicAttr")
+                && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "__getattribute__"
+                && r.line == 14
+                && r.qualifier.as_deref() == Some("DynamicAttr")
+                && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "__getattr__"
+                && r.line == 14
+                && r.qualifier.as_deref() == Some("DynamicAttr")
+                && r.is_method
+        }));
     }
 
     #[test]
@@ -1038,7 +1215,10 @@ from pkg.star import *
         }));
 
         let im = ana.imports_in_file("pkg/dynamic_chain.py", src);
-        assert_eq!(im.get("wraps").map(String::as_str), Some("functools::wraps"));
+        assert_eq!(
+            im.get("wraps").map(String::as_str),
+            Some("functools::wraps")
+        );
     }
 
     #[test]
@@ -1088,12 +1268,18 @@ from pkg.star import *
 
         let im = ana.imports_in_file("pkg/sub/main.py", src);
         assert_eq!(im.get("importlib").map(String::as_str), Some("importlib"));
-        assert_eq!(im.get("imod").map(String::as_str), Some("importlib::import_module"));
+        assert_eq!(
+            im.get("imod").map(String::as_str),
+            Some("importlib::import_module")
+        );
         assert_eq!(
             im.get("loader_mod").map(String::as_str),
             Some("pkg::sub::plugins::loader")
         );
-        assert_eq!(im.get("registry").map(String::as_str), Some("pkg::core::registry"));
+        assert_eq!(
+            im.get("registry").map(String::as_str),
+            Some("pkg::core::registry")
+        );
         // conservative dynamic import edges
         assert_eq!(
             im.get("__glob__pkg::sub::plugins").map(String::as_str),
@@ -1105,4 +1291,3 @@ from pkg.star import *
         );
     }
 }
-
