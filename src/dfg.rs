@@ -130,6 +130,10 @@ impl DfgBuilder for RustDfgBuilder {
                                     .or_default()
                                     .push((sl, node_id.clone()));
                             }
+                            def_lines_by_name
+                                .entry(name.to_string())
+                                .or_default()
+                                .insert(sl);
                         }
                     }
                 }
@@ -142,37 +146,35 @@ impl DfgBuilder for RustDfgBuilder {
             "while", "loop", "return", "use", "struct", "enum", "trait", "impl", "mod", "as", "in",
             "true", "false",
         ];
-        // First pass: collect definitions
+        // First pass: collect let-definitions (including `let mut x = ...`).
+        let re_let_def =
+            regex::Regex::new(r"^\s*let(?:\s+mut)?\s+([A-Za-z_][A-Za-z0-9_]*)\b").unwrap();
         for (idx, line) in source.lines().enumerate() {
             let line_no = (idx + 1) as u32;
-            let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("let ") {
-                // extract variable name
-                if let Some(name) = rest
-                    .split(|c: char| !c.is_alphanumeric() && c != '_')
-                    .next()
-                    && !name.is_empty()
-                {
-                    let node_id = format!("{}:def:{}:{}", path, name, line_no);
-                    if seen_node_ids.insert(node_id.clone()) {
-                        nodes.push(DfgNode {
-                            id: node_id.clone(),
-                            name: name.to_string(),
-                            file: path.to_string(),
-                            line: line_no,
-                        });
-                        def_records_by_name
-                            .entry(name.to_string())
-                            .or_default()
-                            .push((line_no, node_id.clone()));
-                    }
-                    // Track definition line
-                    def_lines_by_name
-                        .entry(name.to_string())
-                        .or_default()
-                        .insert(line_no);
-                }
+            let Some(cap) = re_let_def.captures(line) else {
+                continue;
+            };
+            let Some(name) = cap.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
+            let node_id = format!("{}:def:{}:{}", path, name, line_no);
+            if seen_node_ids.insert(node_id.clone()) {
+                nodes.push(DfgNode {
+                    id: node_id.clone(),
+                    name: name.to_string(),
+                    file: path.to_string(),
+                    line: line_no,
+                });
+                def_records_by_name
+                    .entry(name.to_string())
+                    .or_default()
+                    .push((line_no, node_id.clone()));
             }
+            // Track definition line
+            def_lines_by_name
+                .entry(name.to_string())
+                .or_default()
+                .insert(line_no);
         }
         for records in def_records_by_name.values_mut() {
             records.sort_by_key(|(line, _)| *line);
@@ -1151,6 +1153,40 @@ mod tests {
     }
 
     #[test]
+    fn rust_alias_chain_and_reassignment_prefers_latest_def() {
+        let src = "let mut a = seed;\nlet b = a;\na = other;\nlet c = a;\nlet d = b;\n";
+        let dfg = RustDfgBuilder::build("f.rs", src);
+
+        // `let mut a` should define `a` (not a bogus `mut` symbol).
+        assert!(dfg.nodes.iter().any(|n| n.id.ends_with(":def:a:1")));
+        assert!(!dfg.nodes.iter().any(|n| n.name == "mut"));
+
+        // Assignment chain: a -> b -> d.
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:a:1")
+                && e.to.ends_with(":def:b:2")
+        }));
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:b:2")
+                && e.to.ends_with(":def:d:5")
+        }));
+
+        // Reassignment: `c = a` should use latest def of a (line 3), not initial line 1.
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:a:3")
+                && e.to.ends_with(":def:c:4")
+        }));
+        assert!(!dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:a:1")
+                && e.to.ends_with(":def:c:4")
+        }));
+    }
+
+    #[test]
     fn build_return_dependency() {
         let src = r#"
         fn foo() {
@@ -1263,6 +1299,28 @@ mod tests {
             e.kind == DependencyKind::Data
                 && e.from.ends_with(":def:a:1")
                 && e.to.ends_with(":def:b:2")
+        }));
+    }
+
+    #[test]
+    fn ruby_alias_reassignment_prefers_latest_def() {
+        let src = "a = seed\nb = a\na = other\nc = a\n";
+        let dfg = RubyDfgBuilder::build("test.rb", src);
+
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:a:1")
+                && e.to.ends_with(":def:b:2")
+        }));
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:a:3")
+                && e.to.ends_with(":def:c:4")
+        }));
+        assert!(!dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from.ends_with(":def:a:1")
+                && e.to.ends_with(":def:c:4")
         }));
     }
 
