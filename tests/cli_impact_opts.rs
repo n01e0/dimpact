@@ -151,3 +151,65 @@ fn cli_impact_min_confidence_filters_inferred_edges() {
     assert!(impacted2.is_empty());
     assert!(edges2.is_empty());
 }
+
+#[test]
+fn cli_impact_exclude_dynamic_fallback_matches_min_confidence_inferred() {
+    let (_tmp, repo) = setup_repo_triple();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut a = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let a_out = a
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--min-confidence")
+        .arg("inferred")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff.clone())
+        .assert()
+        .success();
+    let va: serde_json::Value = serde_json::from_slice(a_out.get_output().stdout.as_ref()).unwrap();
+
+    let mut b = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let b_out = b
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--exclude-dynamic-fallback")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff)
+        .assert()
+        .success();
+    let vb: serde_json::Value = serde_json::from_slice(b_out.get_output().stdout.as_ref()).unwrap();
+
+    let impacted_a: std::collections::BTreeSet<&str> = va["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    let impacted_b: std::collections::BTreeSet<&str> = vb["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert_eq!(impacted_a, impacted_b);
+
+    let edges_a = va["edges"].as_array().unwrap().len();
+    let edges_b = vb["edges"].as_array().unwrap().len();
+    assert_eq!(edges_a, edges_b);
+}

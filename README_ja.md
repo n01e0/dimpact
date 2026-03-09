@@ -66,6 +66,8 @@ dimpact id --name foo -f json
 - `--direction callers|callees|both` : 方向 (既定: callers)
 - `--max-depth N`               : 最大探索深度 (既定: 100)
 - `--with-edges`                : 参照エッジを出力に含める
+- `--min-confidence LEVEL`      : confidence 閾値（`confirmed|inferred|dynamic-fallback`）
+- `--exclude-dynamic-fallback`  : `dynamic_fallback` エッジを探索/出力から除外
 - `--ignore-dir DIR`            : 相対パスプレフィックスでディレクトリを無視（繰り返し可）
 - `--with-pdg`                  : PDG ベースの依存解析を使用 (Rust/Ruby の DFG)
 - `--with-propagation`          : 変数・関数をまたいだシンボリック伝播を有効化 (PDG を含む)
