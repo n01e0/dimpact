@@ -1,5 +1,5 @@
 use crate::ir::{Symbol, SymbolId};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -26,15 +26,73 @@ pub enum EdgeCertainty {
     DynamicFallback,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     pub from: SymbolId,
     pub to: SymbolId,
     pub kind: RefKind,
     pub file: String,
     pub line: u32,
-    #[serde(default)]
     pub certainty: EdgeCertainty,
+}
+
+#[derive(Serialize)]
+struct ReferenceSer<'a> {
+    from: &'a SymbolId,
+    to: &'a SymbolId,
+    kind: &'a RefKind,
+    file: &'a str,
+    line: u32,
+    certainty: &'a EdgeCertainty,
+    confidence: &'a EdgeCertainty,
+}
+
+#[derive(Deserialize)]
+struct ReferenceDe {
+    from: SymbolId,
+    to: SymbolId,
+    kind: RefKind,
+    file: String,
+    line: u32,
+    #[serde(default)]
+    certainty: Option<EdgeCertainty>,
+    #[serde(default)]
+    confidence: Option<EdgeCertainty>,
+}
+
+impl Serialize for Reference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        ReferenceSer {
+            from: &self.from,
+            to: &self.to,
+            kind: &self.kind,
+            file: &self.file,
+            line: self.line,
+            certainty: &self.certainty,
+            confidence: &self.certainty,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Reference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = ReferenceDe::deserialize(deserializer)?;
+        Ok(Self {
+            from: raw.from,
+            to: raw.to,
+            kind: raw.kind,
+            file: raw.file,
+            line: raw.line,
+            certainty: raw.certainty.or(raw.confidence).unwrap_or_default(),
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone)]
