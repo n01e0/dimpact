@@ -273,8 +273,8 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             let decorator_ln = byte_to_line(&offs, full.start());
             let mut ln = decorator_ln;
             let dec_idx = decorator_ln.saturating_sub(1) as usize;
-            for i in dec_idx + 1..lines.len() {
-                let t = lines[i].trim();
+            for (i, next_line) in lines.iter().enumerate().skip(dec_idx + 1) {
+                let t = next_line.trim();
                 if t.is_empty() || t.starts_with('#') || t.starts_with('@') {
                     continue;
                 }
@@ -677,23 +677,27 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             vals.sort_by_key(|(ln, _)| *ln);
         }
 
+        struct DynamicImportParseCtx<'a> {
+            from_mod: &'a str,
+            re_str_lit: &'a Regex,
+            re_fstr_lit: &'a Regex,
+            re_ident: &'a Regex,
+            assigned_module_exprs: &'a std::collections::HashMap<String, Vec<(u32, String)>>,
+        }
+
         fn parse_dynamic_import_target(
+            ctx: &DynamicImportParseCtx<'_>,
             arg_raw: &str,
             line: u32,
-            from_mod: &str,
-            re_str_lit: &Regex,
-            re_fstr_lit: &Regex,
-            re_ident: &Regex,
-            assigned_module_exprs: &std::collections::HashMap<String, Vec<(u32, String)>>,
             depth: u8,
         ) -> Option<String> {
             if depth == 0 {
                 return None;
             }
             let raw = arg_raw.trim();
-            let module_raw = if let Some(cap) = re_str_lit.captures(raw) {
+            let module_raw = if let Some(cap) = ctx.re_str_lit.captures(raw) {
                 cap.get(1).map(|m| m.as_str().to_string())
-            } else if let Some(cap) = re_fstr_lit.captures(raw) {
+            } else if let Some(cap) = ctx.re_fstr_lit.captures(raw) {
                 let body = cap.get(1).map(|m| m.as_str()).unwrap_or("");
                 let mut static_prefix = body.split('{').next().unwrap_or("").trim().to_string();
                 while static_prefix.ends_with('.') {
@@ -704,28 +708,20 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 } else {
                     Some(static_prefix)
                 }
-            } else if let Some(cap) = re_ident.captures(raw) {
+            } else if let Some(cap) = ctx.re_ident.captures(raw) {
                 let var = cap.get(1).map(|m| m.as_str())?;
-                let rhs = assigned_module_exprs
+                let rhs = ctx
+                    .assigned_module_exprs
                     .get(var)
                     .and_then(|vals| vals.iter().rev().find(|(ln, _)| *ln <= line))
                     .map(|(_, rhs)| rhs.clone())?;
-                return parse_dynamic_import_target(
-                    &rhs,
-                    line,
-                    from_mod,
-                    re_str_lit,
-                    re_fstr_lit,
-                    re_ident,
-                    assigned_module_exprs,
-                    depth - 1,
-                );
+                return parse_dynamic_import_target(ctx, &rhs, line, depth - 1);
             } else {
                 None
             }?;
 
             let resolved = if module_raw.starts_with('.') {
-                resolve_from_import_module(from_mod, &module_raw)
+                resolve_from_import_module(ctx.from_mod, &module_raw)
             } else {
                 module_raw.replace('.', "::")
             };
@@ -736,18 +732,17 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             }
         }
 
+        let parse_ctx = DynamicImportParseCtx {
+            from_mod: &from_mod,
+            re_str_lit: &re_str_lit,
+            re_fstr_lit: &re_fstr_lit,
+            re_ident: &re_ident,
+            assigned_module_exprs: &assigned_module_exprs,
+        };
+
         let add_dynamic_import_edge =
             |map: &mut std::collections::HashMap<String, String>, ln: u32, arg: &str| {
-                if let Some(module_path) = parse_dynamic_import_target(
-                    arg,
-                    ln,
-                    &from_mod,
-                    &re_str_lit,
-                    &re_fstr_lit,
-                    &re_ident,
-                    &assigned_module_exprs,
-                    4,
-                ) {
+                if let Some(module_path) = parse_dynamic_import_target(&parse_ctx, arg, ln, 4) {
                     map.insert(format!("__glob__{}", module_path.clone()), module_path);
                 }
             };
