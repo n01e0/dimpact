@@ -43,6 +43,25 @@ fn a() { b(); }
     (dir, path)
 }
 
+fn setup_repo_from_fixture(
+    filename: &str,
+    before: &str,
+    after: &str,
+) -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(path.join(filename), before).unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(path.join(filename), after).unwrap();
+    (dir, path)
+}
+
 #[test]
 fn cli_impact_direction_callees() {
     let (_tmp, repo) = setup_repo_triple();
@@ -280,4 +299,78 @@ fn cli_impact_yaml_reports_confidence_filter_summary() {
     let exclude_key = serde_yaml::Value::from("exclude_dynamic_fallback");
     assert_eq!(cf.get(&min_key).and_then(|x| x.as_str()), Some("inferred"));
     assert_eq!(cf.get(&exclude_key).and_then(|x| x.as_bool()), Some(false));
+}
+
+#[test]
+fn cli_impact_confidence_fixture_compares_confirmed_vs_inferred() {
+    let before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/rust/analyzer_hard_cases_confidence_compare.rs"
+    ));
+    let after = before.replacen("x + 1", "x + 2", 1);
+    let (_tmp, repo) = setup_repo_from_fixture("main.rs", before, &after);
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut inferred_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let inferred_assert = inferred_cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--min-confidence")
+        .arg("inferred")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff.clone())
+        .assert()
+        .success();
+    let inferred_v: serde_json::Value =
+        serde_json::from_slice(inferred_assert.get_output().stdout.as_ref()).unwrap();
+
+    let mut confirmed_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let confirmed_assert = confirmed_cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--min-confidence")
+        .arg("confirmed")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff)
+        .assert()
+        .success();
+    let confirmed_v: serde_json::Value =
+        serde_json::from_slice(confirmed_assert.get_output().stdout.as_ref()).unwrap();
+
+    let inferred_impacted: std::collections::BTreeSet<&str> = inferred_v["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    let confirmed_impacted: std::collections::BTreeSet<&str> = confirmed_v["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+
+    assert!(inferred_impacted.contains("dispatch"));
+    assert!(inferred_impacted.contains("entry"));
+    assert!(confirmed_impacted.is_empty());
+
+    let inferred_edges = inferred_v["edges"].as_array().unwrap();
+    let confirmed_edges = confirmed_v["edges"].as_array().unwrap();
+    assert!(!inferred_edges.is_empty());
+    assert!(confirmed_edges.is_empty());
 }
