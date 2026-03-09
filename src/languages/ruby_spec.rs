@@ -105,8 +105,7 @@ fn resolve_dynamic_name_expr(
     }
 }
 
-fn extract_first_send_like_arg(text: &str, method_name: &str) -> Option<String> {
-    let mut idx_opt = None;
+fn find_method_call_start(text: &str, method_name: &str) -> Option<usize> {
     let mut seek_from = 0usize;
     while seek_from < text.len() {
         let rel = text[seek_from..].find(method_name)?;
@@ -115,19 +114,29 @@ fn extract_first_send_like_arg(text: &str, method_name: &str) -> Option<String> 
         let after = text[idx + method_name.len()..].chars().next();
         let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
         if before.is_none_or(|c| !is_ident(c)) && after.is_none_or(|c| !is_ident(c)) {
-            idx_opt = Some(idx);
-            break;
+            return Some(idx);
         }
         seek_from = idx + method_name.len();
     }
+    None
+}
 
-    let idx = idx_opt?;
-    let mut rest = text[idx + method_name.len()..].trim_start();
-    if rest.is_empty() {
-        return None;
+fn extract_call_args(text: &str, method_name: &str, max_args: usize) -> Vec<String> {
+    if max_args == 0 {
+        return Vec::new();
     }
 
-    let first_arg = if let Some(paren_body) = rest.strip_prefix('(') {
+    let Some(idx) = find_method_call_start(text, method_name) else {
+        return Vec::new();
+    };
+    let rest = text[idx + method_name.len()..].trim_start();
+    if rest.is_empty() {
+        return Vec::new();
+    }
+
+    let mut has_parens = false;
+    let body = if let Some(paren_body) = rest.strip_prefix('(') {
+        has_parens = true;
         let mut depth = 1i32;
         let mut in_single = false;
         let mut in_double = false;
@@ -176,15 +185,26 @@ fn extract_first_send_like_arg(text: &str, method_name: &str) -> Option<String> 
         rest
     };
 
+    let mut out = Vec::new();
+    let mut start = 0usize;
     let mut depth_paren = 0i32;
     let mut depth_brack = 0i32;
     let mut depth_brace = 0i32;
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
-    let mut end = first_arg.len();
 
-    for (i, ch) in first_arg.char_indices() {
+    let push_segment = |start_idx: usize, end_idx: usize, out: &mut Vec<String>| {
+        if out.len() >= max_args {
+            return;
+        }
+        let seg = body[start_idx..end_idx].trim();
+        if !seg.is_empty() {
+            out.push(seg.to_string());
+        }
+    };
+
+    for (i, ch) in body.char_indices() {
         if escaped {
             escaped = false;
             continue;
@@ -212,33 +232,63 @@ fn extract_first_send_like_arg(text: &str, method_name: &str) -> Option<String> 
             '(' => depth_paren += 1,
             ')' => {
                 if depth_paren == 0 && depth_brack == 0 && depth_brace == 0 {
-                    end = i;
+                    push_segment(start, i, &mut out);
+                    start = i;
                     break;
                 }
                 depth_paren -= 1;
             }
             '[' => depth_brack += 1,
             ']' => depth_brack -= 1,
+            '{' if !has_parens && depth_paren == 0 && depth_brack == 0 && depth_brace == 0 => {
+                push_segment(start, i, &mut out);
+                start = i;
+                break;
+            }
             '{' => depth_brace += 1,
             '}' => depth_brace -= 1,
             ',' if depth_paren == 0 && depth_brack == 0 && depth_brace == 0 => {
-                end = i;
-                break;
+                push_segment(start, i, &mut out);
+                start = i + ch.len_utf8();
+                if out.len() >= max_args {
+                    break;
+                }
             }
             '\n' | ';' if depth_paren == 0 && depth_brack == 0 && depth_brace == 0 => {
-                end = i;
+                push_segment(start, i, &mut out);
+                start = i;
                 break;
+            }
+            c if !has_parens
+                && c.is_whitespace()
+                && depth_paren == 0
+                && depth_brack == 0
+                && depth_brace == 0 =>
+            {
+                let rem = body[i..].trim_start();
+                if rem == "do" || rem.starts_with("do ") {
+                    push_segment(start, i, &mut out);
+                    start = i;
+                    break;
+                }
             }
             _ => {}
         }
     }
 
-    rest = first_arg[..end].trim();
-    if rest.is_empty() {
-        None
-    } else {
-        Some(rest.to_string())
+    if out.len() < max_args {
+        let seg = body[start..].trim();
+        if !seg.is_empty() {
+            out.push(seg.to_string());
+        }
     }
+
+    out.truncate(max_args);
+    out
+}
+
+fn extract_first_send_like_arg(text: &str, method_name: &str) -> Option<String> {
+    extract_call_args(text, method_name, 1).into_iter().next()
 }
 
 impl LanguageAnalyzer for SpecRubyAnalyzer {
@@ -325,11 +375,6 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
             r#"(?m)^\s*([@]{0,2}[A-Za-z_][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\s*=\s*([^#\n]+?)\s*(?:#.*)?$"#,
         )
         .unwrap();
-        let re_alias_method_args =
-            Regex::new(r#"(?:^|[^\w])alias_method\s*(?:\(\s*)?([^,\)\n]+)\s*,\s*([^,\)\n]+)"#)
-                .unwrap();
-        let re_define_method_first =
-            Regex::new(r#"(?:^|[^\w])define_method\s*(?:\(\s*)?([^,\)\n]+)"#).unwrap();
         let re_symbol_lit = Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)$"#).unwrap();
         let re_string_lit = Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']$"#).unwrap();
         let re_var_ref =
@@ -409,13 +454,9 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                     }
 
                     // Conservative edge for alias_method: add refs for both alias and original targets.
-                    if name == "alias_method"
-                        && let Some(cap) = re_alias_method_args.captures(text)
-                    {
-                        for idx in [1usize, 2usize] {
-                            if let Some(arg_raw) = cap.get(idx).map(|m| m.as_str())
-                                && let Some(resolved) = resolve_dynamic_name(arg_raw, ln)
-                            {
+                    if name == "alias_method" {
+                        for arg_raw in extract_call_args(text, "alias_method", 2) {
+                            if let Some(resolved) = resolve_dynamic_name(&arg_raw, ln) {
                                 out.push(UnresolvedRef {
                                     name: resolved,
                                     kind: RefKind::Call,
@@ -430,11 +471,10 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
 
                     // Conservative edge for define_method: add ref for defined target name.
                     if name == "define_method"
-                        && let Some(arg_raw) = re_define_method_first
-                            .captures(text)
-                            .and_then(|c| c.get(1))
-                            .map(|m| m.as_str())
-                        && let Some(resolved) = resolve_dynamic_name(arg_raw, ln)
+                        && let Some(arg_raw) = extract_call_args(text, "define_method", 1)
+                            .into_iter()
+                            .next()
+                        && let Some(resolved) = resolve_dynamic_name(&arg_raw, ln)
                     {
                         out.push(UnresolvedRef {
                             name: resolved,
@@ -736,6 +776,17 @@ end
     }
 
     #[test]
+    fn extract_call_args_handles_define_method_block_form() {
+        let text = "define_method dyn_name.to_s do";
+        let args = extract_call_args(text, "define_method", 1);
+        assert_eq!(args, vec!["dyn_name.to_s"]);
+
+        let text = "alias_method alias_name.to_sym, original_name";
+        let args = extract_call_args(text, "alias_method", 2);
+        assert_eq!(args, vec!["alias_name.to_sym", "original_name"]);
+    }
+
+    #[test]
     fn ruby_dynamic_fixture_alias_method_define_method() {
         let src = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -765,6 +816,41 @@ end
         assert!(names.contains(&"defined_sym"));
         assert!(names.contains(&"defined_str"));
         assert!(names.contains(&"defined_only"));
+    }
+
+    #[test]
+    fn ruby_alias_define_tracks_assignment_chain_in_conservative_edges() {
+        let src = r#"ORIGINAL_NAME = :original
+ALIAS_NAME = "aliased"
+
+class AliasDefineChain
+  def original
+    :ok
+  end
+
+  alias_target = ALIAS_NAME.to_sym
+  source_name = ORIGINAL_NAME
+  alias_method alias_target, source_name
+
+  define_target = alias_target.to_s
+  define_method define_target do
+    original
+  end
+
+  def execute
+    aliased
+  end
+end
+"#;
+        let ana = SpecRubyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/ruby_alias_define_chain.rb", src);
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+
+        assert!(names.contains(&"alias_method"));
+        assert!(names.contains(&"define_method"));
+        assert!(names.contains(&"original"));
+        assert!(names.contains(&"aliased"));
     }
 
     #[test]
