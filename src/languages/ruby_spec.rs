@@ -4,6 +4,7 @@ use crate::languages::LanguageAnalyzer;
 use crate::languages::path::normalize_path_like;
 use crate::languages::util::{byte_to_line, line_offsets};
 use crate::ts_core::{QueryRunner, compile_queries_ruby, load_ruby_spec};
+use regex::Regex;
 
 pub struct SpecRubyAnalyzer {
     queries: crate::ts_core::CompiledQueries,
@@ -22,6 +23,221 @@ impl SpecRubyAnalyzer {
 impl Default for SpecRubyAnalyzer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Clone, Debug)]
+enum DynamicNameExpr {
+    Literal(String),
+    Ref(String),
+}
+
+fn parse_dynamic_name_expr(
+    raw: &str,
+    re_symbol_lit: &Regex,
+    re_string_lit: &Regex,
+    re_var_ref: &Regex,
+    re_string_to_sym: &Regex,
+    re_symbol_to_s: &Regex,
+    re_var_cast: &Regex,
+) -> Option<DynamicNameExpr> {
+    let mut expr = raw.trim();
+    while expr.starts_with('(') && expr.ends_with(')') && expr.len() >= 2 {
+        expr = expr[1..expr.len() - 1].trim();
+    }
+
+    if let Some(cap) = re_symbol_lit.captures(expr) {
+        return cap
+            .get(1)
+            .map(|m| DynamicNameExpr::Literal(m.as_str().to_string()));
+    }
+    if let Some(cap) = re_string_lit.captures(expr) {
+        return cap
+            .get(1)
+            .map(|m| DynamicNameExpr::Literal(m.as_str().to_string()));
+    }
+    if let Some(cap) = re_string_to_sym.captures(expr) {
+        return cap
+            .get(1)
+            .map(|m| DynamicNameExpr::Literal(m.as_str().to_string()));
+    }
+    if let Some(cap) = re_symbol_to_s.captures(expr) {
+        return cap
+            .get(1)
+            .map(|m| DynamicNameExpr::Literal(m.as_str().to_string()));
+    }
+    if let Some(cap) = re_var_ref.captures(expr) {
+        return cap
+            .get(1)
+            .map(|m| DynamicNameExpr::Ref(m.as_str().to_string()));
+    }
+    if let Some(cap) = re_var_cast.captures(expr) {
+        return cap
+            .get(1)
+            .map(|m| DynamicNameExpr::Ref(m.as_str().to_string()));
+    }
+    None
+}
+
+fn resolve_dynamic_name_expr(
+    expr: DynamicNameExpr,
+    line: u32,
+    assigned_exprs: &std::collections::HashMap<String, Vec<(u32, DynamicNameExpr)>>,
+    depth: u8,
+) -> Option<String> {
+    if depth == 0 {
+        return None;
+    }
+
+    match expr {
+        DynamicNameExpr::Literal(v) => Some(v),
+        DynamicNameExpr::Ref(var) => {
+            let entries = assigned_exprs.get(&var)?;
+            let (assigned_line, assigned_expr) =
+                entries.iter().rev().find(|(ln, _)| *ln <= line)?;
+            resolve_dynamic_name_expr(
+                assigned_expr.clone(),
+                *assigned_line,
+                assigned_exprs,
+                depth - 1,
+            )
+        }
+    }
+}
+
+fn extract_first_send_like_arg(text: &str, method_name: &str) -> Option<String> {
+    let mut idx_opt = None;
+    let mut seek_from = 0usize;
+    while seek_from < text.len() {
+        let rel = text[seek_from..].find(method_name)?;
+        let idx = seek_from + rel;
+        let before = text[..idx].chars().next_back();
+        let after = text[idx + method_name.len()..].chars().next();
+        let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        if before.is_none_or(|c| !is_ident(c)) && after.is_none_or(|c| !is_ident(c)) {
+            idx_opt = Some(idx);
+            break;
+        }
+        seek_from = idx + method_name.len();
+    }
+
+    let idx = idx_opt?;
+    let mut rest = text[idx + method_name.len()..].trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+
+    let first_arg = if let Some(paren_body) = rest.strip_prefix('(') {
+        let mut depth = 1i32;
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut escaped = false;
+        let mut end = paren_body.len();
+
+        for (i, ch) in paren_body.char_indices() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if in_single {
+                if ch == '\\' {
+                    escaped = true;
+                } else if ch == '\'' {
+                    in_single = false;
+                }
+                continue;
+            }
+            if in_double {
+                if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_double = false;
+                }
+                continue;
+            }
+
+            match ch {
+                '\'' => in_single = true,
+                '"' => in_double = true,
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        &paren_body[..end]
+    } else {
+        rest
+    };
+
+    let mut depth_paren = 0i32;
+    let mut depth_brack = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let mut end = first_arg.len();
+
+    for (i, ch) in first_arg.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if in_single {
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == '\'' {
+                in_single = false;
+            }
+            continue;
+        }
+        if in_double {
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_double = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' => in_single = true,
+            '"' => in_double = true,
+            '(' => depth_paren += 1,
+            ')' => {
+                if depth_paren == 0 && depth_brack == 0 && depth_brace == 0 {
+                    end = i;
+                    break;
+                }
+                depth_paren -= 1;
+            }
+            '[' => depth_brack += 1,
+            ']' => depth_brack -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ',' if depth_paren == 0 && depth_brack == 0 && depth_brace == 0 => {
+                end = i;
+                break;
+            }
+            '\n' | ';' if depth_paren == 0 && depth_brack == 0 && depth_brace == 0 => {
+                end = i;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    rest = first_arg[..end].trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
     }
 }
 
@@ -98,68 +314,76 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
         let mut out = Vec::new();
         let offs = line_offsets(source);
 
-        // Track simple local assignments for send/public_send argument tracing.
-        // Example: dyn_sym = :target, dyn_str = "target".
-        let re_assign_literal = regex::Regex::new(
-            r#"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?::([A-Za-z_][A-Za-z0-9_?!]*)|[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"'])\s*$"#,
+        // Track simple assignment chains for send/public_send argument tracing.
+        // Examples:
+        //   dyn_sym = :target
+        //   @dyn = "target"
+        //   TARGET = :target
+        //   alias = dyn_sym
+        //   dyn = "target".to_sym
+        let re_assign_expr = Regex::new(
+            r#"(?m)^\s*([@]{0,2}[A-Za-z_][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\s*=\s*([^#\n]+?)\s*(?:#.*)?$"#,
         )
         .unwrap();
-        let mut assigned_literals: std::collections::HashMap<String, Vec<(u32, String)>> =
+        let re_alias_method_args =
+            Regex::new(r#"(?:^|[^\w])alias_method\s*(?:\(\s*)?([^,\)\n]+)\s*,\s*([^,\)\n]+)"#)
+                .unwrap();
+        let re_define_method_first =
+            Regex::new(r#"(?:^|[^\w])define_method\s*(?:\(\s*)?([^,\)\n]+)"#).unwrap();
+        let re_symbol_lit = Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)$"#).unwrap();
+        let re_string_lit = Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']$"#).unwrap();
+        let re_var_ref =
+            Regex::new(r#"^([@]{0,2}[A-Za-z_][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)$"#).unwrap();
+        let re_string_to_sym =
+            Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']\.to_sym$"#).unwrap();
+        let re_symbol_to_s = Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)\.to_s$"#).unwrap();
+        let re_var_cast =
+            Regex::new(r#"^([@]{0,2}[A-Za-z_][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\.(?:to_sym|to_s)$"#)
+                .unwrap();
+
+        let mut assigned_exprs: std::collections::HashMap<String, Vec<(u32, DynamicNameExpr)>> =
             std::collections::HashMap::new();
-        for caps in re_assign_literal.captures_iter(source) {
+        for caps in re_assign_expr.captures_iter(source) {
             let Some(full) = caps.get(0) else {
                 continue;
             };
             let Some(var) = caps.get(1) else {
                 continue;
             };
-            let Some(value) = caps.get(2).or_else(|| caps.get(3)) else {
+            let Some(rhs) = caps.get(2) else {
                 continue;
             };
             let ln = byte_to_line(&offs, full.start());
-            assigned_literals
-                .entry(var.as_str().to_string())
-                .or_default()
-                .push((ln, value.as_str().to_string()));
+            if let Some(expr) = parse_dynamic_name_expr(
+                rhs.as_str(),
+                &re_symbol_lit,
+                &re_string_lit,
+                &re_var_ref,
+                &re_string_to_sym,
+                &re_symbol_to_s,
+                &re_var_cast,
+            ) {
+                assigned_exprs
+                    .entry(var.as_str().to_string())
+                    .or_default()
+                    .push((ln, expr));
+            }
         }
-        for entries in assigned_literals.values_mut() {
+        for entries in assigned_exprs.values_mut() {
             entries.sort_by_key(|(ln, _)| *ln);
         }
 
-        let re_send_first_arg = regex::Regex::new(
-            r#"(?:^|[^\w])(?:send|public_send)\s*(?:\(\s*)?([^,\)\n]+)"#,
-        )
-        .unwrap();
-        let re_alias_method_args = regex::Regex::new(
-            r#"(?:^|[^\w])alias_method\s*(?:\(\s*)?([^,\)\n]+)\s*,\s*([^,\)\n]+)"#,
-        )
-        .unwrap();
-        let re_define_method_first =
-            regex::Regex::new(r#"(?:^|[^\w])define_method\s*(?:\(\s*)?([^,\)\n]+)"#)
-                .unwrap();
-        let re_symbol_lit = regex::Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)$"#).unwrap();
-        let re_string_lit = regex::Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']$"#).unwrap();
-        let re_ident = regex::Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).unwrap();
-
         let resolve_dynamic_name = |arg_raw: &str, ln: u32| -> Option<String> {
-            let arg_raw = arg_raw.trim();
-            if let Some(cap) = re_symbol_lit.captures(arg_raw) {
-                return cap.get(1).map(|m| m.as_str().to_string());
-            }
-            if let Some(cap) = re_string_lit.captures(arg_raw) {
-                return cap.get(1).map(|m| m.as_str().to_string());
-            }
-            if let Some(cap) = re_ident.captures(arg_raw) {
-                let var = cap.get(1).map(|m| m.as_str())?;
-                if let Some(cands) = assigned_literals.get(var) {
-                    return cands
-                        .iter()
-                        .rev()
-                        .find(|(line, _)| *line <= ln)
-                        .map(|(_, v)| v.clone());
-                }
-            }
-            None
+            let expr = parse_dynamic_name_expr(
+                arg_raw,
+                &re_symbol_lit,
+                &re_string_lit,
+                &re_var_ref,
+                &re_string_to_sym,
+                &re_symbol_to_s,
+                &re_var_cast,
+            )?;
+            resolve_dynamic_name_expr(expr, ln, &assigned_exprs, 8)
         };
 
         for caps in self.runner.run_captures(source, &self.queries.calls) {
@@ -178,11 +402,8 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                     let text = &source[callnode.start..callnode.end];
 
                     if (name == "send" || name == "public_send")
-                        && let Some(arg_raw) = re_send_first_arg
-                            .captures(text)
-                            .and_then(|c| c.get(1))
-                            .map(|m| m.as_str())
-                        && let Some(resolved) = resolve_dynamic_name(arg_raw, ln)
+                        && let Some(arg_raw) = extract_first_send_like_arg(text, &name)
+                        && let Some(resolved) = resolve_dynamic_name(&arg_raw, ln)
                     {
                         name = resolved;
                     }
@@ -291,20 +512,22 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
         // if dynamic call names match method_missing naming policy, add an extra edge to `method_missing`.
         let re_method_missing_def = Regex::new(r"(?m)^\s*def\s+method_missing\b").unwrap();
         if re_method_missing_def.is_match(source) {
-            let re_method_def =
-                Regex::new(r"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_?!]*)\b").unwrap();
+            let re_method_def = Regex::new(r"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_?!]*)\b").unwrap();
             let declared_methods: std::collections::HashSet<String> = re_method_def
                 .captures_iter(source)
                 .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
                 .collect();
 
-            let re_dyn_prefix = Regex::new(
-                r#"name\.to_s\.start_with\?\(\s*(?:\"([^\"]+)\"|'([^']+)')\s*\)"#,
-            )
-            .unwrap();
+            let re_dyn_prefix =
+                Regex::new(r#"name\.to_s\.start_with\?\(\s*(?:\"([^\"]+)\"|'([^']+)')\s*\)"#)
+                    .unwrap();
             let dyn_prefixes: Vec<String> = re_dyn_prefix
                 .captures_iter(source)
-                .filter_map(|c| c.get(1).or_else(|| c.get(2)).map(|m| m.as_str().to_string()))
+                .filter_map(|c| {
+                    c.get(1)
+                        .or_else(|| c.get(2))
+                        .map(|m| m.as_str().to_string())
+                })
                 .collect();
 
             let mut seen_method_missing: std::collections::HashSet<u32> = out
@@ -463,6 +686,56 @@ end
     }
 
     #[test]
+    fn ruby_send_public_send_tracks_assignment_chains_and_reassignments() {
+        let src = r#"CONST_SYM = :target_sym
+CONST_STR = "target_str"
+
+class DynamicDispatch
+  def target_sym
+    :ok
+  end
+
+  def target_str
+    :ok
+  end
+
+  def execute
+    dyn_sym = CONST_SYM
+    send(dyn_sym)
+
+    dyn_alias = dyn_sym
+    public_send(dyn_alias)
+
+    dyn_name = CONST_STR
+    send(dyn_name)
+
+    dyn_name = "target_sym"
+    public_send(dyn_name)
+  end
+end
+"#;
+        let ana = SpecRubyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic_chain.rb", src);
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| format!("{}@{}", r.name, r.line))
+            .collect();
+
+        assert!(
+            names.iter().filter(|&&n| n == "target_sym").count() >= 3,
+            "names={names:?} refs={refs_dbg:?}"
+        );
+        assert!(
+            names.iter().filter(|&&n| n == "target_str").count() >= 1,
+            "names={names:?}"
+        );
+        assert!(!names.contains(&"send"), "names={names:?}");
+        assert!(!names.contains(&"public_send"), "names={names:?}");
+    }
+
+    #[test]
     fn ruby_dynamic_fixture_alias_method_define_method() {
         let src = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -527,10 +800,7 @@ end
         assert!(names.contains(&"from_included"));
         assert!(names.contains(&"around_before"));
         assert!(refs.iter().any(|r| {
-            r.name == "method_missing"
-                && r.line == 27
-                && r.qualifier.is_none()
-                && r.is_method
+            r.name == "method_missing" && r.line == 27 && r.qualifier.is_none() && r.is_method
         }));
     }
 }
