@@ -732,4 +732,53 @@ public class Main {
             Some("java::util::function::BiFunction")
         );
     }
+
+    #[test]
+    fn java_hard_case_fixture_lambda_method_ref_overload_v2() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/java/analyzer_hard_cases_lambda_methodref_overload_v2.java"
+        ));
+        let ana = SpecJavaAnalyzer::new();
+
+        let syms = ana.symbols_in_file("demo/JavaOverloadLabV2.java", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "JavaOverloadLabV2" && matches!(s.kind, SymbolKind::Struct)
+        }));
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "run" && matches!(s.kind, SymbolKind::Method))
+        );
+        let decode_count = syms
+            .iter()
+            .filter(|s| s.name == "decode" && matches!(s.kind, SymbolKind::Method))
+            .count();
+        assert!(decode_count >= 3, "expected overloaded decode methods");
+
+        let refs = ana.unresolved_refs("demo/JavaOverloadLabV2.java", src);
+        assert!(refs.iter().any(|r| {
+            r.name == "decode" && r.qualifier.as_deref() == Some("this") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "decode" && r.qualifier.as_deref() == Some("codec") && r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "decodeStatic"
+                && r.qualifier.as_deref() == Some("JavaOverloadLabV2")
+                && !r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "decode" && r.qualifier.is_none() && !r.is_method
+        }));
+
+        let imports = ana.imports_in_file("demo/JavaOverloadLabV2.java", src);
+        assert_eq!(
+            imports.get("Function").map(String::as_str),
+            Some("java::util::function::Function")
+        );
+        assert_eq!(
+            imports.get("BiFunction").map(String::as_str),
+            Some("java::util::function::BiFunction")
+        );
+    }
 }
