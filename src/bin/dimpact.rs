@@ -97,20 +97,27 @@ fn meets_min_confidence(certainty: EdgeCertainty, min: ConfidenceOpt) -> bool {
     certainty_rank(certainty) >= min.min_rank()
 }
 
-fn apply_min_confidence_filter(
+fn apply_confidence_filter(
     out: ImpactOutput,
     opts: &ImpactOptions,
     min_confidence: Option<ConfidenceOpt>,
+    exclude_dynamic_fallback: bool,
     keep_edges_in_output: bool,
 ) -> ImpactOutput {
-    let Some(min_confidence) = min_confidence else {
+    if min_confidence.is_none() && !exclude_dynamic_fallback {
         return out;
-    };
+    }
 
     let filtered_refs: Vec<Reference> = out
         .edges
         .iter()
-        .filter(|r| meets_min_confidence(r.certainty.clone(), min_confidence))
+        .filter(|r| {
+            min_confidence
+                .map(|min| meets_min_confidence(r.certainty.clone(), min))
+                .unwrap_or(true)
+                && (!exclude_dynamic_fallback
+                    || !matches!(r.certainty, EdgeCertainty::DynamicFallback))
+        })
         .cloned()
         .collect();
 
@@ -187,6 +194,9 @@ struct Args {
     /// dynamic-fallback: all edges
     #[arg(long = "min-confidence", value_enum)]
     min_confidence: Option<ConfidenceOpt>,
+    /// Exclude dynamic-fallback edges from impact traversal/output.
+    #[arg(long = "exclude-dynamic-fallback", default_value_t = false)]
+    exclude_dynamic_fallback: bool,
     /// Ignore directories (relative prefixes). Repeatable.
     #[arg(long = "ignore-dir")]
     ignore_dir: Vec<String>,
@@ -258,6 +268,9 @@ enum Command {
         /// dynamic-fallback: all edges
         #[arg(long = "min-confidence", value_enum)]
         min_confidence: Option<ConfidenceOpt>,
+        /// Exclude dynamic-fallback edges from impact traversal/output.
+        #[arg(long = "exclude-dynamic-fallback", default_value_t = false)]
+        exclude_dynamic_fallback: bool,
         /// Use PDG-based dependence analysis
         #[arg(long = "with-pdg", default_value_t = false)]
         with_pdg: bool,
@@ -390,6 +403,7 @@ fn main() -> anyhow::Result<()> {
                 max_depth,
                 with_edges,
                 min_confidence,
+                exclude_dynamic_fallback,
                 with_pdg,
                 with_propagation,
                 engine,
@@ -406,6 +420,7 @@ fn main() -> anyhow::Result<()> {
                 max_depth,
                 with_edges,
                 min_confidence,
+                exclude_dynamic_fallback,
                 with_pdg,
                 with_propagation,
                 engine,
@@ -462,6 +477,7 @@ fn main() -> anyhow::Result<()> {
                 args.max_depth,
                 args.with_edges,
                 args.min_confidence,
+                args.exclude_dynamic_fallback,
                 false,
                 false,
                 args.engine,
@@ -803,6 +819,7 @@ fn run_impact(
     max_depth: Option<usize>,
     with_edges: bool,
     min_confidence: Option<ConfidenceOpt>,
+    exclude_dynamic_fallback: bool,
     with_pdg: bool,
     with_propagation: bool,
     engine_opt: EngineOpt,
@@ -860,7 +877,7 @@ fn run_impact(
         DirectionOpt::Callees => ImpactDirection::Callees,
         DirectionOpt::Both => ImpactDirection::Both,
     };
-    let compute_with_edges = with_edges || min_confidence.is_some();
+    let compute_with_edges = with_edges || min_confidence.is_some() || exclude_dynamic_fallback;
     let opts = ImpactOptions {
         direction,
         max_depth: max_depth.or(Some(100)),
@@ -924,10 +941,11 @@ fn run_impact(
                     o.direction = ImpactDirection::Callers;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callers,
-                        output: apply_min_confidence_filter(
+                        output: apply_confidence_filter(
                             compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
                             &o,
                             min_confidence,
+                            exclude_dynamic_fallback,
                             with_edges,
                         ),
                     });
@@ -935,20 +953,22 @@ fn run_impact(
                     o2.direction = ImpactDirection::Callees;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callees,
-                        output: apply_min_confidence_filter(
+                        output: apply_confidence_filter(
                             compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
                             &o2,
                             min_confidence,
+                            exclude_dynamic_fallback,
                             with_edges,
                         ),
                     });
                 } else {
                     impacts.push(PerSeedImpact {
                         direction: opts.direction,
-                        output: apply_min_confidence_filter(
+                        output: apply_confidence_filter(
                             compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
                             &opts,
                             min_confidence,
+                            exclude_dynamic_fallback,
                             with_edges,
                         ),
                     });
@@ -978,10 +998,11 @@ fn run_impact(
                     o.direction = ImpactDirection::Callers;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callers,
-                        output: apply_min_confidence_filter(
+                        output: apply_confidence_filter(
                             compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
                             &o,
                             min_confidence,
+                            exclude_dynamic_fallback,
                             with_edges,
                         ),
                     });
@@ -989,20 +1010,22 @@ fn run_impact(
                     o2.direction = ImpactDirection::Callees;
                     impacts.push(PerSeedImpact {
                         direction: ImpactDirection::Callees,
-                        output: apply_min_confidence_filter(
+                        output: apply_confidence_filter(
                             compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
                             &o2,
                             min_confidence,
+                            exclude_dynamic_fallback,
                             with_edges,
                         ),
                     });
                 } else {
                     impacts.push(PerSeedImpact {
                         direction: opts.direction,
-                        output: apply_min_confidence_filter(
+                        output: apply_confidence_filter(
                             compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
                             &opts,
                             min_confidence,
+                            exclude_dynamic_fallback,
                             with_edges,
                         ),
                     });
@@ -1026,7 +1049,7 @@ fn run_impact(
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
         log::info!(
-            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} pdg={} ignore_dirs={:?}",
+            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} exclude_dynamic_fallback={} pdg={} ignore_dirs={:?}",
             ekind,
             files.len(),
             lang,
@@ -1034,6 +1057,7 @@ fn run_impact(
             opts.max_depth,
             compute_with_edges,
             min_confidence,
+            exclude_dynamic_fallback,
             with_pdg,
             opts.ignore_dirs
         );
@@ -1107,10 +1131,11 @@ fn run_impact(
                     }
                 })
                 .collect();
-            let out: ImpactOutput = apply_min_confidence_filter(
+            let out: ImpactOutput = apply_confidence_filter(
                 compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts),
                 &opts,
                 min_confidence,
+                exclude_dynamic_fallback,
                 with_edges,
             );
             match fmt {
@@ -1121,10 +1146,11 @@ fn run_impact(
             }
             return Ok(());
         }
-        let out: ImpactOutput = apply_min_confidence_filter(
+        let out: ImpactOutput = apply_confidence_filter(
             engine.impact(&files, lang, &opts)?,
             &opts,
             min_confidence,
+            exclude_dynamic_fallback,
             with_edges,
         );
         match fmt {
@@ -1137,7 +1163,7 @@ fn run_impact(
     }
 
     log::info!(
-        "mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} ignore_dirs={:?}",
+        "mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} exclude_dynamic_fallback={} ignore_dirs={:?}",
         ekind,
         seeds.len(),
         lang,
@@ -1145,6 +1171,7 @@ fn run_impact(
         opts.max_depth,
         compute_with_edges,
         min_confidence,
+        exclude_dynamic_fallback,
         opts.ignore_dirs
     );
     if with_pdg || with_propagation {
@@ -1214,10 +1241,11 @@ fn run_impact(
                 }
             })
             .collect();
-        let out: ImpactOutput = apply_min_confidence_filter(
+        let out: ImpactOutput = apply_confidence_filter(
             compute_impact(&seeds, &index, &pdg_refs, &opts),
             &opts,
             min_confidence,
+            exclude_dynamic_fallback,
             with_edges,
         );
         match fmt {
@@ -1229,10 +1257,11 @@ fn run_impact(
         return Ok(());
     }
 
-    let out: ImpactOutput = apply_min_confidence_filter(
+    let out: ImpactOutput = apply_confidence_filter(
         engine.impact_from_symbols(&seeds, lang, &opts)?,
         &opts,
         min_confidence,
+        exclude_dynamic_fallback,
         with_edges,
     );
     match fmt {

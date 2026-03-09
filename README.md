@@ -50,6 +50,8 @@ CLI Overview
   - `--direction callers|callees|both` : traversal direction (default: callers)
   - `--max-depth N`             : max traversal depth (default: 100)
   - `--with-edges`              : include reference edges in output
+  - `--min-confidence LEVEL`    : confidence threshold (`confirmed|inferred|dynamic-fallback`)
+  - `--exclude-dynamic-fallback`: exclude `dynamic_fallback` edges from traversal/output
   - `--ignore-dir DIR`          : ignore directories by relative prefix (repeatable)
   - `--with-pdg`                : use PDG-based dependence analysis (Rust/Ruby for DFG)
   - `--with-propagation`        : enable symbolic propagation across variables and functions (implies PDG)
