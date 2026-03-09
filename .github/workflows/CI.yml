@@ -197,46 +197,46 @@ jobs:
             if [ -f precision-regression-report.json ]; then
               echo
               python3 - <<'PY'
-import json
-from pathlib import Path
+              import json
+              from pathlib import Path
 
-p = Path('precision-regression-report.json')
-j = json.loads(p.read_text()) if p.exists() else {}
+              p = Path('precision-regression-report.json')
+              j = json.loads(p.read_text()) if p.exists() else {}
 
-t = j.get('totals', {})
-print('### Totals')
-print(f"- FN: {t.get('fn', 'n/a')} (threshold={j.get('fnThreshold', 'n/a')})")
-print(f"- FP: {t.get('fp', 'n/a')} (threshold={j.get('fpThreshold', 'n/a')})")
+              t = j.get('totals', {})
+              print('### Totals')
+              print(f"- FN: {t.get('fn', 'n/a')} (threshold={j.get('fnThreshold', 'n/a')})")
+              print(f"- FP: {t.get('fp', 'n/a')} (threshold={j.get('fpThreshold', 'n/a')})")
 
-ds = j.get('diffSummary', {})
-if ds:
-    print('\n### Diff summary')
-    fn = ds.get('fn', {})
-    fp = ds.get('fp', {})
-    print(f"- FN changed: {fn.get('changed', 'n/a')}")
-    print(f"- FN impacted: {fn.get('impacted', 'n/a')}")
-    print(f"- FP changed: {fp.get('changed', 'n/a')}")
-    print(f"- FP impacted: {fp.get('impacted', 'n/a')}")
+              ds = j.get('diffSummary', {})
+              if ds:
+                  print('\n### Diff summary')
+                  fn = ds.get('fn', {})
+                  fp = ds.get('fp', {})
+                  print(f"- FN changed: {fn.get('changed', 'n/a')}")
+                  print(f"- FN impacted: {fn.get('impacted', 'n/a')}")
+                  print(f"- FP changed: {fp.get('changed', 'n/a')}")
+                  print(f"- FP impacted: {fp.get('impacted', 'n/a')}")
 
-cd = j.get('confidenceDistribution', {})
-if cd:
-    print('\n### Confidence distribution')
-    for k in sorted(cd):
-        print(f"- {k}: {cd[k]}")
+              cd = j.get('confidenceDistribution', {})
+              if cd:
+                  print('\n### Confidence distribution')
+                  for k in sorted(cd):
+                      print(f"- {k}: {cd[k]}")
 
-cases = j.get('cases', [])
-problem_cases = [
-    c for c in cases
-    if c.get('fn', {}).get('total', 0) > 0 or c.get('fp', {}).get('total', 0) > 0
-]
-if problem_cases:
-    print('\n### Diff hotspots (FN/FP > 0)')
-    for c in problem_cases:
-        print(
-            f"- {c.get('name')} ({c.get('lang')}): "
-            f"fn={c.get('fn', {}).get('total', 0)} fp={c.get('fp', {}).get('total', 0)}"
-        )
-PY
+              cases = j.get('cases', [])
+              problem_cases = [
+                  c for c in cases
+                  if c.get('fn', {}).get('total', 0) > 0 or c.get('fp', {}).get('total', 0) > 0
+              ]
+              if problem_cases:
+                  print('\n### Diff hotspots (FN/FP > 0)')
+                  for c in problem_cases:
+                      print(
+                          f"- {c.get('name')} ({c.get('lang')}): "
+                          f"fn={c.get('fn', {}).get('total', 0)} fp={c.get('fp', {}).get('total', 0)}"
+                      )
+              PY
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload precision regression artifacts
