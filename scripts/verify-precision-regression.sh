@@ -200,6 +200,7 @@ def run_case(case):
                 "callers",
                 "--lang",
                 case["lang"],
+                "--with-edges",
                 "--format",
                 "json",
             ],
@@ -212,6 +213,12 @@ def run_case(case):
             for s in im.get("impacted_symbols", [])
             if isinstance(s, dict) and s.get("name")
         }
+        confidence_counts = {}
+        for e in im.get("edges", []):
+            if not isinstance(e, dict):
+                continue
+            certainty = e.get("certainty") or "unknown"
+            confidence_counts[certainty] = confidence_counts.get(certainty, 0) + 1
 
     exp_changed = set(case["expected_changed"])
     exp_impacted = set(case["expected_impacted"])
@@ -240,11 +247,33 @@ def run_case(case):
             "impacted": fp_impacted,
             "total": len(fp_changed) + len(fp_impacted),
         },
+        "diffSummary": {
+            "fn": {
+                "changed": len(fn_changed),
+                "impacted": len(fn_impacted),
+                "total": len(fn_changed) + len(fn_impacted),
+            },
+            "fp": {
+                "changed": len(fp_changed),
+                "impacted": len(fp_impacted),
+                "total": len(fp_changed) + len(fp_impacted),
+            },
+        },
+        "confidenceDistribution": confidence_counts,
     }
 
 results = [run_case(c) for c in cases]
 fn_total = sum(r["fn"]["total"] for r in results)
 fp_total = sum(r["fp"]["total"] for r in results)
+fn_changed_total = sum(r["diffSummary"]["fn"]["changed"] for r in results)
+fn_impacted_total = sum(r["diffSummary"]["fn"]["impacted"] for r in results)
+fp_changed_total = sum(r["diffSummary"]["fp"]["changed"] for r in results)
+fp_impacted_total = sum(r["diffSummary"]["fp"]["impacted"] for r in results)
+
+confidence_distribution = {}
+for r in results:
+    for certainty, count in r.get("confidenceDistribution", {}).items():
+        confidence_distribution[certainty] = confidence_distribution.get(certainty, 0) + count
 
 report = {
     "fnThreshold": fn_threshold,
@@ -253,6 +282,19 @@ report = {
         "fn": fn_total,
         "fp": fp_total,
     },
+    "diffSummary": {
+        "fn": {
+            "changed": fn_changed_total,
+            "impacted": fn_impacted_total,
+            "total": fn_total,
+        },
+        "fp": {
+            "changed": fp_changed_total,
+            "impacted": fp_impacted_total,
+            "total": fp_total,
+        },
+    },
+    "confidenceDistribution": confidence_distribution,
     "cases": results,
 }
 
@@ -262,9 +304,18 @@ report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", 
 print("# precision regression gate")
 print(f"FN total={fn_total} (threshold={fn_threshold})")
 print(f"FP total={fp_total} (threshold={fp_threshold})")
+print(
+    "diff summary: "
+    f"fn(changed={fn_changed_total}, impacted={fn_impacted_total}) "
+    f"fp(changed={fp_changed_total}, impacted={fp_impacted_total})"
+)
+if confidence_distribution:
+    print("confidence distribution:")
+    for certainty in sorted(confidence_distribution):
+        print(f"  - {certainty}: {confidence_distribution[certainty]}")
 for r in results:
     print(
-        f"- {r['name']} ({r['lang']}): fn={r['fn']['total']} fp={r['fp']['total']} changed={r['changed']} impacted={r['impacted']}"
+        f"- {r['name']} ({r['lang']}): fn={r['fn']['total']} fp={r['fp']['total']} changed={r['changed']} impacted={r['impacted']} confidence={r.get('confidenceDistribution', {})}"
     )
 
 if fn_total > fn_threshold or fp_total > fp_threshold:
