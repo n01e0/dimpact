@@ -134,3 +134,92 @@ impl SymbolIndex {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference(certainty: EdgeCertainty) -> Reference {
+        Reference {
+            from: SymbolId("a::f".to_string()),
+            to: SymbolId("b::g".to_string()),
+            kind: RefKind::Call,
+            file: "src/lib.rs".to_string(),
+            line: 42,
+            certainty,
+        }
+    }
+
+    #[test]
+    fn serialize_contains_certainty_and_confidence() {
+        let r = reference(EdgeCertainty::DynamicFallback);
+        let v = serde_json::to_value(&r).expect("serialize reference");
+
+        assert_eq!(v["certainty"], "dynamic_fallback");
+        assert_eq!(v["confidence"], "dynamic_fallback");
+    }
+
+    #[test]
+    fn deserialize_accepts_legacy_certainty_field() {
+        let raw = serde_json::json!({
+            "from": "a::f",
+            "to": "b::g",
+            "kind": "call",
+            "file": "src/lib.rs",
+            "line": 42,
+            "certainty": "inferred"
+        });
+
+        let r: Reference = serde_json::from_value(raw).expect("deserialize by certainty");
+        assert_eq!(r.certainty, EdgeCertainty::Inferred);
+    }
+
+    #[test]
+    fn deserialize_accepts_new_confidence_field() {
+        let raw = serde_json::json!({
+            "from": "a::f",
+            "to": "b::g",
+            "kind": "call",
+            "file": "src/lib.rs",
+            "line": 42,
+            "confidence": "dynamic_fallback"
+        });
+
+        let r: Reference = serde_json::from_value(raw).expect("deserialize by confidence");
+        assert_eq!(r.certainty, EdgeCertainty::DynamicFallback);
+    }
+
+    #[test]
+    fn deserialize_prefers_certainty_when_both_exist() {
+        let raw = serde_json::json!({
+            "from": "a::f",
+            "to": "b::g",
+            "kind": "call",
+            "file": "src/lib.rs",
+            "line": 42,
+            "certainty": "confirmed",
+            "confidence": "dynamic_fallback"
+        });
+
+        let r: Reference = serde_json::from_value(raw).expect("deserialize both");
+        assert_eq!(r.certainty, EdgeCertainty::Confirmed);
+    }
+
+    #[test]
+    fn yaml_roundtrip_keeps_confidence_alias() {
+        let y = r#"
+from: a::f
+to: b::g
+kind: call
+file: src/lib.rs
+line: 42
+confidence: inferred
+"#;
+        let r: Reference = serde_yaml::from_str(y).expect("yaml deserialize");
+        assert_eq!(r.certainty, EdgeCertainty::Inferred);
+
+        let out = serde_yaml::to_string(&r).expect("yaml serialize");
+        assert!(out.contains("certainty: inferred"));
+        assert!(out.contains("confidence: inferred"));
+    }
+}
