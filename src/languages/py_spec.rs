@@ -453,18 +453,35 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             methods: std::collections::HashSet<String>,
             has_getattr: bool,
             has_getattribute: bool,
+            metaclass: Option<String>,
+            is_protocol: bool,
         }
 
         let re_method_def =
             Regex::new(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\b").expect("valid python method regex");
+        let re_class_header =
+            Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*:")
+                .expect("valid class header regex");
+        let re_metaclass =
+            Regex::new(r"\bmetaclass\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\b").expect("meta regex");
+
         let mut class_infos: Vec<ClassInfo> = Vec::new();
         for i in 0..lines.len() {
-            let Some(cap) = re_class.captures(lines[i]) else {
+            let Some(cap) = re_class_header.captures(lines[i]) else {
                 continue;
             };
             let Some(class_name) = cap.get(1).map(|m| m.as_str().to_string()) else {
                 continue;
             };
+
+            let bases = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+            let metaclass = re_metaclass
+                .captures(bases)
+                .and_then(|m| m.get(1).map(|x| x.as_str().to_string()));
+            let is_protocol = bases
+                .split(',')
+                .map(|b| b.trim())
+                .any(|b| b == "Protocol" || b.ends_with(".Protocol"));
 
             let start_line = (i as u32) + 1;
             let end_idx = find_python_block_end(&lines, i);
@@ -483,25 +500,28 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 }
             }
 
-            if methods.is_empty() {
-                continue;
-            }
-
             let has_getattr = methods.contains("__getattr__");
             let has_getattribute = methods.contains("__getattribute__");
-            if has_getattr || has_getattribute {
-                class_infos.push(ClassInfo {
-                    name: class_name,
-                    start_line,
-                    end_line,
-                    methods,
-                    has_getattr,
-                    has_getattribute,
-                });
-            }
+            class_infos.push(ClassInfo {
+                name: class_name,
+                start_line,
+                end_line,
+                methods,
+                has_getattr,
+                has_getattribute,
+                metaclass,
+                is_protocol,
+            });
         }
 
         if !class_infos.is_empty() {
+            let class_by_name: std::collections::HashMap<String, ClassInfo> = class_infos
+                .iter()
+                .cloned()
+                .map(|c| (c.name.clone(), c))
+                .collect();
+
+            // 1) Instance-level fallback: self.<attr>(...) -> __getattribute__/__getattr__ in enclosing class.
             for r in out.clone() {
                 if !r.is_method || r.qualifier.as_deref() != Some("self") {
                     continue;
@@ -556,6 +576,132 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                             qualifier: Some(class_ctx.name.clone()),
                             is_method: true,
                         });
+                    }
+                }
+            }
+
+            // 2) Metaclass-level fallback: ClassName.dynamic_method(...) -> metaclass dunder hooks.
+            for r in out.clone() {
+                if !r.is_method || r.name == "__getattr__" || r.name == "__getattribute__" {
+                    continue;
+                }
+                let Some(qual) = r.qualifier.as_ref() else {
+                    continue;
+                };
+                let Some(class_ctx) = class_by_name.get(qual) else {
+                    continue;
+                };
+                if class_ctx.methods.contains(&r.name) {
+                    continue;
+                }
+                let Some(meta_name) = class_ctx.metaclass.as_ref() else {
+                    continue;
+                };
+                let Some(meta_ctx) = class_by_name.get(meta_name) else {
+                    continue;
+                };
+
+                if meta_ctx.has_getattribute {
+                    let key = (
+                        r.line,
+                        "__getattribute__".to_string(),
+                        Some(meta_ctx.name.clone()),
+                        true,
+                    );
+                    if seen.insert(key) {
+                        out.push(UnresolvedRef {
+                            name: "__getattribute__".to_string(),
+                            kind: RefKind::Call,
+                            file: path.to_string(),
+                            line: r.line,
+                            qualifier: Some(meta_ctx.name.clone()),
+                            is_method: true,
+                        });
+                    }
+                }
+                if meta_ctx.has_getattr {
+                    let key = (
+                        r.line,
+                        "__getattr__".to_string(),
+                        Some(meta_ctx.name.clone()),
+                        true,
+                    );
+                    if seen.insert(key) {
+                        out.push(UnresolvedRef {
+                            name: "__getattr__".to_string(),
+                            kind: RefKind::Call,
+                            file: path.to_string(),
+                            line: r.line,
+                            qualifier: Some(meta_ctx.name.clone()),
+                            is_method: true,
+                        });
+                    }
+                }
+            }
+
+            // 3) Protocol narrowing: within `if isinstance(var, ProtocolType):`,
+            // map method calls on `var` to protocol method refs.
+            let re_isinstance = Regex::new(
+                r"^\s*if\s+isinstance\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*\)\s*:",
+            )
+            .expect("isinstance regex");
+            let mut proto_narrowings: Vec<(u32, u32, String, String)> = Vec::new();
+            for (i, line) in lines.iter().enumerate() {
+                let Some(cap) = re_isinstance.captures(line) else {
+                    continue;
+                };
+                let Some(var_name) = cap.get(1).map(|m| m.as_str().to_string()) else {
+                    continue;
+                };
+                let Some(proto_raw) = cap.get(2).map(|m| m.as_str()) else {
+                    continue;
+                };
+                let proto_name = proto_raw
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(proto_raw)
+                    .to_string();
+                let Some(proto_ctx) = class_by_name.get(&proto_name) else {
+                    continue;
+                };
+                if !proto_ctx.is_protocol {
+                    continue;
+                }
+                let start_line = (i as u32) + 1;
+                let end_line = find_python_block_end(&lines, i) as u32;
+                proto_narrowings.push((start_line, end_line, var_name, proto_name));
+            }
+
+            if !proto_narrowings.is_empty() {
+                for r in out.clone() {
+                    if !r.is_method || r.name.starts_with("__") {
+                        continue;
+                    }
+                    let Some(qual) = r.qualifier.as_ref() else {
+                        continue;
+                    };
+
+                    for (start_line, end_line, var_name, proto_name) in &proto_narrowings {
+                        if r.line < *start_line || r.line > *end_line || qual != var_name {
+                            continue;
+                        }
+                        let Some(proto_ctx) = class_by_name.get(proto_name) else {
+                            continue;
+                        };
+                        if !proto_ctx.methods.contains(&r.name) {
+                            continue;
+                        }
+                        let key = (r.line, r.name.clone(), Some(proto_name.clone()), true);
+                        if seen.insert(key) {
+                            out.push(UnresolvedRef {
+                                name: r.name.clone(),
+                                kind: RefKind::Call,
+                                file: path.to_string(),
+                                line: r.line,
+                                qualifier: Some(proto_name.clone()),
+                                is_method: true,
+                            });
+                        }
                     }
                 }
             }
@@ -1717,7 +1863,21 @@ class Service:
         );
         assert!(
             refs.iter().any(|r| {
+                r.name == "run" && r.qualifier.as_deref() == Some("SupportsRun") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
                 r.name == "build" && r.qualifier.as_deref() == Some("Service") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "__getattr__"
+                    && r.qualifier.as_deref() == Some("MetaRouter")
+                    && r.is_method
             }),
             "refs={refs_dbg:?}"
         );
