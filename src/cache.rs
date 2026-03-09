@@ -505,7 +505,7 @@ pub fn load_graph(conn: &Connection) -> anyhow::Result<(SymbolIndex, Vec<Referen
             kind: crate::ir::reference::RefKind::Call,
             file,
             line: line as u32,
-            certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+            certainty: crate::ir::reference::EdgeCertainty::Inferred,
         })
     })?;
     let mut edges = Vec::new();

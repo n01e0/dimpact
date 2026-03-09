@@ -367,7 +367,7 @@ pub(crate) fn resolve_references(
                 kind: r.kind.clone(),
                 file: r.file.clone(),
                 line: r.line,
-                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                certainty: crate::ir::reference::EdgeCertainty::Inferred,
             });
         }
     }
