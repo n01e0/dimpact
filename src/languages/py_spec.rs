@@ -120,6 +120,7 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
         let mut seen: HashSet<(u32, String, Option<String>, bool)> = HashSet::new();
         let imports = self.imports_in_file(path, source);
         let import_aliases: HashSet<String> = imports.keys().cloned().collect();
+        let lines: Vec<&str> = source.lines().collect();
 
         for caps in self.runner.run_captures(source, &self.queries.calls) {
             let Some(name_cap) = caps.iter().find(|c| c.name == "name") else {
@@ -269,7 +270,20 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 continue;
             }
 
-            let ln = byte_to_line(&offs, full.start());
+            let decorator_ln = byte_to_line(&offs, full.start());
+            let mut ln = decorator_ln;
+            let dec_idx = decorator_ln.saturating_sub(1) as usize;
+            for i in dec_idx + 1..lines.len() {
+                let t = lines[i].trim();
+                if t.is_empty() || t.starts_with('#') || t.starts_with('@') {
+                    continue;
+                }
+                if t.starts_with("def ") || t.starts_with("async def ") || t.starts_with("class ") {
+                    ln = (i as u32) + 1;
+                }
+                break;
+            }
+
             let compact = chain.replace([' ', '\t', '\n'], "");
             let mut parts: Vec<&str> = compact.split('.').collect();
             if parts.is_empty() {
@@ -306,7 +320,6 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
         // If a class attribute is initialized with a descriptor class instance and that class
         // defines `__get__`, add a fallback edge from `self.<attr>(...)` callsites to
         // `<DescriptorClass>.__get__`.
-        let lines: Vec<&str> = source.lines().collect();
         let re_class =
             Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\b").expect("valid class regex");
         let re_def_get = Regex::new(r"^\s*def\s+__get__\b").expect("valid __get__ regex");
@@ -358,14 +371,57 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             }
         }
 
+        let mut descriptor_aliases: std::collections::HashMap<String, Vec<(u32, String)>> =
+            std::collections::HashMap::new();
         if !descriptor_attrs.is_empty() {
-            for r in out.clone() {
-                if !r.is_method || r.qualifier.as_deref() != Some("self") {
-                    continue;
-                }
-                let Some(desc_class) = descriptor_attrs.get(&r.name) else {
+            let re_alias_self_attr = Regex::new(
+                r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*self\.([A-Za-z_][A-Za-z0-9_]*)\s*$",
+            )
+            .expect("valid descriptor alias regex");
+            for cap in re_alias_self_attr.captures_iter(source) {
+                let Some(full) = cap.get(0) else {
                     continue;
                 };
+                let Some(alias) = cap.get(1).map(|m| m.as_str().to_string()) else {
+                    continue;
+                };
+                let Some(attr) = cap.get(2).map(|m| m.as_str().to_string()) else {
+                    continue;
+                };
+                let Some(desc_class) = descriptor_attrs.get(&attr).cloned() else {
+                    continue;
+                };
+                let ln = byte_to_line(&offs, full.start());
+                descriptor_aliases
+                    .entry(alias)
+                    .or_default()
+                    .push((ln, desc_class));
+            }
+            for vals in descriptor_aliases.values_mut() {
+                vals.sort_by_key(|(ln, _)| *ln);
+            }
+
+            for r in out.clone() {
+                let direct_desc = if r.is_method && r.qualifier.as_deref() == Some("self") {
+                    descriptor_attrs.get(&r.name).cloned()
+                } else {
+                    None
+                };
+                let alias_desc = if !r.is_method && r.qualifier.is_none() {
+                    descriptor_aliases.get(&r.name).and_then(|vals| {
+                        vals.iter()
+                            .rev()
+                            .find(|(ln, _)| *ln <= r.line)
+                            .map(|(_, dc)| dc.clone())
+                    })
+                } else {
+                    None
+                };
+
+                let Some(desc_class) = direct_desc.or(alias_desc) else {
+                    continue;
+                };
+
                 let key = (
                     r.line,
                     "__get__".to_string(),
@@ -380,7 +436,7 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                     kind: RefKind::Call,
                     file: path.to_string(),
                     line: r.line,
-                    qualifier: Some(desc_class.clone()),
+                    qualifier: Some(desc_class),
                     is_method: true,
                 });
             }
@@ -818,15 +874,17 @@ def run():
         let ana = SpecPyAnalyzer::new();
         let refs = ana.unresolved_refs("pkg/main.py", src);
 
-        assert!(
-            refs.iter()
-                .any(|r| r.name == "traced" && r.qualifier.is_none() && !r.is_method)
-        );
         assert!(refs.iter().any(|r| {
-            r.name == "decorate" && r.qualifier.as_deref() == Some("pkg") && !r.is_method
+            r.name == "traced" && r.line == 4 && r.qualifier.is_none() && !r.is_method
         }));
         assert!(refs.iter().any(|r| {
-            r.name == "wrap" && r.qualifier.as_deref() == Some("pkg") && !r.is_method
+            r.name == "decorate"
+                && r.line == 4
+                && r.qualifier.as_deref() == Some("pkg")
+                && !r.is_method
+        }));
+        assert!(refs.iter().any(|r| {
+            r.name == "wrap" && r.line == 4 && r.qualifier.as_deref() == Some("pkg") && !r.is_method
         }));
     }
 
@@ -990,6 +1048,40 @@ from pkg.star import *
             im.get("__glob__pkg::sub::plugins").map(String::as_str),
             Some("pkg::sub::plugins")
         );
+    }
+
+    #[test]
+    fn unresolved_refs_descriptor_alias_call_infers_get_edge() {
+        let src = r#"class UpperDescriptor:
+    def __get__(self, obj, objtype=None):
+        def inner(v):
+            return v.upper()
+
+        return inner
+
+
+class Service:
+    normalizer = UpperDescriptor()
+
+    def process(self, value):
+        fn = self.normalizer
+        return fn(value)
+"#;
+        let ana = SpecPyAnalyzer::new();
+        let refs = ana.unresolved_refs("pkg/svc_alias.py", src);
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+
+        assert!(refs.iter().any(|r| {
+            r.name == "__get__"
+                && r.qualifier.as_deref() == Some("UpperDescriptor")
+                && r.is_method
+        }), "refs={refs_dbg:?}");
     }
 
     #[test]
