@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
