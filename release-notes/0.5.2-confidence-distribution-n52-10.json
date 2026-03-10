@@ -1,0 +1,64 @@
+{
+  "runId": "f8523962-c6b3-46f4-829d-a1863296a810",
+  "generatedAt": "2026-03-10T11:00:23.016128+00:00",
+  "sourceReport": "/tmp/n52-10-precision.json",
+  "gateStatus": "passed",
+  "distributionByLanguage": {
+    "go": {
+      "cases": 2,
+      "confirmed": 0,
+      "inferred": 0,
+      "dynamic-fallback": 0,
+      "total_edges": 0
+    },
+    "java": {
+      "cases": 2,
+      "confirmed": 0,
+      "inferred": 19,
+      "dynamic-fallback": 0,
+      "total_edges": 19
+    },
+    "python": {
+      "cases": 2,
+      "confirmed": 0,
+      "inferred": 11,
+      "dynamic-fallback": 0,
+      "total_edges": 11
+    },
+    "ruby": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 6,
+      "dynamic-fallback": 0,
+      "total_edges": 6
+    },
+    "rust": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 0,
+      "dynamic-fallback": 0,
+      "total_edges": 0
+    },
+    "tsx": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 0,
+      "dynamic-fallback": 0,
+      "total_edges": 0
+    },
+    "typescript": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 3,
+      "dynamic-fallback": 0,
+      "total_edges": 3
+    }
+  },
+  "overall": {
+    "cases": 10,
+    "confirmed": 0,
+    "inferred": 39,
+    "dynamic-fallback": 0,
+    "total_edges": 39
+  }
+}
