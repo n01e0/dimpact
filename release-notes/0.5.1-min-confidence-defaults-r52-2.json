@@ -1,0 +1,90 @@
+{
+  "runId": "dbeebef7-ed73-453c-b1d4-3483147055fa",
+  "generatedAt": "2026-03-10T06:03:32.776214+00:00",
+  "sourceDistribution": "release-notes/0.5.1-confidence-distribution-r52-1.json",
+  "recommendedDefaultGlobal": "inferred",
+  "recommendedByLanguage": {
+    "go": {
+      "minConfidence": "inferred",
+      "reason": "no impacted edges observed in current fixture sample; keep global default for consistency",
+      "evidence": {
+        "confirmed": 0,
+        "inferred": 0,
+        "dynamic_fallback": 0,
+        "total_edges": 0,
+        "cases": 1
+      }
+    },
+    "java": {
+      "minConfidence": "inferred",
+      "reason": "sampled impacted edges are inferred; confirmed would drop observed signal",
+      "evidence": {
+        "confirmed": 0,
+        "inferred": 9,
+        "dynamic_fallback": 0,
+        "total_edges": 9,
+        "cases": 1
+      }
+    },
+    "python": {
+      "minConfidence": "inferred",
+      "reason": "sampled impacted edges are inferred; confirmed would drop observed signal",
+      "evidence": {
+        "confirmed": 0,
+        "inferred": 11,
+        "dynamic_fallback": 0,
+        "total_edges": 11,
+        "cases": 2
+      }
+    },
+    "ruby": {
+      "minConfidence": "inferred",
+      "reason": "sampled impacted edges are inferred; confirmed would drop observed signal",
+      "evidence": {
+        "confirmed": 0,
+        "inferred": 6,
+        "dynamic_fallback": 0,
+        "total_edges": 6,
+        "cases": 1
+      }
+    },
+    "rust": {
+      "minConfidence": "inferred",
+      "reason": "no impacted edges observed in current fixture sample; keep global default for consistency",
+      "evidence": {
+        "confirmed": 0,
+        "inferred": 0,
+        "dynamic_fallback": 0,
+        "total_edges": 0,
+        "cases": 1
+      }
+    },
+    "tsx": {
+      "minConfidence": "inferred",
+      "reason": "no impacted edges observed in current fixture sample; keep global default for consistency",
+      "evidence": {
+        "confirmed": 0,
+        "inferred": 0,
+        "dynamic_fallback": 0,
+        "total_edges": 0,
+        "cases": 1
+      }
+    },
+    "typescript": {
+      "minConfidence": "inferred",
+      "reason": "sampled impacted edges are inferred; confirmed would drop observed signal",
+      "evidence": {
+        "confirmed": 0,
+        "inferred": 3,
+        "dynamic_fallback": 0,
+        "total_edges": 3,
+        "cases": 1
+      }
+    }
+  },
+  "operationalNotes": [
+    "For higher precision / lower recall triage, operators can override to --min-confidence confirmed.",
+    "Keep dynamic-fallback excluded from default path unless explicitly needed for recall investigation.",
+    "Revisit per-language defaults after R53 corpus measurements."
+  ]
+}
