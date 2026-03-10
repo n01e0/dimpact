@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.2 - 2026-03-10
+
+_Change range: `v0.5.1..v0.5.2`._
+
+### Major changes
+- Completed the v0.5.2 precision-next loop (N52) and merged the full PR chain (`#367`..`#385`) under required-check gating.
+- Tightened precision regression thresholds with per-language policy, including strict zero-FN/FP enforcement on stabilized lanes.
+- Expanded strict real-LSP migration and residual-trend evidence in CI/nightly with clearer skip-safe/fail-fast operation reporting.
+- Extended hard-fixture and non-regression coverage for dynamic/edge cases across Ruby, Python, Go, and Java lanes.
+
+### Notes
+- Tag/release published: `v0.5.2` (2026-03-10).
+- Detailed evidence is recorded under `release-notes/0.5.2-*`.
+
 ## 0.5.1 - draft
 
 _Change range: `v0.5.0..HEAD`._
