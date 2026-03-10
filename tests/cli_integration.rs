@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use predicates::prelude::*;
 use std::fs;
 use std::io::Write;

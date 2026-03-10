@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 #![allow(unused)]
 use std::collections::BTreeSet;
 use std::fs;

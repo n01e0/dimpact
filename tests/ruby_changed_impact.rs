@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 #![allow(unused)]
 use std::fs;
 use std::process::Command;

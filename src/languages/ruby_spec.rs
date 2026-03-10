@@ -36,6 +36,7 @@ enum DynamicNameExpr {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_dynamic_name_expr(
     raw: &str,
     re_symbol_lit: &Regex,
@@ -97,6 +98,7 @@ fn dedup_names(names: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_dynamic_name_exprs(
     expr: DynamicNameExpr,
     line: u32,
