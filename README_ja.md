@@ -84,6 +84,20 @@ dimpact id --name foo -f json
 - `--seed-json PATH|'-'|JSON`   : JSON 配列やファイル・stdin でシード
 - `--per-seed`                  : 変更/シードごとに結果をグループ化; `--direction both` 時は caller/callee 別出力
 
+## `--exclude-dynamic-fallback` 運用ガイド
+- 目的: 低確度の `dynamic_fallback` エッジを探索/出力から除外し、precision 重視で結果を見る。
+- 推奨利用パターン:
+  - CI / レビューゲート（precision優先）:
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence inferred --exclude-dynamic-fallback -f json`
+  - 取りこぼし調査（recall優先）:
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence dynamic-fallback -f json`
+- 実運用ルール:
+  - エッジフィルタ観点では `--exclude-dynamic-fallback` は実質 `--min-confidence inferred` と同等です。
+  - すでに `--min-confidence inferred` を指定している場合、`--exclude-dynamic-fallback` は明示用途で、機能的には冗長です。
+  - 最も厳しく絞る場合は `--min-confidence confirmed` を使います（この場合もフラグの追加効果はありません）。
+- 確認ポイント:
+  - JSON/YAML の `confidence_filter.input_edge_count` と `confidence_filter.kept_edge_count` を比較し、想定どおりに除外されたか確認します。
+
 ## PDG 可視化
 `--with-pdg` と `-f dot` を組み合わせて PDG を dot 形式で出力できます。
 ```bash
