@@ -163,6 +163,36 @@ cases = [
         "expected_impacted": set(),
     },
     {
+        "name": "go-hard-v74",
+        "lang": "go",
+        "file": "demo/a.go",
+        "fixture": "tests/fixtures/go/analyzer_hard_cases_interface_dispatch_method_value_generic_receiver_v2.go",
+        "replace": [
+            (
+                "if err := methodValue(context.Background()); err != nil {",
+                "if err := methodValue(context.TODO()); err != nil {",
+                1,
+            )
+        ],
+        "expected_changed": {"Execute"},
+        "expected_impacted": set(),
+    },
+    {
+        "name": "java-hard-v74",
+        "lang": "java",
+        "file": "demo/A.java",
+        "fixture": "tests/fixtures/java/analyzer_hard_cases_lambda_methodref_overload_v2.java",
+        "replace": [
+            (
+                "return Integer.parseInt(s);",
+                "return Integer.parseInt(s) + 1;",
+                1,
+            )
+        ],
+        "expected_changed": {"JavaOverloadLabV2", "decode"},
+        "expected_impacted": {"decode", "run"},
+    },
+    {
         "name": "ruby-hard-v79",
         "lang": "ruby",
         "file": "demo/a.rb",

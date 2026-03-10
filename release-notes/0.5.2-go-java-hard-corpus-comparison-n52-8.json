@@ -1,0 +1,98 @@
+{
+  "runId": "f8523962-c6b3-46f4-829d-a1863296a810",
+  "generatedAt": "2026-03-10T10:28:04.620718+00:00",
+  "beforeReport": "/tmp/n52-8-before.json",
+  "afterReport": "/tmp/n52-8-after.json",
+  "go": {
+    "before": {
+      "fn": 0,
+      "fp": 0,
+      "cases": [
+        "go-hard-v73"
+      ],
+      "diff": {
+        "fn": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        }
+      }
+    },
+    "after": {
+      "fn": 0,
+      "fp": 0,
+      "cases": [
+        "go-hard-v73",
+        "go-hard-v74"
+      ],
+      "diff": {
+        "fn": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        }
+      }
+    },
+    "delta": {
+      "fn": 0,
+      "fp": 0,
+      "caseCount": 1
+    }
+  },
+  "java": {
+    "before": {
+      "fn": 0,
+      "fp": 0,
+      "cases": [
+        "java-hard-v73"
+      ],
+      "diff": {
+        "fn": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        }
+      }
+    },
+    "after": {
+      "fn": 0,
+      "fp": 0,
+      "cases": [
+        "java-hard-v73",
+        "java-hard-v74"
+      ],
+      "diff": {
+        "fn": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        }
+      }
+    },
+    "delta": {
+      "fn": 0,
+      "fp": 0,
+      "caseCount": 1
+    }
+  }
+}
