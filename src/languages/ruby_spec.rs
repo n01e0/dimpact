@@ -30,6 +30,8 @@ impl Default for SpecRubyAnalyzer {
 enum DynamicNameExpr {
     Literal(String),
     Ref(String),
+    InterpolatedPrefix(String),
+    Any(Vec<DynamicNameExpr>),
     MapLookup {
         map_name: String,
         key_expr: Option<String>,
@@ -44,12 +46,41 @@ fn parse_dynamic_name_expr(
     re_var_ref: &Regex,
     re_string_to_sym: &Regex,
     re_symbol_to_s: &Regex,
+    re_interpolated_to_sym: &Regex,
     re_var_cast: &Regex,
     re_map_lookup: &Regex,
 ) -> Option<DynamicNameExpr> {
     let mut expr = raw.trim();
     while expr.starts_with('(') && expr.ends_with(')') && expr.len() >= 2 {
         expr = expr[1..expr.len() - 1].trim();
+    }
+
+    if let Some((lhs, rhs)) = expr.split_once("||") {
+        let left = parse_dynamic_name_expr(
+            lhs.trim(),
+            re_symbol_lit,
+            re_string_lit,
+            re_var_ref,
+            re_string_to_sym,
+            re_symbol_to_s,
+            re_interpolated_to_sym,
+            re_var_cast,
+            re_map_lookup,
+        );
+        let right = parse_dynamic_name_expr(
+            rhs.trim(),
+            re_symbol_lit,
+            re_string_lit,
+            re_var_ref,
+            re_string_to_sym,
+            re_symbol_to_s,
+            re_interpolated_to_sym,
+            re_var_cast,
+            re_map_lookup,
+        );
+        if let (Some(left_expr), Some(right_expr)) = (left, right) {
+            return Some(DynamicNameExpr::Any(vec![left_expr, right_expr]));
+        }
     }
 
     if let Some(cap) = re_symbol_lit.captures(expr) {
@@ -71,6 +102,11 @@ fn parse_dynamic_name_expr(
         return cap
             .get(1)
             .map(|m| DynamicNameExpr::Literal(m.as_str().to_string()));
+    }
+    if let Some(cap) = re_interpolated_to_sym.captures(expr) {
+        return cap
+            .get(1)
+            .map(|m| DynamicNameExpr::InterpolatedPrefix(m.as_str().to_string()));
     }
     if let Some(cap) = re_map_lookup.captures(expr) {
         let map_name = cap.get(1).map(|m| m.as_str().to_string())?;
@@ -94,8 +130,45 @@ fn dedup_names(names: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     names
         .into_iter()
+        .filter(|n| !n.is_empty())
         .filter(|n| seen.insert(n.clone()))
         .collect()
+}
+
+fn strip_ruby_inline_comment(expr: &str) -> String {
+    let mut out = String::with_capacity(expr.len());
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    for ch in expr.chars() {
+        if escape {
+            out.push(ch);
+            escape = false;
+            continue;
+        }
+        if (in_single || in_double) && ch == '\\' {
+            out.push(ch);
+            escape = true;
+            continue;
+        }
+        if !in_double && ch == '\'' {
+            in_single = !in_single;
+            out.push(ch);
+            continue;
+        }
+        if !in_single && ch == '"' {
+            in_double = !in_double;
+            out.push(ch);
+            continue;
+        }
+        if !in_single && !in_double && ch == '#' {
+            break;
+        }
+        out.push(ch);
+    }
+
+    out.trim().to_string()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -109,6 +182,7 @@ fn resolve_dynamic_name_exprs(
     re_var_ref: &Regex,
     re_string_to_sym: &Regex,
     re_symbol_to_s: &Regex,
+    re_interpolated_to_sym: &Regex,
     re_var_cast: &Regex,
     re_map_lookup: &Regex,
     depth: u8,
@@ -119,6 +193,36 @@ fn resolve_dynamic_name_exprs(
 
     match expr {
         DynamicNameExpr::Literal(v) => vec![v],
+        DynamicNameExpr::InterpolatedPrefix(prefix) => {
+            let mut names = Vec::new();
+            for entries in map_entries.values() {
+                for (k, _) in entries {
+                    names.push(format!("{prefix}{k}"));
+                }
+            }
+            dedup_names(names)
+        }
+        DynamicNameExpr::Any(parts) => {
+            let mut names = Vec::new();
+            for part in parts {
+                names.extend(resolve_dynamic_name_exprs(
+                    part,
+                    line,
+                    assigned_exprs,
+                    map_entries,
+                    re_symbol_lit,
+                    re_string_lit,
+                    re_var_ref,
+                    re_string_to_sym,
+                    re_symbol_to_s,
+                    re_interpolated_to_sym,
+                    re_var_cast,
+                    re_map_lookup,
+                    depth - 1,
+                ));
+            }
+            dedup_names(names)
+        }
         DynamicNameExpr::Ref(var) => {
             let Some(entries) = assigned_exprs.get(&var) else {
                 return Vec::new();
@@ -138,6 +242,7 @@ fn resolve_dynamic_name_exprs(
                 re_var_ref,
                 re_string_to_sym,
                 re_symbol_to_s,
+                re_interpolated_to_sym,
                 re_var_cast,
                 re_map_lookup,
                 depth - 1,
@@ -158,6 +263,7 @@ fn resolve_dynamic_name_exprs(
                         re_var_ref,
                         re_string_to_sym,
                         re_symbol_to_s,
+                        re_interpolated_to_sym,
                         re_var_cast,
                         re_map_lookup,
                     ) {
@@ -171,6 +277,7 @@ fn resolve_dynamic_name_exprs(
                             re_var_ref,
                             re_string_to_sym,
                             re_symbol_to_s,
+                            re_interpolated_to_sym,
                             re_var_cast,
                             re_map_lookup,
                             depth - 1,
@@ -566,7 +673,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
         //   alias = dyn_sym
         //   dyn = "target".to_sym
         let re_assign_expr = Regex::new(
-            r#"(?m)^\s*([@]{0,2}[A-Za-z_][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\s*=\s*([^#\n]+?)\s*(?:#.*)?$"#,
+            r#"(?m)^\s*([@]{0,2}[A-Za-z_][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\s*=\s*([^\n]+?)\s*$"#,
         )
         .unwrap();
         let re_symbol_lit = Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)$"#).unwrap();
@@ -576,6 +683,9 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
         let re_string_to_sym =
             Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']\.to_sym$"#).unwrap();
         let re_symbol_to_s = Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)\.to_s$"#).unwrap();
+        let re_interpolated_to_sym =
+            Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)#\{[^}]+\}[\"']\.to_sym$"#)
+                .unwrap();
         let re_var_cast =
             Regex::new(r#"^([@]{0,2}[A-Za-z_][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\.(?:to_sym|to_s)$"#)
                 .unwrap();
@@ -629,14 +739,19 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
             let Some(rhs) = caps.get(2) else {
                 continue;
             };
+            let rhs_clean = strip_ruby_inline_comment(rhs.as_str());
+            if rhs_clean.is_empty() {
+                continue;
+            }
             let ln = byte_to_line(&offs, full.start());
             if let Some(expr) = parse_dynamic_name_expr(
-                rhs.as_str(),
+                rhs_clean.as_str(),
                 &re_symbol_lit,
                 &re_string_lit,
                 &re_var_ref,
                 &re_string_to_sym,
                 &re_symbol_to_s,
+                &re_interpolated_to_sym,
                 &re_var_cast,
                 &re_map_lookup,
             ) {
@@ -658,6 +773,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 &re_var_ref,
                 &re_string_to_sym,
                 &re_symbol_to_s,
+                &re_interpolated_to_sym,
                 &re_var_cast,
                 &re_map_lookup,
             ) else {
@@ -673,6 +789,7 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 &re_var_ref,
                 &re_string_to_sym,
                 &re_symbol_to_s,
+                &re_interpolated_to_sym,
                 &re_var_cast,
                 &re_map_lookup,
                 8,
@@ -885,9 +1002,10 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
                 .collect();
 
-            let re_dyn_prefix =
-                Regex::new(r#"name\.to_s\.start_with\?\(\s*(?:\"([^\"]+)\"|'([^']+)')\s*\)"#)
-                    .unwrap();
+            let re_dyn_prefix = Regex::new(
+                r#"(?:name(?:\.to_s)?|[A-Za-z_][A-Za-z0-9_]*)\.start_with\?\(\s*(?:\"([^\"]+)\"|'([^']+)')\s*\)"#,
+            )
+            .unwrap();
             let dyn_prefixes: Vec<String> = re_dyn_prefix
                 .captures_iter(source)
                 .filter_map(|c| {
@@ -1292,6 +1410,49 @@ end
             refs.iter().any(|r| {
                 r.name == "respond_to_missing?"
                     && r.line == 48
+                    && r.qualifier.is_none()
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+    }
+
+    #[test]
+    fn ruby_dynamic_fixture_dsl_method_missing_dispatch_chain_v2() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_dsl_method_missing_chain_v2.rb"
+        ));
+        let ana = SpecRubyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic_dsl_chain_v2.rb", src);
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]", r.name, r.line, q),
+                None => format!("{}@{}", r.name, r.line),
+            })
+            .collect();
+
+        assert!(names.contains(&"route_create"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"route_delete"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"emit_created"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"emit_deleted"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"emit_unknown"), "refs={refs_dbg:?}");
+        assert!(!names.contains(&"send"), "refs={refs_dbg:?}");
+        assert!(!names.contains(&"public_send"), "refs={refs_dbg:?}");
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "method_missing" && r.line == 81 && r.qualifier.is_none() && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "respond_to_missing?"
+                    && r.line == 81
                     && r.qualifier.is_none()
                     && r.is_method
             }),
