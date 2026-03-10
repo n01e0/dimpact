@@ -211,16 +211,6 @@ fn require_env_gate_callers_lane(lane: &str, lane_var: &str, hint: &str) -> bool
     }
 }
 
-fn should_run_go_strict_lsp_e2e() -> bool {
-    std::env::var("DIMPACT_E2E_STRICT_LSP_GO").ok().as_deref() == Some("1")
-        || should_run_strict_lsp_e2e()
-}
-
-fn should_run_java_strict_lsp_e2e() -> bool {
-    std::env::var("DIMPACT_E2E_STRICT_LSP_JAVA").ok().as_deref() == Some("1")
-        || should_run_strict_lsp_e2e()
-}
-
 fn should_run_typescript_strict_lsp_e2e() -> bool {
     std::env::var("DIMPACT_E2E_STRICT_LSP_TYPESCRIPT")
         .ok()
@@ -3320,10 +3310,11 @@ fn lsp_engine_strict_ruby_both_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn go_real_lsp_e2e_fixture_is_opt_in_gated() {
-    if !should_run_go_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e fixture"
-        );
+    if !require_env_gate_callers_lane(
+        "go/preflight-fixture",
+        "DIMPACT_E2E_STRICT_LSP_GO",
+        "DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_gopls_for_lane("go/preflight-fixture");
@@ -3350,10 +3341,11 @@ fn go_real_lsp_e2e_fixture_is_opt_in_gated() {
 #[test]
 #[serial]
 fn java_real_lsp_e2e_fixture_is_opt_in_gated() {
-    if !should_run_java_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e fixture"
-        );
+    if !require_env_gate_callers_lane(
+        "java/preflight-fixture",
+        "DIMPACT_E2E_STRICT_LSP_JAVA",
+        "DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_jdtls_for_lane("java/preflight-fixture");
@@ -3439,10 +3431,11 @@ fn lsp_engine_strict_java_callers_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_java_callees_chain_e2e_when_available() {
-    if !should_run_java_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "java/callees",
+        "DIMPACT_E2E_STRICT_LSP_JAVA",
+        "DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_jdtls_for_lane("java/callees");
@@ -3490,10 +3483,11 @@ fn lsp_engine_strict_java_callees_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_java_both_chain_e2e_when_available() {
-    if !should_run_java_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "java/both",
+        "DIMPACT_E2E_STRICT_LSP_JAVA",
+        "DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_jdtls_for_lane("java/both");
@@ -3597,10 +3591,11 @@ fn lsp_engine_strict_go_callers_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_go_callees_chain_e2e_when_available() {
-    if !should_run_go_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "go/callees",
+        "DIMPACT_E2E_STRICT_LSP_GO",
+        "DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_gopls_for_lane("go/callees");
@@ -3648,10 +3643,11 @@ fn lsp_engine_strict_go_callees_chain_e2e_when_available() {
 #[test]
 #[serial]
 fn lsp_engine_strict_go_both_chain_e2e_when_available() {
-    if !should_run_go_strict_lsp_e2e() {
-        eprintln!(
-            "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
-        );
+    if !require_env_gate_callers_lane(
+        "go/both",
+        "DIMPACT_E2E_STRICT_LSP_GO",
+        "DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1)",
+    ) {
         return;
     }
     require_gopls_for_lane("go/both");
