@@ -38,18 +38,33 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install + health-check TypeScript/JavaScript language server
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/install-ts-js.log"
           exec > >(tee -a "$LOG") 2>&1
+
+          if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+            echo "::error::[ts/js] node/npm missing after actions/setup-node"
+            echo "[ts/js] PATH=$PATH"
+            exit 1
+          fi
+
           echo "[ts/js] node=$(node -v) npm=$(npm -v)"
 
-          if ! npm install -g typescript typescript-language-server; then
-            echo "::error::[ts/js] npm install failed (typescript/typescript-language-server)"
-            exit 1
+          install_ts_js() {
+            npm install -g --no-audit --no-fund typescript@latest typescript-language-server@latest
+          }
+
+          if ! install_ts_js; then
+            echo "[ts/js] first npm install failed, retrying once after npm cache clean"
+            npm cache clean --force || true
+            if ! install_ts_js; then
+              echo "::error::[ts/js] npm install failed (typescript/typescript-language-server) after retry"
+              exit 1
+            fi
           fi
 
           if ! command -v typescript-language-server >/dev/null 2>&1; then
@@ -70,11 +85,26 @@ jobs:
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/install-python.log"
           exec > >(tee -a "$LOG") 2>&1
+
+          if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+            echo "::error::[python] node/npm missing after actions/setup-node"
+            echo "[python] PATH=$PATH"
+            exit 1
+          fi
+
           echo "[python] node=$(node -v) npm=$(npm -v)"
 
-          if ! npm install -g pyright; then
-            echo "::error::[python] npm install failed (pyright)"
-            exit 1
+          install_pyright() {
+            npm install -g --no-audit --no-fund pyright@latest
+          }
+
+          if ! install_pyright; then
+            echo "[python] first npm install failed, retrying once after npm cache clean"
+            npm cache clean --force || true
+            if ! install_pyright; then
+              echo "::error::[python] npm install failed (pyright) after retry"
+              exit 1
+            fi
           fi
 
           if ! command -v pyright-langserver >/dev/null 2>&1; then
