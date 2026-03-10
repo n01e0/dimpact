@@ -161,12 +161,42 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
         let imports = self.imports_in_file(path, source);
         let import_aliases: HashSet<String> = imports.keys().cloned().collect();
 
-        let decl_lines: HashSet<u32> = self
-            .symbols_in_file(path, source)
-            .into_iter()
+        let syms = self.symbols_in_file(path, source);
+        let decl_lines: HashSet<u32> = syms
+            .iter()
             .filter(|s| matches!(s.kind, SymbolKind::Method | SymbolKind::Function))
             .map(|s| s.range.start_line)
             .collect();
+
+        #[derive(Clone)]
+        struct JavaClassScope {
+            start_line: u32,
+            end_line: u32,
+            methods: std::collections::HashSet<String>,
+        }
+
+        let mut class_scopes: Vec<JavaClassScope> = syms
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Struct | SymbolKind::Trait | SymbolKind::Enum))
+            .map(|s| JavaClassScope {
+                start_line: s.range.start_line,
+                end_line: s.range.end_line,
+                methods: std::collections::HashSet::new(),
+            })
+            .collect();
+
+        for m in syms
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Method | SymbolKind::Function))
+        {
+            if let Some(scope) = class_scopes
+                .iter_mut()
+                .filter(|c| m.range.start_line >= c.start_line && m.range.start_line <= c.end_line)
+                .max_by_key(|c| c.start_line)
+            {
+                scope.methods.insert(m.name.clone());
+            }
+        }
 
         let re_qualified_call =
             Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*\(")
@@ -303,6 +333,39 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
                 qualifier: None,
                 is_method: false,
             });
+        }
+
+        // Contextual method inference for bare calls:
+        // inside class/lambda bodies, if a bare call name matches a declared method in the
+        // nearest enclosing class, emit an additional `this.<method>` ref.
+        if !class_scopes.is_empty() {
+            for r in out.clone() {
+                if r.is_method || r.qualifier.is_some() {
+                    continue;
+                }
+                let Some(scope) = class_scopes
+                    .iter()
+                    .filter(|c| r.line >= c.start_line && r.line <= c.end_line)
+                    .max_by_key(|c| c.start_line)
+                else {
+                    continue;
+                };
+                if !scope.methods.contains(&r.name) {
+                    continue;
+                }
+                let key = (r.line, r.name.clone(), Some("this".to_string()), true);
+                if !seen.insert(key) {
+                    continue;
+                }
+                out.push(UnresolvedRef {
+                    name: r.name,
+                    kind: RefKind::Call,
+                    file: path.to_string(),
+                    line: r.line,
+                    qualifier: Some("this".to_string()),
+                    is_method: true,
+                });
+            }
         }
 
         out
@@ -756,9 +819,46 @@ public class Main {
         assert!(decode_count >= 3, "expected overloaded decode methods");
 
         let refs = ana.unresolved_refs("demo/JavaOverloadLabV2.java", src);
-        assert!(refs.iter().any(|r| {
-            r.name == "decode" && r.qualifier.as_deref() == Some("this") && r.is_method
-        }));
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "decode" && r.qualifier.as_deref() == Some("this") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "decode"
+                    && r.qualifier.as_deref() == Some("this")
+                    && r.is_method
+                    && r.line == 31
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "decode"
+                    && r.qualifier.as_deref() == Some("this")
+                    && r.is_method
+                    && r.line == 32
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "decode"
+                    && r.qualifier.as_deref() == Some("this")
+                    && r.is_method
+                    && r.line == 33
+            }),
+            "refs={refs_dbg:?}"
+        );
         assert!(refs.iter().any(|r| {
             r.name == "decode" && r.qualifier.as_deref() == Some("codec") && r.is_method
         }));
