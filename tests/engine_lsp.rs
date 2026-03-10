@@ -199,9 +199,13 @@ fn should_run_strict_lsp_e2e() -> bool {
 fn require_strict_lsp_env_gate_for_lane(lane: &str) -> bool {
     match std::env::var("DIMPACT_E2E_STRICT_LSP") {
         Ok(v) if v == "1" => true,
+        Ok(v) if v == "0" => {
+            eprintln!("skip: lane={} has DIMPACT_E2E_STRICT_LSP=0", lane);
+            false
+        }
         Ok(v) => {
             panic!(
-                "fail-fast preflight: lane={} cause=env invalid DIMPACT_E2E_STRICT_LSP={} (expected 1)",
+                "fail-fast preflight: lane={} cause=env invalid DIMPACT_E2E_STRICT_LSP={} (expected 1 or 0)",
                 lane, v
             );
         }

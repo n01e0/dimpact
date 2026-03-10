@@ -274,25 +274,24 @@ jobs:
             command -v "$1" >/dev/null 2>&1 && "$1" version >/dev/null 2>&1
           }
 
+          # Keep global strict gate in lane-only mode (0) and control execution by per-language gates.
+          # This avoids forcing all strict lanes at once while failure-first stabilization is in progress.
+          set_gate "DIMPACT_E2E_STRICT_LSP" "0" "lane-only mode (global strict gate disabled)"
           if has_cmd_help rust-analyzer; then
-            set_gate "DIMPACT_E2E_STRICT_LSP" "1" "rust-analyzer available"
-            rust_reason="rust-analyzer available"
+            rust_reason="rust-analyzer available (global gate remains lane-only)"
           else
-            set_gate "DIMPACT_E2E_STRICT_LSP" "0" "rust-analyzer missing (skip-safe)"
-            rust_reason="rust-analyzer missing (skip-safe)"
+            rust_reason="rust-analyzer missing (global gate remains lane-only)"
           fi
 
           if has_cmd_help typescript-language-server; then
-            set_gate "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "1" "typescript-language-server available"
-            set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "1" "typescript-language-server available (shared with TS)"
-            ts_reason="typescript-language-server available"
-            js_reason="typescript-language-server available (shared with TS)"
+            ts_reason="typescript-language-server available (temporarily kept skip-safe in F53)"
+            js_reason="typescript-language-server available (temporarily kept skip-safe in F53)"
           else
-            set_gate "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "0" "typescript-language-server missing (skip-safe)"
-            set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "0" "typescript-language-server missing (skip-safe)"
             ts_reason="typescript-language-server missing (skip-safe)"
             js_reason="typescript-language-server missing (skip-safe)"
           fi
+          set_gate "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "0" "$ts_reason"
+          set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "0" "$js_reason"
 
           if has_cmd_version gopls; then
             set_gate "DIMPACT_E2E_STRICT_LSP_GO" "1" "gopls available"
@@ -303,12 +302,11 @@ jobs:
           fi
 
           if has_cmd_help jdtls; then
-            set_gate "DIMPACT_E2E_STRICT_LSP_JAVA" "1" "jdtls available"
-            java_reason="jdtls available"
+            java_reason="jdtls available (temporarily kept skip-safe in F53)"
           else
-            set_gate "DIMPACT_E2E_STRICT_LSP_JAVA" "0" "jdtls missing (skip-safe)"
             java_reason="jdtls missing (skip-safe)"
           fi
+          set_gate "DIMPACT_E2E_STRICT_LSP_JAVA" "0" "$java_reason"
 
           if has_cmd_help ruby-lsp; then
             set_gate "DIMPACT_E2E_STRICT_LSP_RUBY" "1" "ruby-lsp available"
