@@ -258,12 +258,18 @@ jobs:
           PRE_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-preflight.log"
           : > "$PRE_LOG"
 
-          set_gate() {
-            local key="$1" enabled="$2" reason="$3"
-            printf -v "$key" '%s' "$enabled"
+          set_gate_enabled() {
+            local key="$1" reason="$2"
+            printf -v "$key" '%s' "1"
             export "$key"
-            echo "${key}=${enabled}" >> "$GITHUB_ENV"
-            echo "${key}=${enabled} reason=${reason}" >> "$PRE_LOG"
+            echo "${key}=1" >> "$GITHUB_ENV"
+            echo "${key}=1 reason=${reason}" >> "$PRE_LOG"
+          }
+
+          set_gate_unset() {
+            local key="$1" reason="$2"
+            unset "$key" || true
+            echo "${key}=unset reason=${reason}" >> "$PRE_LOG"
           }
 
           has_cmd_help() {
@@ -274,9 +280,9 @@ jobs:
             command -v "$1" >/dev/null 2>&1 && "$1" version >/dev/null 2>&1
           }
 
-          # Keep global strict gate in lane-only mode (0) and control execution by per-language gates.
+          # Keep global strict gate unset in lane-only mode and control execution by per-language gates.
           # This avoids forcing all strict lanes at once while failure-first stabilization is in progress.
-          set_gate "DIMPACT_E2E_STRICT_LSP" "0" "lane-only mode (global strict gate disabled)"
+          set_gate_unset "DIMPACT_E2E_STRICT_LSP" "lane-only mode (global strict gate unset)"
           if has_cmd_help rust-analyzer; then
             rust_reason="rust-analyzer available (global gate remains lane-only)"
           else
@@ -284,34 +290,38 @@ jobs:
           fi
 
           if has_cmd_help typescript-language-server; then
-            ts_reason="typescript-language-server available (temporarily kept skip-safe in F53)"
-            js_reason="typescript-language-server available (temporarily kept skip-safe in F53)"
+            ts_reason="typescript-language-server available"
+            js_reason="typescript-language-server available"
+            set_gate_enabled "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
+            set_gate_enabled "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
           else
             ts_reason="typescript-language-server missing (skip-safe)"
             js_reason="typescript-language-server missing (skip-safe)"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
           fi
-          set_gate "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "0" "$ts_reason"
-          set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "0" "$js_reason"
 
           if has_cmd_version gopls; then
-            go_reason="gopls available (temporarily kept skip-safe in F53)"
+            go_reason="gopls available"
+            set_gate_enabled "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
           else
             go_reason="gopls missing (skip-safe)"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
           fi
-          set_gate "DIMPACT_E2E_STRICT_LSP_GO" "0" "$go_reason"
 
           if has_cmd_help jdtls; then
-            java_reason="jdtls available (temporarily kept skip-safe in F53)"
+            java_reason="jdtls available"
+            set_gate_enabled "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
           else
             java_reason="jdtls missing (skip-safe)"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
           fi
-          set_gate "DIMPACT_E2E_STRICT_LSP_JAVA" "0" "$java_reason"
 
           if has_cmd_help ruby-lsp; then
-            set_gate "DIMPACT_E2E_STRICT_LSP_RUBY" "1" "ruby-lsp available"
+            set_gate_enabled "DIMPACT_E2E_STRICT_LSP_RUBY" "ruby-lsp available"
             ruby_reason="ruby-lsp available"
           else
-            set_gate "DIMPACT_E2E_STRICT_LSP_RUBY" "0" "ruby-lsp missing (skip-safe)"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_RUBY" "ruby-lsp missing (skip-safe)"
             ruby_reason="ruby-lsp missing (skip-safe)"
           fi
 
@@ -329,11 +339,11 @@ jobs:
           fi
 
           if [ -n "$python_server" ]; then
-            set_gate "DIMPACT_E2E_STRICT_LSP_PYTHON" "1" "$python_reason"
+            set_gate_enabled "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
             echo "DIMPACT_PYTHON_LSP=$python_server" >> "$GITHUB_ENV"
             echo "DIMPACT_PYTHON_LSP=$python_server reason=selected by preflight" >> "$PRE_LOG"
           else
-            set_gate "DIMPACT_E2E_STRICT_LSP_PYTHON" "0" "$python_reason"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
           fi
 
           {
