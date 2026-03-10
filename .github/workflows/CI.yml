@@ -233,6 +233,8 @@ jobs:
             exit 1
           fi
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
       - name: Cache CARGO_HOME
         uses: actions/cache@v4
         with:
@@ -241,11 +243,35 @@ jobs:
           restore-keys: ${{ runner.os }}
       - name: Run engine_lsp regression test suite
         run: cargo test -q --test engine_lsp
-      - name: Summarize strict real-LSP migration status (skip-safe/fail-fast)
+      - name: Summarize strict real-LSP migration status + residual trend
         if: always()
         run: |
+          set -euo pipefail
           bash scripts/summarize-strict-e2e-migration-progress.sh tests/engine_lsp.rs > strict-e2e-migration-summary.md
+
+          bash scripts/summarize-strict-e2e-skips.sh \
+            tests/engine_lsp.rs \
+            strict-e2e-residual-after.json \
+            strict-e2e-residual-after.md
+
+          if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git show HEAD^:tests/engine_lsp.rs > /tmp/engine_lsp.prev.rs
+            bash scripts/summarize-strict-e2e-skips.sh \
+              /tmp/engine_lsp.prev.rs \
+              strict-e2e-residual-before.json \
+              strict-e2e-residual-before.md
+          else
+            cp strict-e2e-residual-after.json strict-e2e-residual-before.json
+          fi
+
+          python3 scripts/render-strict-e2e-residual-trend.py \
+            strict-e2e-residual-before.json \
+            strict-e2e-residual-after.json \
+            > strict-e2e-residual-trend.md
+
           cat strict-e2e-migration-summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat strict-e2e-residual-after.md >> "$GITHUB_STEP_SUMMARY"
+          cat strict-e2e-residual-trend.md >> "$GITHUB_STEP_SUMMARY"
 
   lsp_graduation_check:
     runs-on: ubuntu-latest
