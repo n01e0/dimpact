@@ -2114,4 +2114,103 @@ class Service:
             Some("typing::runtime_checkable")
         );
     }
+
+    #[test]
+    fn python_hard_case_fixture_monkeypatch_metaclass_protocol_v3() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol_v3.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/dynamic_protocol_meta_v3.py", src);
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "runtime_checkable" && r.qualifier.is_none() && !r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "wraps" && r.qualifier.is_none() && !r.is_method),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| { r.name == "audit_wrapper" && r.qualifier.is_none() && !r.is_method }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "setattr" && r.qualifier.is_none() && !r.is_method),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| { r.name == "patched_dispatch" && r.qualifier.is_none() && !r.is_method }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "dispatch" && r.qualifier.as_deref() == Some("Handler") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "dispatch" && r.qualifier.as_deref() == Some("target") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "dispatch"
+                    && r.qualifier.as_deref() == Some("SupportsDispatch")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "build_service" && r.qualifier.as_deref() == Some("Router") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "_build" && r.qualifier.as_deref() == Some("Router") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "__getattr__"
+                    && r.qualifier.as_deref() == Some("MetaBridge")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+
+        let im = ana.imports_in_file("pkg/dynamic_protocol_meta_v3.py", src);
+        assert_eq!(
+            im.get("wraps").map(String::as_str),
+            Some("functools::wraps")
+        );
+        assert_eq!(
+            im.get("Protocol").map(String::as_str),
+            Some("typing::Protocol")
+        );
+        assert_eq!(
+            im.get("runtime_checkable").map(String::as_str),
+            Some("typing::runtime_checkable")
+        );
+    }
 }
