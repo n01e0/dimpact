@@ -1,0 +1,32 @@
+{
+  "runId": "a41dde90-e976-4d41-b878-305bffb4632b",
+  "taskId": "F53-11",
+  "branch": "task/f53-11-nightly-consecutive-green",
+  "headSha": "a9a97143a307e9f7270a7ccb2c484b7a7671722a",
+  "workflow": "nightly-strict-lsp.yml",
+  "verifiedConsecutiveGreenRuns": [
+    {
+      "databaseId": 22921341777,
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "createdAt": "2026-03-10T19:49:19Z",
+      "updatedAt": "2026-03-10T19:52:34Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22921341777"
+    },
+    {
+      "databaseId": 22921475512,
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "createdAt": "2026-03-10T19:52:51Z",
+      "updatedAt": "2026-03-10T19:55:58Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22921475512"
+    }
+  ],
+  "summary": {
+    "consecutiveGreenCount": 2,
+    "requirement": "at least 2",
+    "satisfied": true
+  }
+}
