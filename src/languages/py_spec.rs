@@ -545,6 +545,28 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             });
         }
 
+        let re_meta_dynamic_route = Regex::new(
+            r#"(?ms)class\s+([A-Za-z_][A-Za-z0-9_]*)[^\n]*:\s+.*?def\s+__getattr__\([^\)]*\):.*?name\.startswith\(\s*[\"']([^\"']+)[\"']\s*\).*?cls\.([A-Za-z_][A-Za-z0-9_]*)\s*\("#,
+        )
+        .expect("meta dynamic route regex");
+        let mut metaclass_dynamic_routes: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+        for cap in re_meta_dynamic_route.captures_iter(source) {
+            let Some(meta_name) = cap.get(1).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
+            let Some(prefix) = cap.get(2).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
+            let Some(target_method) = cap.get(3).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
+            metaclass_dynamic_routes
+                .entry(meta_name)
+                .or_default()
+                .push((prefix, target_method));
+        }
+
         if !class_infos.is_empty() {
             let class_by_name: std::collections::HashMap<String, ClassInfo> = class_infos
                 .iter()
@@ -668,6 +690,33 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                         });
                     }
                 }
+
+                // 2b) Metaclass dynamic route inference:
+                // if __getattr__ uses name.startswith("<prefix>") and dispatches to cls.<method>(...),
+                // map Class.<prefix*> calls to Class.<method> conservatively.
+                if let Some(routes) = metaclass_dynamic_routes.get(meta_name) {
+                    for (prefix, target_method) in routes {
+                        if !r.name.starts_with(prefix) {
+                            continue;
+                        }
+                        let key = (
+                            r.line,
+                            target_method.clone(),
+                            Some(class_ctx.name.clone()),
+                            true,
+                        );
+                        if seen.insert(key) {
+                            out.push(UnresolvedRef {
+                                name: target_method.clone(),
+                                kind: RefKind::Call,
+                                file: path.to_string(),
+                                line: r.line,
+                                qualifier: Some(class_ctx.name.clone()),
+                                is_method: true,
+                            });
+                        }
+                    }
+                }
             }
 
             // 3) Protocol narrowing: within `if isinstance(var, ProtocolType):`,
@@ -701,6 +750,57 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 let start_line = (i as u32) + 1;
                 let end_line = find_python_block_end(&lines, i) as u32;
                 proto_narrowings.push((start_line, end_line, var_name, proto_name));
+            }
+
+            // 3b) Protocol-typed function parameters:
+            // within `def f(arg: ProtocolType, ...):`, map `arg.method(...)` calls
+            // to protocol method refs in that function body.
+            let re_func_sig = Regex::new(
+                r"^\s*def\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^\)]*)\)\s*(?:->[^:]+)?\s*:",
+            )
+            .expect("function signature regex");
+            let re_param_annot = Regex::new(
+                r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_\.]*)",
+            )
+            .expect("parameter annotation regex");
+            for (i, line) in lines.iter().enumerate() {
+                let Some(cap) = re_func_sig.captures(line) else {
+                    continue;
+                };
+                let Some(params_raw) = cap.get(1).map(|m| m.as_str()) else {
+                    continue;
+                };
+                let start_line = (i as u32) + 1;
+                let end_line = find_python_block_end(&lines, i) as u32;
+
+                for param in params_raw.split(',') {
+                    let p = param.trim();
+                    if p.is_empty() {
+                        continue;
+                    }
+                    let Some(pcap) = re_param_annot.captures(p) else {
+                        continue;
+                    };
+                    let Some(var_name) = pcap.get(1).map(|m| m.as_str().to_string()) else {
+                        continue;
+                    };
+                    let Some(proto_raw) = pcap.get(2).map(|m| m.as_str()) else {
+                        continue;
+                    };
+                    let proto_name = proto_raw
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(proto_raw)
+                        .to_string();
+                    let Some(proto_ctx) = class_by_name.get(&proto_name) else {
+                        continue;
+                    };
+                    if !proto_ctx.is_protocol {
+                        continue;
+                    }
+
+                    proto_narrowings.push((start_line, end_line, var_name, proto_name));
+                }
             }
 
             if !proto_narrowings.is_empty() {
@@ -1919,6 +2019,92 @@ class Service:
         );
 
         let im = ana.imports_in_file("pkg/dynamic_protocol_meta.py", src);
+        assert_eq!(
+            im.get("Protocol").map(String::as_str),
+            Some("typing::Protocol")
+        );
+        assert_eq!(
+            im.get("runtime_checkable").map(String::as_str),
+            Some("typing::runtime_checkable")
+        );
+    }
+
+    #[test]
+    fn python_hard_case_fixture_monkeypatch_metaclass_protocol_v2() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol_v2.py"
+        ));
+        let ana = SpecPyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/dynamic_protocol_meta_v2.py", src);
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "runtime_checkable" && r.qualifier.is_none() && !r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "setattr" && r.qualifier.is_none() && !r.is_method),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "patched_handle" && r.qualifier.is_none() && !r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "handle" && r.qualifier.as_deref() == Some("Worker") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "handle" && r.qualifier.as_deref() == Some("target") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "handle"
+                    && r.qualifier.as_deref() == Some("SupportsHandle")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "make_service" && r.qualifier.as_deref() == Some("Engine") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "_from_tag" && r.qualifier.as_deref() == Some("Engine") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "__getattr__"
+                    && r.qualifier.as_deref() == Some("MetaFactory")
+                    && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+
+        let im = ana.imports_in_file("pkg/dynamic_protocol_meta_v2.py", src);
         assert_eq!(
             im.get("Protocol").map(String::as_str),
             Some("typing::Protocol")
