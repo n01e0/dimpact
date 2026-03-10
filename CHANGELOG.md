@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.3 - 2026-03-10
+
+_Change range: `v0.5.2..v0.5.3`._
+
+### Major changes
+- Completed failure-first stabilization loop (F53) and drove failure backlog to zero.
+- Stabilized nightly strict real-LSP pipeline (install/preflight/retry/finalize/summary) with explicit lane policy and retry-aware gating.
+- Added/extended high-dynamic fixtures and resolver precision improvements:
+  - Ruby/Python dynamic fixture coverage (v3)
+  - Python monkeypatch/getattr resolver bridge (FN reduction)
+  - Go/Java extraction precision hardening to ignore pseudo-calls in comments/literals (FP reduction)
+- Verified release gating evidence:
+  - two consecutive nightly strict-lsp green runs
+  - regression suite pass (`engine_lsp`, `cargo test -q`, `cargo clippy`)
+
+### Notes
+- Tag/release published: `v0.5.3` (2026-03-10).
+- Detailed evidence is recorded under `release-notes/0.5.3-*`.
+
 ## 0.5.2 - 2026-03-10
 
 _Change range: `v0.5.1..v0.5.2`._
