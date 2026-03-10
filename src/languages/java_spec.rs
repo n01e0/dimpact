@@ -167,6 +167,11 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
             .filter(|s| matches!(s.kind, SymbolKind::Method | SymbolKind::Function))
             .map(|s| s.range.start_line)
             .collect();
+        let class_name_set: HashSet<String> = syms
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Struct | SymbolKind::Trait | SymbolKind::Enum))
+            .map(|s| s.name.clone())
+            .collect();
 
         #[derive(Clone)]
         struct JavaClassScope {
@@ -300,6 +305,14 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
 
         let re_bare_call =
             Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(").expect("valid java bare call regex");
+        let re_method_decl_line = Regex::new(
+            r"^\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?\s*)*(?:public|protected|private|static|final|abstract|synchronized|native|strictfp|default|\s)*(?:<[^>\n]+>\s*)?(?:[A-Za-z_][A-Za-z0-9_<>\[\].?]*(?:\s+[A-Za-z_][A-Za-z0-9_<>\[\].?]*)*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{]*\)\s*(?:throws [^{;]+)?\{",
+        )
+        .expect("valid java method declaration line regex");
+        let re_ctor_decl_line = Regex::new(
+            r"^\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?\s*)*(?:public|protected|private|\s)+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{]*\)\s*(?:throws [^{;]+)?\{",
+        )
+        .expect("valid java constructor declaration line regex");
         for caps in re_bare_call.captures_iter(source) {
             let Some(m) = caps.get(0) else {
                 continue;
@@ -318,6 +331,32 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
 
             let ln = byte_to_line(&offs, m.start());
             if decl_lines.contains(&ln) {
+                continue;
+            }
+
+            // Skip constructor/type-site bare captures.
+            if class_name_set.contains(name) {
+                continue;
+            }
+
+            // Skip declaration-line captures conservatively.
+            let line_start = source[..m.start()].rfind('\n').map_or(0, |i| i + 1);
+            let line_end = source[m.start()..]
+                .find('\n')
+                .map_or(source.len(), |i| m.start() + i);
+            let line_text = &source[line_start..line_end];
+            if re_method_decl_line
+                .captures(line_text)
+                .and_then(|c| c.get(1).map(|m| m.as_str()))
+                .is_some_and(|decl_name| decl_name == name)
+            {
+                continue;
+            }
+            if re_ctor_decl_line
+                .captures(line_text)
+                .and_then(|c| c.get(1).map(|m| m.as_str()))
+                .is_some_and(|decl_name| decl_name == name)
+            {
                 continue;
             }
 
@@ -341,6 +380,9 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
         if !class_scopes.is_empty() {
             for r in out.clone() {
                 if r.is_method || r.qualifier.is_some() {
+                    continue;
+                }
+                if decl_lines.contains(&r.line) {
                     continue;
                 }
                 let Some(scope) = class_scopes
@@ -870,6 +912,23 @@ public class Main {
         assert!(refs.iter().any(|r| {
             r.name == "decode" && r.qualifier.is_none() && !r.is_method
         }));
+        assert!(
+            refs.iter().all(|r| {
+                let on_decl_line = matches!(r.line, 12 | 16 | 20 | 24);
+                if !on_decl_line {
+                    return true;
+                }
+                if !matches!(r.name.as_str(), "decode" | "decodeStatic" | "run") {
+                    return true;
+                }
+                !(r.qualifier.is_none() || r.qualifier.as_deref() == Some("this"))
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().all(|r| !(r.name == "JavaOverloadLabV2" && r.qualifier.is_none())),
+            "refs={refs_dbg:?}"
+        );
 
         let imports = ana.imports_in_file("demo/JavaOverloadLabV2.java", src);
         assert_eq!(

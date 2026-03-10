@@ -198,7 +198,7 @@ fn changed_impacted_golden_baseline_matrix_v73() {
             java_before,
             java_after.as_str(),
             BTreeSet::from(["OverloadLab".to_string(), "parse".to_string()]),
-            BTreeSet::from(["parse".to_string(), "run".to_string()]),
+            BTreeSet::from(["run".to_string()]),
         ),
         (
             "go",
