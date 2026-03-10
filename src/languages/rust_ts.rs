@@ -64,7 +64,7 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
             } else if kind == "impl_item" {
                 // methods inside impl
                 for i in 0..node.child_count() {
-                    let ch = node.child(i).unwrap();
+                    let ch = node.child(i as u32).unwrap();
                     if ch.kind() == "function_item" || ch.kind() == "method_definition" {
                         let name_node = ch.child_by_field_name("name");
                         if let Some(nn) = name_node {
@@ -108,7 +108,7 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
             }
 
             for i in 0..node.child_count() {
-                stack.push(node.child(i).unwrap());
+                stack.push(node.child(i as u32).unwrap());
             }
         }
         out
@@ -178,7 +178,7 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                 }
             }
             for i in 0..node.child_count() {
-                stack.push(node.child(i).unwrap());
+                stack.push(node.child(i as u32).unwrap());
             }
         }
         out
@@ -278,7 +278,7 @@ impl crate::languages::LanguageAnalyzer for RustTsAnalyzer {
                 }
             }
             for i in 0..node.child_count() {
-                stack.push(node.child(i).unwrap());
+                stack.push(node.child(i as u32).unwrap());
             }
         }
         // mod declarations mapping
