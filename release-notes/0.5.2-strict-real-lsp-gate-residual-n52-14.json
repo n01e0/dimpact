@@ -1,0 +1,485 @@
+{
+  "source": "tests/engine_lsp.rs",
+  "totalSkipPrints": 25,
+  "lanes": {
+    "go/all": {
+      "env-gate-disabled": 1
+    },
+    "go/both": {
+      "env-gate-disabled": 1
+    },
+    "go/callees": {
+      "env-gate-disabled": 1
+    },
+    "java/all": {
+      "env-gate-disabled": 1
+    },
+    "java/both": {
+      "env-gate-disabled": 1
+    },
+    "java/callees": {
+      "env-gate-disabled": 1
+    },
+    "javascript/all": {
+      "env-gate-disabled": 1
+    },
+    "javascript/both": {
+      "env-gate-disabled": 1
+    },
+    "javascript/callees": {
+      "env-gate-disabled": 1
+    },
+    "python/all": {
+      "env-gate-disabled": 1
+    },
+    "python/both": {
+      "env-gate-disabled": 1
+    },
+    "python/callees": {
+      "env-gate-disabled": 1
+    },
+    "ruby/all": {
+      "env-gate-disabled": 1
+    },
+    "ruby/both": {
+      "env-gate-disabled": 1
+    },
+    "ruby/callees": {
+      "env-gate-disabled": 1
+    },
+    "rust/both": {
+      "server-missing": 1
+    },
+    "rust/callees": {
+      "server-missing": 1
+    },
+    "rust/callers": {
+      "server-missing": 2
+    },
+    "tsx/all": {
+      "env-gate-disabled": 1
+    },
+    "tsx/both": {
+      "env-gate-disabled": 1
+    },
+    "tsx/callees": {
+      "env-gate-disabled": 1
+    },
+    "typescript/all": {
+      "env-gate-disabled": 1
+    },
+    "typescript/both": {
+      "env-gate-disabled": 1
+    },
+    "typescript/callees": {
+      "env-gate-disabled": 1
+    }
+  },
+  "laneCategory": {
+    "go/all": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "go/both": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "go/callees": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "java/all": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "java/both": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "java/callees": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "javascript/all": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "javascript/both": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "javascript/callees": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "python/all": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "python/both": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "python/callees": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "ruby/all": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "ruby/both": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "ruby/callees": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "rust/both": {
+      "env": 0,
+      "server": 1,
+      "capability": 0,
+      "other": 0
+    },
+    "rust/callees": {
+      "env": 0,
+      "server": 1,
+      "capability": 0,
+      "other": 0
+    },
+    "rust/callers": {
+      "env": 0,
+      "server": 2,
+      "capability": 0,
+      "other": 0
+    },
+    "tsx/all": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "tsx/both": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "tsx/callees": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "typescript/all": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "typescript/both": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    },
+    "typescript/callees": {
+      "env": 1,
+      "server": 0,
+      "capability": 0,
+      "other": 0
+    }
+  },
+  "categoryTotals": {
+    "env": 21,
+    "server": 4,
+    "capability": 0,
+    "other": 0
+  },
+  "samples": {
+    "go/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e fixture"
+    },
+    "go/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
+    },
+    "go/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_GO=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Go strict LSP e2e tests"
+    },
+    "java/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e fixture"
+    },
+    "java/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e tests"
+    },
+    "java/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVA=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Java strict LSP e2e tests"
+    },
+    "javascript/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e fixture"
+    },
+    "javascript/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
+    },
+    "javascript/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_JAVASCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run JavaScript strict LSP e2e tests"
+    },
+    "python/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e fixture"
+    },
+    "python/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e tests"
+    },
+    "python/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_PYTHON=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Python strict LSP e2e tests"
+    },
+    "ruby/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e fixture"
+    },
+    "ruby/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
+    },
+    "ruby/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_RUBY=1 (or DIMPACT_E2E_STRICT_LSP=1) to run Ruby strict LSP e2e tests"
+    },
+    "rust/both": {
+      "server-missing": "skip: rust-analyzer not available"
+    },
+    "rust/callees": {
+      "server-missing": "skip: rust-analyzer not available"
+    },
+    "rust/callers": {
+      "server-missing": "skip: rust-analyzer not available"
+    },
+    "tsx/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e fixture"
+    },
+    "tsx/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
+    },
+    "tsx/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TSX=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TSX strict LSP e2e tests"
+    },
+    "typescript/all": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e fixture"
+    },
+    "typescript/both": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e tests"
+    },
+    "typescript/callees": {
+      "env-gate-disabled": "skip: set DIMPACT_E2E_STRICT_LSP_TYPESCRIPT=1 (or DIMPACT_E2E_STRICT_LSP=1) to run TypeScript strict LSP e2e tests"
+    }
+  },
+  "actionableResidual": [],
+  "operationalResidual": [
+    {
+      "lane": "go/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "go/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "go/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "java/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "java/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "java/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "javascript/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "javascript/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "javascript/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "python/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "python/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "python/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "ruby/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "ruby/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "ruby/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "rust/both",
+      "reasons": {
+        "server-missing": 1
+      },
+      "note": "server missing on host"
+    },
+    {
+      "lane": "rust/callees",
+      "reasons": {
+        "server-missing": 1
+      },
+      "note": "server missing on host"
+    },
+    {
+      "lane": "rust/callers",
+      "reasons": {
+        "server-missing": 2
+      },
+      "note": "server missing on host"
+    },
+    {
+      "lane": "tsx/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "tsx/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "tsx/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "typescript/all",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "typescript/both",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    },
+    {
+      "lane": "typescript/callees",
+      "reasons": {
+        "env-gate-disabled": 1
+      },
+      "note": "env gate opt-in"
+    }
+  ],
+  "capabilityResidual": [],
+  "summary": {
+    "actionableResidualLanes": 0,
+    "operationalResidualLanes": 24,
+    "capabilityResidualLanes": 0
+  },
+  "policy": {
+    "phase": "F2",
+    "rule": "residual is minimal when only env/server remain; capability residuals are tracked separately"
+  }
+}
