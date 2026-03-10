@@ -614,17 +614,15 @@ jobs:
           strict_ok=0
           grad_ok=0
 
-          if [ "$init_strict" = "success" ]; then
-            strict_ok=1
-          elif [ "$retry_enabled" = "1" ] && [ "$retry_strict" = "success" ]; then
+          if [ "$init_strict" = "success" ] || [ "$retry_strict" = "success" ]; then
             strict_ok=1
           fi
 
-          if [ "$init_grad" = "success" ]; then
-            grad_ok=1
-          elif [ "$retry_enabled" = "1" ] && [ "$retry_grad" = "success" ]; then
+          if [ "$init_grad" = "success" ] || [ "$retry_grad" = "success" ]; then
             grad_ok=1
           fi
+
+          echo "[finalize] strict initial=$init_strict strict retry=${retry_strict:-skipped} grad initial=$init_grad grad retry=${retry_grad:-skipped} retry enabled=$retry_enabled strict_ok=$strict_ok grad_ok=$grad_ok"
 
           {
             echo "## retry finalize"
