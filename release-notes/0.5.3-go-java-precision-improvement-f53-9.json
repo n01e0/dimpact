@@ -1,0 +1,67 @@
+{
+  "runId": "a41dde90-e976-4d41-b878-305bffb4632b",
+  "baselineCommit": "253196807f33c529629f1a1f7469ba530af350cd",
+  "headCommit": "253196807f33c529629f1a1f7469ba530af350cd",
+  "cases": [
+    {
+      "id": "go-comment-string-call-pattern",
+      "language": "go",
+      "changedBefore": [
+        "helper"
+      ],
+      "impactedBefore": [
+        "run"
+      ],
+      "changedAfter": [
+        "helper"
+      ],
+      "impactedAfter": [],
+      "oracleImpacted": [],
+      "before": {
+        "fn": [],
+        "fp": [
+          "run"
+        ],
+        "fnCount": 0,
+        "fpCount": 1
+      },
+      "after": {
+        "fn": [],
+        "fp": [],
+        "fnCount": 0,
+        "fpCount": 0
+      }
+    },
+    {
+      "id": "java-comment-string-call-pattern",
+      "language": "java",
+      "changedBefore": [
+        "Demo",
+        "helper"
+      ],
+      "impactedBefore": [
+        "run"
+      ],
+      "changedAfter": [
+        "Demo",
+        "helper"
+      ],
+      "impactedAfter": [],
+      "oracleImpacted": [],
+      "before": {
+        "fn": [],
+        "fp": [
+          "run"
+        ],
+        "fnCount": 0,
+        "fpCount": 1
+      },
+      "after": {
+        "fn": [],
+        "fp": [],
+        "fnCount": 0,
+        "fpCount": 0
+      }
+    }
+  ]
+}

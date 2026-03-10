@@ -73,6 +73,7 @@ impl LanguageAnalyzer for SpecGoAnalyzer {
         let mut out = Vec::new();
         let mut seen: HashSet<(u32, String, Option<String>, bool)> = HashSet::new();
         let offs = line_offsets(source);
+        let scan_source = mask_go_non_code(source);
         let imports = self.imports_in_file(path, source);
         let import_aliases: HashSet<String> = imports.keys().cloned().collect();
         let decl_lines: HashSet<u32> = source
@@ -91,7 +92,7 @@ impl LanguageAnalyzer for SpecGoAnalyzer {
             r"\b([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*(?:\[[^\]]+\])?\s*\(",
         )
         .unwrap();
-        for cap in re_qualified_call.captures_iter(source) {
+        for cap in re_qualified_call.captures_iter(&scan_source) {
             let Some(m) = cap.get(0) else {
                 continue;
             };
@@ -135,7 +136,7 @@ impl LanguageAnalyzer for SpecGoAnalyzer {
             "cap", "append", "copy", "delete", "close", "panic", "recover", "print", "println",
             "complex", "real", "imag",
         ];
-        for cap in re_bare_call.captures_iter(source) {
+        for cap in re_bare_call.captures_iter(&scan_source) {
             let Some(m) = cap.get(0) else {
                 continue;
             };
@@ -227,6 +228,146 @@ impl LanguageAnalyzer for SpecGoAnalyzer {
         }
         map
     }
+}
+
+fn mask_go_non_code(source: &str) -> String {
+    #[derive(Clone, Copy)]
+    enum State {
+        Code,
+        LineComment,
+        BlockComment,
+        String,
+        RawString,
+        Rune,
+    }
+
+    let src = source.as_bytes();
+    let mut out = src.to_vec();
+    let mut i = 0usize;
+    let mut state = State::Code;
+
+    while i < src.len() {
+        match state {
+            State::Code => {
+                if i + 1 < src.len() && src[i] == b'/' && src[i + 1] == b'/' {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = State::LineComment;
+                    continue;
+                }
+                if i + 1 < src.len() && src[i] == b'/' && src[i + 1] == b'*' {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = State::BlockComment;
+                    continue;
+                }
+                if src[i] == b'"' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::String;
+                    continue;
+                }
+                if src[i] == b'`' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::RawString;
+                    continue;
+                }
+                if src[i] == b'\'' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::Rune;
+                    continue;
+                }
+                i += 1;
+            }
+            State::LineComment => {
+                if src[i] == b'\n' {
+                    state = State::Code;
+                } else {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::BlockComment => {
+                if i + 1 < src.len() && src[i] == b'*' && src[i + 1] == b'/' {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::String => {
+                if src[i] == b'\\' {
+                    out[i] = b' ';
+                    if i + 1 < src.len() {
+                        if src[i + 1] != b'\n' {
+                            out[i + 1] = b' ';
+                        }
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if src[i] == b'"' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::RawString => {
+                if src[i] == b'`' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::Rune => {
+                if src[i] == b'\\' {
+                    out[i] = b' ';
+                    if i + 1 < src.len() {
+                        if src[i + 1] != b'\n' {
+                            out[i + 1] = b' ';
+                        }
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if src[i] == b'\'' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn find_decl_block_end(source: &str, decl_start: usize) -> Option<usize> {
@@ -345,6 +486,28 @@ import (
         assert_eq!(
             imports.get("_").map(String::as_str),
             Some("github.com::acme::hidden")
+        );
+    }
+
+    #[test]
+    fn go_unresolved_refs_ignores_comment_and_string_call_patterns() {
+        let src = r#"package sample
+
+func helper() int { return 1 }
+
+func run() int {
+    // helper()
+    _ = "helper()"
+    /* helper() */
+    return 0
+}
+"#;
+        let ana = SpecGoAnalyzer::new();
+        let refs = ana.unresolved_refs("pkg/main.go", src);
+        assert!(
+            !refs.iter().any(|r| r.name == "helper"),
+            "refs={:?}",
+            refs.iter().map(|r| (&r.name, r.line)).collect::<Vec<_>>()
         );
     }
 

@@ -158,6 +158,7 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
         let mut out = Vec::new();
         let mut seen: HashSet<(u32, String, Option<String>, bool)> = HashSet::new();
         let offs = line_offsets(source);
+        let scan_source = mask_java_non_code(source);
         let imports = self.imports_in_file(path, source);
         let import_aliases: HashSet<String> = imports.keys().cloned().collect();
 
@@ -206,7 +207,7 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
         let re_qualified_call =
             Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*\(")
                 .expect("valid java qualified call regex");
-        for caps in re_qualified_call.captures_iter(source) {
+        for caps in re_qualified_call.captures_iter(&scan_source) {
             let Some(m) = caps.get(0) else {
                 continue;
             };
@@ -258,7 +259,7 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
             r"\b([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*::\s*([A-Za-z_][A-Za-z0-9_]*)",
         )
         .expect("valid java method ref regex");
-        for caps in re_method_ref.captures_iter(source) {
+        for caps in re_method_ref.captures_iter(&scan_source) {
             let Some(m) = caps.get(0) else {
                 continue;
             };
@@ -313,7 +314,7 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
             r"^\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?\s*)*(?:public|protected|private|\s)+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{]*\)\s*(?:throws [^{;]+)?\{",
         )
         .expect("valid java constructor declaration line regex");
-        for caps in re_bare_call.captures_iter(source) {
+        for caps in re_bare_call.captures_iter(&scan_source) {
             let Some(m) = caps.get(0) else {
                 continue;
             };
@@ -449,6 +450,152 @@ impl LanguageAnalyzer for SpecJavaAnalyzer {
 
         map
     }
+}
+
+fn mask_java_non_code(source: &str) -> String {
+    #[derive(Clone, Copy)]
+    enum State {
+        Code,
+        LineComment,
+        BlockComment,
+        String,
+        Char,
+        TextBlock,
+    }
+
+    let src = source.as_bytes();
+    let mut out = src.to_vec();
+    let mut i = 0usize;
+    let mut state = State::Code;
+
+    while i < src.len() {
+        match state {
+            State::Code => {
+                if i + 1 < src.len() && src[i] == b'/' && src[i + 1] == b'/' {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = State::LineComment;
+                    continue;
+                }
+                if i + 1 < src.len() && src[i] == b'/' && src[i + 1] == b'*' {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = State::BlockComment;
+                    continue;
+                }
+                if i + 2 < src.len() && src[i] == b'"' && src[i + 1] == b'"' && src[i + 2] == b'"'
+                {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    out[i + 2] = b' ';
+                    i += 3;
+                    state = State::TextBlock;
+                    continue;
+                }
+                if src[i] == b'"' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::String;
+                    continue;
+                }
+                if src[i] == b'\'' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::Char;
+                    continue;
+                }
+                i += 1;
+            }
+            State::LineComment => {
+                if src[i] == b'\n' {
+                    state = State::Code;
+                } else {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::BlockComment => {
+                if i + 1 < src.len() && src[i] == b'*' && src[i + 1] == b'/' {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::String => {
+                if src[i] == b'\\' {
+                    out[i] = b' ';
+                    if i + 1 < src.len() {
+                        if src[i + 1] != b'\n' {
+                            out[i + 1] = b' ';
+                        }
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if src[i] == b'"' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::Char => {
+                if src[i] == b'\\' {
+                    out[i] = b' ';
+                    if i + 1 < src.len() {
+                        if src[i + 1] != b'\n' {
+                            out[i + 1] = b' ';
+                        }
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if src[i] == b'\'' {
+                    out[i] = b' ';
+                    i += 1;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+            State::TextBlock => {
+                if i + 2 < src.len() && src[i] == b'"' && src[i + 1] == b'"' && src[i + 2] == b'"'
+                {
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    out[i + 2] = b' ';
+                    i += 3;
+                    state = State::Code;
+                    continue;
+                }
+                if src[i] != b'\n' {
+                    out[i] = b' ';
+                }
+                i += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn is_java_control_like(name: &str) -> bool {
@@ -616,6 +763,33 @@ import static java.util.Collections.*;
                 .get("__glob__java::util::Collections")
                 .map(String::as_str),
             Some("java::util::Collections")
+        );
+    }
+
+    #[test]
+    fn java_unresolved_refs_ignores_comment_and_string_call_patterns() {
+        let src = r#"package demo;
+
+class Demo {
+    String helper() { return "ok"; }
+
+    String run() {
+        String text = "helper()";
+        // helper()
+        /* helper() */
+        return text;
+    }
+}
+"#;
+        let ana = SpecJavaAnalyzer::new();
+        let refs = ana.unresolved_refs("demo/Demo.java", src);
+
+        assert!(
+            !refs.iter().any(|r| r.name == "helper"),
+            "refs={:?}",
+            refs.iter()
+                .map(|r| (&r.name, r.qualifier.as_deref(), r.line))
+                .collect::<Vec<_>>()
         );
     }
 
