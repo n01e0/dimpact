@@ -266,11 +266,15 @@ jobs:
             echo "${key}=${enabled} reason=${reason}" >> "$PRE_LOG"
           }
 
-          has_cmd() {
-            command -v "$1" >/dev/null 2>&1
+          has_cmd_help() {
+            command -v "$1" >/dev/null 2>&1 && "$1" --help >/dev/null 2>&1
           }
 
-          if has_cmd rust-analyzer; then
+          has_cmd_version() {
+            command -v "$1" >/dev/null 2>&1 && "$1" version >/dev/null 2>&1
+          }
+
+          if has_cmd_help rust-analyzer; then
             set_gate "DIMPACT_E2E_STRICT_LSP" "1" "rust-analyzer available"
             rust_reason="rust-analyzer available"
           else
@@ -278,7 +282,7 @@ jobs:
             rust_reason="rust-analyzer missing (skip-safe)"
           fi
 
-          if has_cmd typescript-language-server; then
+          if has_cmd_help typescript-language-server; then
             set_gate "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "1" "typescript-language-server available"
             set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "1" "typescript-language-server available (shared with TS)"
             ts_reason="typescript-language-server available"
@@ -290,7 +294,7 @@ jobs:
             js_reason="typescript-language-server missing (skip-safe)"
           fi
 
-          if has_cmd gopls; then
+          if has_cmd_version gopls; then
             set_gate "DIMPACT_E2E_STRICT_LSP_GO" "1" "gopls available"
             go_reason="gopls available"
           else
@@ -298,7 +302,7 @@ jobs:
             go_reason="gopls missing (skip-safe)"
           fi
 
-          if has_cmd jdtls; then
+          if has_cmd_help jdtls; then
             set_gate "DIMPACT_E2E_STRICT_LSP_JAVA" "1" "jdtls available"
             java_reason="jdtls available"
           else
@@ -306,7 +310,7 @@ jobs:
             java_reason="jdtls missing (skip-safe)"
           fi
 
-          if has_cmd ruby-lsp; then
+          if has_cmd_help ruby-lsp; then
             set_gate "DIMPACT_E2E_STRICT_LSP_RUBY" "1" "ruby-lsp available"
             ruby_reason="ruby-lsp available"
           else
@@ -316,13 +320,13 @@ jobs:
 
           python_server=""
           python_reason="python LSP server missing (pyright-langserver/basedpyright-langserver/pylsp) (skip-safe)"
-          if has_cmd pyright-langserver; then
+          if has_cmd_help pyright-langserver; then
             python_server="pyright"
             python_reason="pyright-langserver available"
-          elif has_cmd basedpyright-langserver; then
+          elif has_cmd_help basedpyright-langserver; then
             python_server="basedpyright"
             python_reason="basedpyright-langserver available"
-          elif has_cmd pylsp; then
+          elif has_cmd_help pylsp; then
             python_server="pylsp"
             python_reason="pylsp available"
           fi
@@ -567,14 +571,6 @@ jobs:
         id: strict_e2e_retry
         continue-on-error: true
         if: always() && steps.retry_policy.outputs.enabled == '1'
-        env:
-          DIMPACT_E2E_STRICT_LSP: "1"
-          DIMPACT_E2E_STRICT_LSP_TYPESCRIPT: "1"
-          DIMPACT_E2E_STRICT_LSP_JAVASCRIPT: "1"
-          DIMPACT_E2E_STRICT_LSP_GO: "1"
-          DIMPACT_E2E_STRICT_LSP_JAVA: "1"
-          DIMPACT_E2E_STRICT_LSP_RUBY: "1"
-          DIMPACT_E2E_STRICT_LSP_PYTHON: "1"
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/run-engine-lsp-strict-retry.log"
