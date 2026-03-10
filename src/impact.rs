@@ -558,7 +558,10 @@ pub fn compute_impact(
         rev.entry(to).or_default().push(from);
     }
 
+    let changed_ids: HashSet<&str> = changed.iter().map(|s| s.id.0.as_str()).collect();
+
     let mut seen: HashSet<&str> = HashSet::new();
+    let mut reached_changed_via_callees: HashSet<&str> = HashSet::new();
     let mut q: VecDeque<(&str, usize)> = VecDeque::new();
     // Seed queue with non-ignored changed symbols
     for s in changed {
@@ -586,6 +589,9 @@ pub fn compute_impact(
             ImpactDirection::Callees => {
                 if let Some(nbs) = fwd.get(cur) {
                     for &n in nbs {
+                        if changed_ids.contains(n) && n != cur {
+                            reached_changed_via_callees.insert(n);
+                        }
                         q.push_back((n, d + 1));
                     }
                 }
@@ -605,10 +611,16 @@ pub fn compute_impact(
         }
     }
 
-    let changed_ids: HashSet<&str> = changed.iter().map(|s| s.id.0.as_str()).collect();
-    let mut impacted_symbols: Vec<Symbol> = seen
+    let mut impacted_ids: HashSet<&str> = seen
         .into_iter()
         .filter(|id| !changed_ids.contains(*id))
+        .collect();
+    if matches!(opts.direction, ImpactDirection::Callees) {
+        impacted_ids.extend(reached_changed_via_callees);
+    }
+
+    let mut impacted_symbols: Vec<Symbol> = impacted_ids
+        .into_iter()
         .filter_map(|id| by_id.get(id).cloned().cloned())
         .collect();
     // Filter out symbols located in ignored directories
@@ -623,20 +635,28 @@ pub fn compute_impact(
     impacted_files.dedup();
 
     let edges = if opts.with_edges.unwrap_or(false) {
-        // Include edges with at least one endpoint in the node set.
-        // Renderers will add missing endpoints as context nodes to avoid dangling errors.
-        let node_set: std::collections::HashSet<&str> = changed
+        // Keep the primary relationship graph for changed+impacted nodes.
+        // For callees mode we avoid inbound context edges from outside the explored node set
+        // to keep oracle comparison stable (e.g. exclude f10->f09 when f10 is outside scope).
+        let impacted_id_set: std::collections::HashSet<&str> = impacted_symbols
             .iter()
             .map(|s| s.id.0.as_str())
-            .chain(
-                by_id
-                    .keys()
-                    .cloned()
-                    .filter(|id| impacted_symbols.iter().any(|s| s.id.0.as_str() == *id)),
-            )
+            .collect();
+        let node_set: std::collections::HashSet<&str> = changed_ids
+            .iter()
+            .copied()
+            .chain(impacted_id_set.iter().copied())
             .collect();
         refs.iter()
-            .filter(|e| node_set.contains(e.from.0.as_str()) || node_set.contains(e.to.0.as_str()))
+            .filter(|e| {
+                let from = e.from.0.as_str();
+                let to = e.to.0.as_str();
+                if matches!(opts.direction, ImpactDirection::Callees) {
+                    node_set.contains(from) && node_set.contains(to)
+                } else {
+                    node_set.contains(from) || node_set.contains(to)
+                }
+            })
             .cloned()
             .collect()
     } else {
