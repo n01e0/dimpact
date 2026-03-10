@@ -57,6 +57,7 @@ CLI Overview
   - `--with-edges`              : include reference edges in output
   - `--min-confidence LEVEL`    : confidence threshold (`confirmed|inferred|dynamic-fallback`)
   - `--exclude-dynamic-fallback`: exclude `dynamic_fallback` edges from traversal/output
+  - `--op-profile PROFILE`      : operational preset (`balanced|precision-first`)
   - `--ignore-dir DIR`          : ignore directories by relative prefix (repeatable)
   - `--with-pdg`                : use PDG-based dependence analysis (Rust/Ruby for DFG)
   - `--with-propagation`        : enable symbolic propagation across variables and functions (implies PDG)
@@ -68,17 +69,22 @@ CLI Overview
   - `--seed-json PATH|'-'|JSON` : seed symbols via JSON array or file or stdin
   - `--per-seed`              : group impact per changed/seed symbol; when `--direction both`, outputs separate caller and callee results
 
-### Operational guide for `--exclude-dynamic-fallback`
-- Purpose: remove low-certainty `dynamic_fallback` edges from traversal/output when you want a precision-first view.
-- Recommended usage profile:
-  - CI / review gate (precision-first):
-    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence inferred --exclude-dynamic-fallback -f json`
-  - Recall investigation (intentionally broad):
+### Operational confidence profiles (`--op-profile`)
+- `balanced`
+  - applies `--min-confidence inferred` (recommended default operating mode)
+  - keeps a practical recall/precision balance for routine analysis
+- `precision-first`
+  - applies `--min-confidence confirmed` + `--exclude-dynamic-fallback`
+  - intended for strict CI/review triage where false positives are costly
+- Override precedence:
+  - explicit flags (`--min-confidence`, `--exclude-dynamic-fallback`) override profile defaults
+- Typical usage:
+  - balanced:
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --op-profile balanced -f json`
+  - precision-first:
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --op-profile precision-first -f json`
+  - recall investigation (intentionally broad):
     - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence dynamic-fallback -f json`
-- Practical rules:
-  - `--exclude-dynamic-fallback` is effectively equivalent to `--min-confidence inferred` for edge filtering.
-  - If `--min-confidence inferred` is already set, adding `--exclude-dynamic-fallback` is explicit but functionally redundant.
-  - For strictest triage, use `--min-confidence confirmed` (the flag then has no additional effect).
 - Validation tip:
   - Compare `confidence_filter.input_edge_count` vs `confidence_filter.kept_edge_count` in JSON/YAML output to confirm expected filtering.
   

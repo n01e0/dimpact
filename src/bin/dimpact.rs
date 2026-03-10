@@ -75,6 +75,14 @@ enum ConfidenceOpt {
     DynamicFallback,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OperationalProfileOpt {
+    #[value(name = "balanced")]
+    Balanced,
+    #[value(name = "precision-first")]
+    PrecisionFirst,
+}
+
 impl ConfidenceOpt {
     fn min_rank(self) -> u8 {
         match self {
@@ -119,6 +127,26 @@ fn certainty_rank(certainty: EdgeCertainty) -> u8 {
 
 fn meets_min_confidence(certainty: EdgeCertainty, min: ConfidenceOpt) -> bool {
     certainty_rank(certainty) >= min.min_rank()
+}
+
+fn resolve_operational_profile(
+    profile: Option<OperationalProfileOpt>,
+    min_confidence: Option<ConfidenceOpt>,
+    exclude_dynamic_fallback: bool,
+) -> (Option<ConfidenceOpt>, bool) {
+    let Some(profile) = profile else {
+        return (min_confidence, exclude_dynamic_fallback);
+    };
+
+    match profile {
+        OperationalProfileOpt::Balanced => (
+            min_confidence.or(Some(ConfidenceOpt::Inferred)),
+            exclude_dynamic_fallback,
+        ),
+        OperationalProfileOpt::PrecisionFirst => {
+            (min_confidence.or(Some(ConfidenceOpt::Confirmed)), true)
+        }
+    }
 }
 
 fn apply_confidence_filter(
@@ -263,6 +291,11 @@ struct Args {
     /// Exclude dynamic-fallback edges from impact traversal/output.
     #[arg(long = "exclude-dynamic-fallback", default_value_t = false)]
     exclude_dynamic_fallback: bool,
+    /// Operational confidence profile preset for impact filtering.
+    /// balanced: min-confidence inferred
+    /// precision-first: min-confidence confirmed + exclude dynamic-fallback
+    #[arg(long = "op-profile", value_enum)]
+    op_profile: Option<OperationalProfileOpt>,
     /// Ignore directories (relative prefixes). Repeatable.
     #[arg(long = "ignore-dir")]
     ignore_dir: Vec<String>,
@@ -337,6 +370,11 @@ enum Command {
         /// Exclude dynamic-fallback edges from impact traversal/output.
         #[arg(long = "exclude-dynamic-fallback", default_value_t = false)]
         exclude_dynamic_fallback: bool,
+        /// Operational confidence profile preset for impact filtering.
+        /// balanced: min-confidence inferred
+        /// precision-first: min-confidence confirmed + exclude dynamic-fallback
+        #[arg(long = "op-profile", value_enum)]
+        op_profile: Option<OperationalProfileOpt>,
         /// Use PDG-based dependence analysis
         #[arg(long = "with-pdg", default_value_t = false)]
         with_pdg: bool,
@@ -470,6 +508,7 @@ fn main() -> anyhow::Result<()> {
                 with_edges,
                 min_confidence,
                 exclude_dynamic_fallback,
+                op_profile,
                 with_pdg,
                 with_propagation,
                 engine,
@@ -487,6 +526,7 @@ fn main() -> anyhow::Result<()> {
                 with_edges,
                 min_confidence,
                 exclude_dynamic_fallback,
+                op_profile,
                 with_pdg,
                 with_propagation,
                 engine,
@@ -544,6 +584,7 @@ fn main() -> anyhow::Result<()> {
                 args.with_edges,
                 args.min_confidence,
                 args.exclude_dynamic_fallback,
+                args.op_profile,
                 false,
                 false,
                 args.engine,
@@ -888,6 +929,7 @@ fn run_impact(
     with_edges: bool,
     min_confidence: Option<ConfidenceOpt>,
     exclude_dynamic_fallback: bool,
+    op_profile: Option<OperationalProfileOpt>,
     with_pdg: bool,
     with_propagation: bool,
     engine_opt: EngineOpt,
@@ -945,6 +987,8 @@ fn run_impact(
         DirectionOpt::Callees => ImpactDirection::Callees,
         DirectionOpt::Both => ImpactDirection::Both,
     };
+    let (min_confidence, exclude_dynamic_fallback) =
+        resolve_operational_profile(op_profile, min_confidence, exclude_dynamic_fallback);
     let compute_with_edges = with_edges || min_confidence.is_some() || exclude_dynamic_fallback;
     let opts = ImpactOptions {
         direction,
@@ -1129,13 +1173,14 @@ fn run_impact(
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
         log::info!(
-            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} exclude_dynamic_fallback={} pdg={} ignore_dirs={:?}",
+            "mode=impact(diff) engine={:?} files={} lang={:?} dir={:?} max_depth={:?} with_edges={} profile={:?} min_conf={:?} exclude_dynamic_fallback={} pdg={} ignore_dirs={:?}",
             ekind,
             files.len(),
             lang,
             direction,
             opts.max_depth,
             compute_with_edges,
+            op_profile,
             min_confidence,
             exclude_dynamic_fallback,
             with_pdg,
@@ -1233,13 +1278,14 @@ fn run_impact(
     }
 
     log::info!(
-        "mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={} min_conf={:?} exclude_dynamic_fallback={} ignore_dirs={:?}",
+        "mode=impact(seeds) engine={:?} seeds={} lang={:?} dir={:?} max_depth={:?} with_edges={} profile={:?} min_conf={:?} exclude_dynamic_fallback={} ignore_dirs={:?}",
         ekind,
         seeds.len(),
         lang,
         direction,
         opts.max_depth,
         compute_with_edges,
+        op_profile,
         min_confidence,
         exclude_dynamic_fallback,
         opts.ignore_dirs
@@ -1695,5 +1741,48 @@ mod tests {
         unsafe {
             std::env::remove_var("DIMPACT_AUTO_POLICY");
         }
+    }
+
+    #[test]
+    fn cli_op_profile_accepts_balanced_and_precision_first() {
+        let a = Args::try_parse_from(["dimpact", "impact", "--op-profile", "balanced"])
+            .expect("balanced profile should parse");
+        match a.cmd {
+            Some(Command::Impact { op_profile, .. }) => {
+                assert!(matches!(op_profile, Some(OperationalProfileOpt::Balanced)))
+            }
+            _ => panic!("expected impact subcommand"),
+        }
+
+        let b = Args::try_parse_from(["dimpact", "impact", "--op-profile", "precision-first"])
+            .expect("precision-first profile should parse");
+        match b.cmd {
+            Some(Command::Impact { op_profile, .. }) => assert!(matches!(
+                op_profile,
+                Some(OperationalProfileOpt::PrecisionFirst)
+            )),
+            _ => panic!("expected impact subcommand"),
+        }
+    }
+
+    #[test]
+    fn op_profile_defaults_can_be_overridden_explicitly() {
+        let (min_a, excl_a) =
+            resolve_operational_profile(Some(OperationalProfileOpt::Balanced), None, false);
+        assert!(matches!(min_a, Some(ConfidenceOpt::Inferred)));
+        assert!(!excl_a);
+
+        let (min_b, excl_b) =
+            resolve_operational_profile(Some(OperationalProfileOpt::PrecisionFirst), None, false);
+        assert!(matches!(min_b, Some(ConfidenceOpt::Confirmed)));
+        assert!(excl_b);
+
+        let (min_c, excl_c) = resolve_operational_profile(
+            Some(OperationalProfileOpt::PrecisionFirst),
+            Some(ConfidenceOpt::DynamicFallback),
+            false,
+        );
+        assert!(matches!(min_c, Some(ConfidenceOpt::DynamicFallback)));
+        assert!(excl_c);
     }
 }

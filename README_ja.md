@@ -73,6 +73,7 @@ dimpact id --name foo -f json
 - `--with-edges`                : 参照エッジを出力に含める
 - `--min-confidence LEVEL`      : confidence 閾値（`confirmed|inferred|dynamic-fallback`）
 - `--exclude-dynamic-fallback`  : `dynamic_fallback` エッジを探索/出力から除外
+- `--op-profile PROFILE`        : 運用プリセット（`balanced|precision-first`）
 - `--ignore-dir DIR`            : 相対パスプレフィックスでディレクトリを無視（繰り返し可）
 - `--with-pdg`                  : PDG ベースの依存解析を使用 (Rust/Ruby の DFG)
 - `--with-propagation`          : 変数・関数をまたいだシンボリック伝播を有効化 (PDG を含む)
@@ -84,17 +85,22 @@ dimpact id --name foo -f json
 - `--seed-json PATH|'-'|JSON`   : JSON 配列やファイル・stdin でシード
 - `--per-seed`                  : 変更/シードごとに結果をグループ化; `--direction both` 時は caller/callee 別出力
 
-## `--exclude-dynamic-fallback` 運用ガイド
-- 目的: 低確度の `dynamic_fallback` エッジを探索/出力から除外し、precision 重視で結果を見る。
-- 推奨利用パターン:
-  - CI / レビューゲート（precision優先）:
-    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence inferred --exclude-dynamic-fallback -f json`
+## 運用 confidence プロファイル（`--op-profile`）
+- `balanced`
+  - `--min-confidence inferred` を適用（推奨の標準運用モード）
+  - 日常運用での recall/precision バランスを重視
+- `precision-first`
+  - `--min-confidence confirmed` + `--exclude-dynamic-fallback` を適用
+  - CI/レビューゲートなど誤判定コストが高い場面向け
+- 優先順位:
+  - 明示指定フラグ（`--min-confidence` / `--exclude-dynamic-fallback`）がプロファイル既定値を上書きします
+- 典型コマンド:
+  - balanced:
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --op-profile balanced -f json`
+  - precision-first:
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --op-profile precision-first -f json`
   - 取りこぼし調査（recall優先）:
     - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence dynamic-fallback -f json`
-- 実運用ルール:
-  - エッジフィルタ観点では `--exclude-dynamic-fallback` は実質 `--min-confidence inferred` と同等です。
-  - すでに `--min-confidence inferred` を指定している場合、`--exclude-dynamic-fallback` は明示用途で、機能的には冗長です。
-  - 最も厳しく絞る場合は `--min-confidence confirmed` を使います（この場合もフラグの追加効果はありません）。
 - 確認ポイント:
   - JSON/YAML の `confidence_filter.input_edge_count` と `confidence_filter.kept_edge_count` を比較し、想定どおりに除外されたか確認します。
 
