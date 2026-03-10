@@ -1,0 +1,355 @@
+{
+  "runId": "dbeebef7-ed73-453c-b1d4-3483147055fa",
+  "generatedAt": "2026-03-10T07:26:55.984712+00:00",
+  "scope": {
+    "workflow": "CI",
+    "branch": "main",
+    "sampleSize": 24
+  },
+  "summary": {
+    "gatePresentRuns": 24,
+    "gateSuccessRuns": 24,
+    "gateFailureRuns": 0,
+    "gateMissingRuns": 0,
+    "successRate": 1.0,
+    "latestConsecutiveSuccessStreak": 24
+  },
+  "runs": [
+    {
+      "runId": 22891221142,
+      "createdAt": "2026-03-10T07:08:47Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22891221142",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T07:08:50Z",
+        "completedAt": "2026-03-10T07:10:12Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22891221142/job/66414676054"
+      }
+    },
+    {
+      "runId": 22890894317,
+      "createdAt": "2026-03-10T06:57:12Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22890894317",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T06:57:14Z",
+        "completedAt": "2026-03-10T06:58:36Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22890894317/job/66413697031"
+      }
+    },
+    {
+      "runId": 22890240992,
+      "createdAt": "2026-03-10T06:33:12Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22890240992",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T06:33:15Z",
+        "completedAt": "2026-03-10T06:34:36Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22890240992/job/66411723126"
+      }
+    },
+    {
+      "runId": 22889868928,
+      "createdAt": "2026-03-10T06:19:31Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22889868928",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T06:19:34Z",
+        "completedAt": "2026-03-10T06:20:58Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22889868928/job/66410583965"
+      }
+    },
+    {
+      "runId": 22889619134,
+      "createdAt": "2026-03-10T06:10:11Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22889619134",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T06:10:13Z",
+        "completedAt": "2026-03-10T06:11:35Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22889619134/job/66409800177"
+      }
+    },
+    {
+      "runId": 22889373911,
+      "createdAt": "2026-03-10T06:00:55Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22889373911",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T06:00:58Z",
+        "completedAt": "2026-03-10T06:02:26Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22889373911/job/66409090617"
+      }
+    },
+    {
+      "runId": 22888473137,
+      "createdAt": "2026-03-10T05:25:04Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22888473137",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T05:25:07Z",
+        "completedAt": "2026-03-10T05:26:33Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22888473137/job/66406404593"
+      }
+    },
+    {
+      "runId": 22888172068,
+      "createdAt": "2026-03-10T05:12:09Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22888172068",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T05:12:19Z",
+        "completedAt": "2026-03-10T05:13:36Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22888172068/job/66405499647"
+      }
+    },
+    {
+      "runId": 22888050060,
+      "createdAt": "2026-03-10T05:06:50Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22888050060",
+      "runConclusion": "cancelled",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T05:06:59Z",
+        "completedAt": "2026-03-10T05:08:09Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22888050060/job/66405120849"
+      }
+    },
+    {
+      "runId": 22887924604,
+      "createdAt": "2026-03-10T05:01:33Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22887924604",
+      "runConclusion": "cancelled",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T05:01:35Z",
+        "completedAt": "2026-03-10T05:03:02Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22887924604/job/66404737662"
+      }
+    },
+    {
+      "runId": 22887784945,
+      "createdAt": "2026-03-10T04:55:35Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22887784945",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T04:55:37Z",
+        "completedAt": "2026-03-10T04:56:49Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22887784945/job/66404317062"
+      }
+    },
+    {
+      "runId": 22887642496,
+      "createdAt": "2026-03-10T04:49:35Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22887642496",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T04:49:38Z",
+        "completedAt": "2026-03-10T04:51:03Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22887642496/job/66403892378"
+      }
+    },
+    {
+      "runId": 22887473078,
+      "createdAt": "2026-03-10T04:42:37Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22887473078",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T04:42:40Z",
+        "completedAt": "2026-03-10T04:44:02Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22887473078/job/66403402299"
+      }
+    },
+    {
+      "runId": 22887130221,
+      "createdAt": "2026-03-10T04:28:40Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22887130221",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T04:28:42Z",
+        "completedAt": "2026-03-10T04:30:02Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22887130221/job/66402370940"
+      }
+    },
+    {
+      "runId": 22886830540,
+      "createdAt": "2026-03-10T04:15:44Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22886830540",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T04:15:47Z",
+        "completedAt": "2026-03-10T04:17:12Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22886830540/job/66401293001"
+      }
+    },
+    {
+      "runId": 22886431572,
+      "createdAt": "2026-03-10T03:59:01Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22886431572",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T03:59:04Z",
+        "completedAt": "2026-03-10T04:00:29Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22886431572/job/66399994076"
+      }
+    },
+    {
+      "runId": 22886197006,
+      "createdAt": "2026-03-10T03:49:05Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22886197006",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T03:49:08Z",
+        "completedAt": "2026-03-10T03:50:33Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22886197006/job/66399290498"
+      }
+    },
+    {
+      "runId": 22885998245,
+      "createdAt": "2026-03-10T03:40:45Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22885998245",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-10T03:40:48Z",
+        "completedAt": "2026-03-10T03:42:12Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22885998245/job/66398699596"
+      }
+    },
+    {
+      "runId": 22859336994,
+      "createdAt": "2026-03-09T14:52:22Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22859336994",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-09T14:52:25Z",
+        "completedAt": "2026-03-09T14:54:07Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22859336994/job/66308526369"
+      }
+    },
+    {
+      "runId": 22858867402,
+      "createdAt": "2026-03-09T14:41:42Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22858867402",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-09T14:41:45Z",
+        "completedAt": "2026-03-09T14:43:08Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22858867402/job/66306800685"
+      }
+    },
+    {
+      "runId": 22857699506,
+      "createdAt": "2026-03-09T14:14:54Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22857699506",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-09T14:14:57Z",
+        "completedAt": "2026-03-09T14:16:20Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22857699506/job/66302498654"
+      }
+    },
+    {
+      "runId": 22856876607,
+      "createdAt": "2026-03-09T13:55:35Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22856876607",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-09T13:55:38Z",
+        "completedAt": "2026-03-09T13:57:00Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22856876607/job/66299497750"
+      }
+    },
+    {
+      "runId": 22856016996,
+      "createdAt": "2026-03-09T13:35:21Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22856016996",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-09T13:35:23Z",
+        "completedAt": "2026-03-09T13:36:46Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22856016996/job/66296456040"
+      }
+    },
+    {
+      "runId": 22855606348,
+      "createdAt": "2026-03-09T13:25:25Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22855606348",
+      "runConclusion": "success",
+      "gate": {
+        "present": true,
+        "conclusion": "success",
+        "status": "completed",
+        "startedAt": "2026-03-09T13:25:27Z",
+        "completedAt": "2026-03-09T13:26:48Z",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22855606348/job/66294982235"
+      }
+    }
+  ]
+}
