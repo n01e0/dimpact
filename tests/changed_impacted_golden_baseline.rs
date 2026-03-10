@@ -174,6 +174,34 @@ fn changed_impacted_golden_baseline_matrix_v73() {
     let python_monkey_v3_after =
         python_monkey_v3_before.replace("payload.strip().upper()", "payload.strip().lower()");
 
+    let go_comment_fp_before = r#"package demo
+
+func helper() int { return 1 }
+
+func run() int {
+    // helper()
+    _ = "helper()"
+    /* helper() */
+    return 0
+}
+"#;
+    let go_comment_fp_after = go_comment_fp_before.replace("return 1", "return 2");
+
+    let java_comment_fp_before = r#"package demo;
+
+class Demo {
+    int helper() { return 1; }
+
+    int run() {
+        String text = \"helper()\";
+        // helper()
+        /* helper() */
+        return text.length();
+    }
+}
+"#;
+    let java_comment_fp_after = java_comment_fp_before.replace("return 1;", "return 2;");
+
     let cases = vec![
         (
             "typescript",
@@ -208,11 +236,27 @@ fn changed_impacted_golden_baseline_matrix_v73() {
             BTreeSet::from(["run".to_string()]),
         ),
         (
+            "java",
+            "demo/CommentFp.java",
+            java_comment_fp_before,
+            java_comment_fp_after.as_str(),
+            BTreeSet::from(["Demo".to_string(), "helper".to_string()]),
+            BTreeSet::new(),
+        ),
+        (
             "go",
             "demo/a.go",
             go_before,
             go_after.as_str(),
             BTreeSet::from(["Run".to_string()]),
+            BTreeSet::new(),
+        ),
+        (
+            "go",
+            "demo/comment_fp.go",
+            go_comment_fp_before,
+            go_comment_fp_after.as_str(),
+            BTreeSet::from(["helper".to_string()]),
             BTreeSet::new(),
         ),
         (
