@@ -643,7 +643,7 @@ jobs:
             echo "- graduation final ok: $grad_ok"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$strict_ok" -ne 1 ] || [ "$grad_ok" -ne 1 ]; then
+          if [[ "$init_strict" != "success" && "$retry_strict" != "success" ]] || [[ "$init_grad" != "success" && "$retry_grad" != "success" ]]; then
             echo "nightly failed after applying retry policy" >&2
             exit 1
           fi
