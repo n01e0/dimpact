@@ -1,0 +1,168 @@
+{
+  "runId": "dbeebef7-ed73-453c-b1d4-3483147055fa",
+  "generatedAt": "2026-03-10T06:49:46.443301+00:00",
+  "method": "compare-impact-vs-lsp-oracle (candidate=ts, oracle=lsp strict, with-edges) on real-code corpus fixtures",
+  "results": {
+    "python": {
+      "callers": {
+        "exitCode": 0,
+        "log": "/tmp/r53-1/python-callers.log",
+        "status": "measured",
+        "fn": {
+          "changed": 0,
+          "impacted": 0,
+          "edges": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "edges": 0
+        },
+        "summary": {
+          "candidate": {
+            "changed": 10,
+            "impacted": 31,
+            "edges": 40
+          },
+          "oracle": {
+            "changed": 10,
+            "impacted": 31,
+            "edges": 40
+          }
+        }
+      },
+      "callees": {
+        "exitCode": 0,
+        "log": "/tmp/r53-1/python-callees.log",
+        "status": "measured",
+        "fn": {
+          "changed": 0,
+          "impacted": 9,
+          "edges": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "edges": 1
+        },
+        "summary": {
+          "candidate": {
+            "changed": 10,
+            "impacted": 0,
+            "edges": 10
+          },
+          "oracle": {
+            "changed": 10,
+            "impacted": 9,
+            "edges": 9
+          }
+        }
+      },
+      "both": {
+        "exitCode": 0,
+        "log": "/tmp/r53-1/python-both.log",
+        "status": "measured",
+        "fn": {
+          "changed": 0,
+          "impacted": 0,
+          "edges": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "edges": 0
+        },
+        "summary": {
+          "candidate": {
+            "changed": 10,
+            "impacted": 31,
+            "edges": 40
+          },
+          "oracle": {
+            "changed": 10,
+            "impacted": 31,
+            "edges": 40
+          }
+        }
+      }
+    },
+    "ruby": {
+      "callers": {
+        "exitCode": 1,
+        "log": "/tmp/r53-1/ruby-callers.log",
+        "status": "failed",
+        "error": "Error: lsp initialize timeout or invalid response"
+      },
+      "callees": {
+        "exitCode": 1,
+        "log": "/tmp/r53-1/ruby-callees.log",
+        "status": "failed",
+        "error": "Error: lsp initialize timeout or invalid response"
+      },
+      "both": {
+        "exitCode": 1,
+        "log": "/tmp/r53-1/ruby-both.log",
+        "status": "failed",
+        "error": "Error: lsp initialize timeout or invalid response"
+      }
+    }
+  },
+  "aggregate": {
+    "python": {
+      "measuredDirections": 3,
+      "failedDirections": 0,
+      "fnTotal": 9,
+      "fpTotal": 1
+    },
+    "ruby": {
+      "measuredDirections": 0,
+      "failedDirections": 3,
+      "fnTotal": 0,
+      "fpTotal": 0
+    }
+  },
+  "proxyCallersTsVsAutoStrictIfAvailable": {
+    "python": {
+      "direction": "callers",
+      "fn": {
+        "changed": 0,
+        "impacted": 0
+      },
+      "fp": {
+        "changed": 0,
+        "impacted": 0
+      },
+      "ts": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "tsJson": "/tmp/r53-1/python-callers-ts.json",
+      "autoJson": "/tmp/r53-1/python-callers-auto.json"
+    },
+    "ruby": {
+      "direction": "callers",
+      "fn": {
+        "changed": 0,
+        "impacted": 0
+      },
+      "fp": {
+        "changed": 0,
+        "impacted": 0
+      },
+      "ts": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "tsJson": "/tmp/r53-1/ruby-callers-ts.json",
+      "autoJson": "/tmp/r53-1/ruby-callers-auto.json"
+    }
+  }
+}
