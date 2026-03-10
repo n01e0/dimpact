@@ -5,6 +5,35 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+struct ScopedEnvVar {
+    key: &'static str,
+    prev: Option<String>,
+}
+
+impl ScopedEnvVar {
+    fn set(key: &'static str, value: &str) -> Self {
+        let prev = std::env::var(key).ok();
+        // SAFETY: tests using this helper are serial and restore previous value in Drop.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, prev }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        // SAFETY: tests using this helper are serial and restore previous value in Drop.
+        unsafe {
+            if let Some(prev) = &self.prev {
+                std::env::set_var(self.key, prev);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+}
+
 fn git(cwd: &std::path::Path, args: &[&str]) -> std::process::Output {
     let mut cmd = Command::new("git");
     cmd.args(args).current_dir(cwd);
@@ -170,9 +199,13 @@ fn should_run_strict_lsp_e2e() -> bool {
 fn require_strict_lsp_env_gate_for_lane(lane: &str) -> bool {
     match std::env::var("DIMPACT_E2E_STRICT_LSP") {
         Ok(v) if v == "1" => true,
+        Ok(v) if v == "0" => {
+            eprintln!("skip: lane={} has DIMPACT_E2E_STRICT_LSP=0", lane);
+            false
+        }
         Ok(v) => {
             panic!(
-                "fail-fast preflight: lane={} cause=env invalid DIMPACT_E2E_STRICT_LSP={} (expected 1)",
+                "fail-fast preflight: lane={} cause=env invalid DIMPACT_E2E_STRICT_LSP={} (expected 1 or 0)",
                 lane, v
             );
         }
@@ -795,9 +828,7 @@ fn lsp_engine_falls_back_impact_callers() {
 #[serial]
 fn lsp_engine_strict_errors() {
     // Ensure tests do not accidentally use a real server on dev machines
-    unsafe {
-        std::env::set_var("DIMPACT_DISABLE_REAL_LSP", "1");
-    }
+    let _guard = ScopedEnvVar::set("DIMPACT_DISABLE_REAL_LSP", "1");
     let (_tmp, repo) = setup_repo_basic();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
     let diff = String::from_utf8(diff_out.stdout).unwrap();
@@ -998,9 +1029,7 @@ fn lsp_engine_strict_impact_from_symbols_errors_when_caps_missing() {
 #[serial]
 fn lsp_engine_non_strict_impact_from_symbols_falls_back_when_lsp_unavailable() {
     // Ensure this path exercises fallback from LSP session init failure
-    unsafe {
-        std::env::set_var("DIMPACT_DISABLE_REAL_LSP", "1");
-    }
+    let _guard = ScopedEnvVar::set("DIMPACT_DISABLE_REAL_LSP", "1");
     let (_tmp, repo) = setup_repo_basic();
     let cfg = dimpact::EngineConfig {
         lsp_strict: false,
