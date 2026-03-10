@@ -1,0 +1,98 @@
+{
+  "runId": "dbeebef7-ed73-453c-b1d4-3483147055fa",
+  "generatedAt": "2026-03-10T06:26:08.402334+00:00",
+  "regression": {
+    "precisionGate": {
+      "gateStatus": "passed",
+      "fn": 0,
+      "fp": 0,
+      "report": "/tmp/precision-r52-4.json"
+    },
+    "cargoTests": {
+      "engine_lsp": "pass",
+      "cargo_test": "pass"
+    }
+  },
+  "benchmarks": {
+    "typescript": {
+      "ts": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "thresholdResult": "PASS",
+      "log": "/tmp/r52-4-bench/typescript.log"
+    },
+    "javascript": {
+      "ts": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 0,
+        "impacted": 0
+      },
+      "thresholdResult": "FAIL",
+      "log": "/tmp/r52-4-bench/javascript.log"
+    },
+    "go": {
+      "ts": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "thresholdResult": "PASS",
+      "log": "/tmp/r52-4-bench/go.log"
+    },
+    "java": {
+      "ts": {
+        "changed": 11,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 11,
+        "impacted": 31
+      },
+      "thresholdResult": "PASS",
+      "log": "/tmp/r52-4-bench/java.log"
+    },
+    "python": {
+      "ts": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "thresholdResult": "PASS",
+      "log": "/tmp/r52-4-bench/python.log"
+    },
+    "ruby": {
+      "ts": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "autoStrictIfAvailable": {
+        "changed": 10,
+        "impacted": 31
+      },
+      "thresholdResult": "PASS",
+      "log": "/tmp/r52-4-bench/ruby.log"
+    }
+  },
+  "assessment": {
+    "noNewDegradation": true,
+    "notes": [
+      "Precision regression gate remained PASSED with FN=0/FP=0.",
+      "Bench guardrails passed for typescript/go/java/python/ruby under auto(strict-if-available) profile.",
+      "javascript lane stayed below guardrail (0/0), matching pre-existing known behavior tracked in bench-fixtures/guardrail-thresholds.md."
+    ]
+  }
+}
