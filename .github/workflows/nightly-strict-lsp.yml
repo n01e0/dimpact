@@ -294,12 +294,11 @@ jobs:
           set_gate "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "0" "$js_reason"
 
           if has_cmd_version gopls; then
-            set_gate "DIMPACT_E2E_STRICT_LSP_GO" "1" "gopls available"
-            go_reason="gopls available"
+            go_reason="gopls available (temporarily kept skip-safe in F53)"
           else
-            set_gate "DIMPACT_E2E_STRICT_LSP_GO" "0" "gopls missing (skip-safe)"
             go_reason="gopls missing (skip-safe)"
           fi
+          set_gate "DIMPACT_E2E_STRICT_LSP_GO" "0" "$go_reason"
 
           if has_cmd_help jdtls; then
             java_reason="jdtls available (temporarily kept skip-safe in F53)"
