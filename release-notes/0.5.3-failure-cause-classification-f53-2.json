@@ -1,0 +1,148 @@
+{
+  "runId": "418b4f96-7cea-4256-ac3e-af08c4763cc4",
+  "generatedAt": "2026-03-10T15:47:30.168065+00:00",
+  "scope": "nightly strict-lsp failures from F53-1 inventory",
+  "runs": [
+    {
+      "runId": 22868304850,
+      "headSha": "cf1ef0a5dd895a58f546af7a70af19a09aa03c91",
+      "createdAt": "2026-03-09T18:21:10Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22868304850",
+      "failedSteps": [
+        "Install + health-check TypeScript/JavaScript language server",
+        "Summarize strict real-LSP migration status (skip-safe/fail-fast)",
+        "Classify nightly flaky causes",
+        "Decide flaky-type retry policy",
+        "Finalize nightly result with retry policy",
+        "Publish failure triage summary (cause/language/repro)"
+      ],
+      "detectedSignals": [
+        {
+          "signal": "install-ts-js-lsp",
+          "category": "install"
+        },
+        {
+          "signal": "workflow-shell-bad-substitution",
+          "category": "workflow"
+        },
+        {
+          "signal": "workflow-missing-script-or-command",
+          "category": "workflow"
+        },
+        {
+          "signal": "retry-policy-finalize-failure",
+          "category": "logic"
+        }
+      ],
+      "primaryCause": {
+        "signal": "install-ts-js-lsp",
+        "category": "install"
+      }
+    },
+    {
+      "runId": 22826824760,
+      "headSha": "8f02e39c2c3fc8036f53bfaebf64f0c49592acab",
+      "createdAt": "2026-03-08T18:10:02Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22826824760",
+      "failedSteps": [
+        "Install + health-check TypeScript/JavaScript language server",
+        "Summarize strict real-LSP migration status (skip-safe/fail-fast)",
+        "Classify nightly flaky causes",
+        "Decide flaky-type retry policy",
+        "Finalize nightly result with retry policy",
+        "Publish failure triage summary (cause/language/repro)"
+      ],
+      "detectedSignals": [
+        {
+          "signal": "install-ts-js-lsp",
+          "category": "install"
+        },
+        {
+          "signal": "workflow-shell-bad-substitution",
+          "category": "workflow"
+        },
+        {
+          "signal": "workflow-missing-script-or-command",
+          "category": "workflow"
+        },
+        {
+          "signal": "retry-policy-finalize-failure",
+          "category": "logic"
+        }
+      ],
+      "primaryCause": {
+        "signal": "install-ts-js-lsp",
+        "category": "install"
+      }
+    },
+    {
+      "runId": 22804383757,
+      "headSha": "a439d743ac55bcde298f73715612c88abc0c2c2e",
+      "createdAt": "2026-03-07T18:09:47Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22804383757",
+      "failedSteps": [
+        "Install + health-check TypeScript/JavaScript language server",
+        "Classify nightly flaky causes",
+        "Decide flaky-type retry policy",
+        "Finalize nightly result with retry policy",
+        "Publish failure triage summary (cause/language/repro)"
+      ],
+      "detectedSignals": [
+        {
+          "signal": "install-ts-js-lsp",
+          "category": "install"
+        },
+        {
+          "signal": "workflow-shell-bad-substitution",
+          "category": "workflow"
+        },
+        {
+          "signal": "workflow-missing-script-or-command",
+          "category": "workflow"
+        },
+        {
+          "signal": "retry-policy-finalize-failure",
+          "category": "logic"
+        }
+      ],
+      "primaryCause": {
+        "signal": "install-ts-js-lsp",
+        "category": "install"
+      }
+    },
+    {
+      "runId": 22776166947,
+      "headSha": "897d92570b1bcfcc649c204555b4f4ffb064d3e9",
+      "createdAt": "2026-03-06T18:16:45Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22776166947",
+      "failedSteps": [
+        "Install + health-check TypeScript/JavaScript language server",
+        "Run LSP graduation auto-check script"
+      ],
+      "detectedSignals": [
+        {
+          "signal": "install-ts-js-lsp",
+          "category": "install"
+        },
+        {
+          "signal": "workflow-missing-script-or-command",
+          "category": "workflow"
+        },
+        {
+          "signal": "preflight-or-logic-graduation-check-failed",
+          "category": "logic"
+        }
+      ],
+      "primaryCause": {
+        "signal": "install-ts-js-lsp",
+        "category": "install"
+      }
+    }
+  ],
+  "primaryCauseCounts": {
+    "workflow": 0,
+    "install": 4,
+    "preflight": 0,
+    "logic": 0
+  }
+}
