@@ -19,8 +19,12 @@ jobs:
   strict_real_lsp_e2e:
     runs-on: ubuntu-latest
     container: ghcr.io/n01e0/dimpact-ci:latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Ensure base tools (git/bash/python3/nodejs/npm/ripgrep)
+        shell: sh
         run: |
           if command -v apt-get >/dev/null 2>&1; then
             apt-get update
@@ -122,13 +126,18 @@ jobs:
             echo "::error::[python] pyright-langserver not found in PATH after install"
             exit 1
           fi
-
-          echo "[python] pyright-langserver path=$(command -v pyright-langserver)"
-          if ! pyright-langserver --help >/tmp/pyright-langserver-help.log 2>&1; then
-            echo "::error::[python] pyright-langserver --help failed"
-            cat /tmp/pyright-langserver-help.log >&2
+          if ! command -v pyright >/dev/null 2>&1; then
+            echo "::error::[python] pyright CLI not found in PATH after install"
             exit 1
           fi
+
+          echo "[python] pyright-langserver path=$(command -v pyright-langserver)"
+          if ! pyright --version >/tmp/pyright-version.log 2>&1; then
+            echo "::error::[python] pyright --version failed"
+            cat /tmp/pyright-version.log >&2
+            exit 1
+          fi
+          echo "[python] pyright version=$(cat /tmp/pyright-version.log | head -n 1)"
           echo "[python] health-check=ok"
 
       - uses: actions/setup-go@v6
