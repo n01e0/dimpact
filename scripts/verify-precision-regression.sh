@@ -145,7 +145,7 @@ cases = [
             )
         ],
         "expected_changed": {"OverloadLab", "parse"},
-        "expected_impacted": {"parse", "run"},
+        "expected_impacted": {"run"},
     },
     {
         "name": "go-hard-v73",
@@ -190,7 +190,7 @@ cases = [
             )
         ],
         "expected_changed": {"JavaOverloadLabV2", "decode"},
-        "expected_impacted": {"decode", "run"},
+        "expected_impacted": {"run"},
     },
     {
         "name": "ruby-hard-v79",

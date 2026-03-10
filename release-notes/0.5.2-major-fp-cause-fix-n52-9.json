@@ -1,0 +1,82 @@
+{
+  "runId": "f8523962-c6b3-46f4-829d-a1863296a810",
+  "generatedAt": "2026-03-10T10:44:48.221612+00:00",
+  "majorCause": {
+    "id": "java-declaration-line-call-misclassification",
+    "description": "Java bare-call extraction and contextual this-inference were treating method/constructor declaration lines as call sites, creating false-positive refs."
+  },
+  "fix": {
+    "files": [
+      "src/languages/java_spec.rs",
+      "scripts/verify-precision-regression.sh",
+      "tests/changed_impacted_golden_baseline.rs"
+    ],
+    "summary": [
+      "Skip declaration-line captures via method/constructor line guards.",
+      "Skip class-name bare captures (constructor/type-site).",
+      "Prevent contextual this-inference on declaration lines.",
+      "Update java hard-case impacted goldens to reflect corrected non-spurious behavior."
+    ]
+  },
+  "remeasure": {
+    "fixture": "tests/fixtures/java/analyzer_hard_cases_lambda_methodref_overload_v2.java",
+    "before": {
+      "declaration_line_ref_count": 8,
+      "declaration_line_refs": [
+        "decode@12[]/false",
+        "decode@16[]/false",
+        "decodeStatic@20[]/false",
+        "run@24[]/false",
+        "decode@12[this]/true",
+        "decode@16[this]/true",
+        "decodeStatic@20[this]/true",
+        "run@24[this]/true"
+      ],
+      "total_refs": 33
+    },
+    "after": {
+      "declaration_line_ref_count": 0,
+      "declaration_line_refs": [],
+      "total_refs": 24
+    },
+    "delta": {
+      "declaration_line_ref_count": -8,
+      "total_refs": -9
+    }
+  },
+  "precisionRegressionAfter": {
+    "gateStatus": "passed",
+    "totals": {
+      "fn": 0,
+      "fp": 0
+    },
+    "java": {
+      "fn": 0,
+      "fp": 0,
+      "diffSummary": {
+        "fn": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        },
+        "fp": {
+          "changed": 0,
+          "impacted": 0,
+          "total": 0
+        }
+      },
+      "threshold": {
+        "fn": 0,
+        "fp": 0
+      },
+      "thresholdDiff": {
+        "fn": 0,
+        "fp": 0
+      },
+      "cases": [
+        "java-hard-v73",
+        "java-hard-v74"
+      ]
+    }
+  }
+}
