@@ -14,6 +14,9 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/target
   CARGO_TERM_COLOR: always
   NIGHTLY_LOG_DIR: ${{ github.workspace }}/nightly-logs
+  # Lane-level stabilization policy for strict real-LSP nightly.
+  # Keep this narrow while hardening install/preflight/retry behavior.
+  STRICT_LSP_ACTIVE_LANES: "go"
 
 jobs:
   strict_real_lsp_e2e:
@@ -56,6 +59,7 @@ jobs:
           restore-keys: ${{ runner.os }}
 
       - name: Install + health-check TypeScript/JavaScript language server
+        id: install_ts_js
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -97,6 +101,7 @@ jobs:
           echo "[ts/js] health-check=ok"
 
       - name: Install + health-check Python language server
+        id: install_python
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -147,6 +152,7 @@ jobs:
           go-version: "1.22.x"
 
       - name: Install + health-check Go language server
+        id: install_go
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -178,6 +184,7 @@ jobs:
           echo "[go] health-check=ok"
 
       - name: Install + health-check Java language server
+        id: install_java
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -224,6 +231,7 @@ jobs:
           echo "[java] health-check=ok"
 
       - name: Install + health-check Ruby language server
+        id: install_ruby
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -250,6 +258,7 @@ jobs:
           echo "[ruby] health-check=ok"
 
       - name: Preflight strict real-LSP targets (skip-safe)
+        id: preflight
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/preflight.log"
@@ -258,12 +267,33 @@ jobs:
           PRE_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-preflight.log"
           : > "$PRE_LOG"
 
+          ts_install='${{ steps.install_ts_js.outcome }}'
+          py_install='${{ steps.install_python.outcome }}'
+          go_install='${{ steps.install_go.outcome }}'
+          java_install='${{ steps.install_java.outcome }}'
+          ruby_install='${{ steps.install_ruby.outcome }}'
+
+          active_lanes=",${STRICT_LSP_ACTIVE_LANES:-go},"
+          lane_allowed() {
+            local lane="$1"
+            [[ "$active_lanes" == *",${lane},"* ]]
+          }
+
+          enabled_count=0
+          ts_enabled=0
+          js_enabled=0
+          go_enabled=0
+          java_enabled=0
+          ruby_enabled=0
+          py_enabled=0
+
           set_gate_enabled() {
             local key="$1" reason="$2"
             printf -v "$key" '%s' "1"
             export "$key"
             echo "${key}=1" >> "$GITHUB_ENV"
             echo "${key}=1 reason=${reason}" >> "$PRE_LOG"
+            enabled_count=$((enabled_count + 1))
           }
 
           set_gate_unset() {
@@ -281,27 +311,112 @@ jobs:
           }
 
           # Keep global strict gate unset in lane-only mode and control execution by per-language gates.
-          # This avoids forcing all strict lanes at once while failure-first stabilization is in progress.
           set_gate_unset "DIMPACT_E2E_STRICT_LSP" "lane-only mode (global strict gate unset)"
           if has_cmd_help rust-analyzer; then
-            rust_reason="rust-analyzer available (global gate remains lane-only)"
+            rust_reason="rust-analyzer available (lane-only mode)"
           else
-            rust_reason="rust-analyzer missing (global gate remains lane-only)"
+            rust_reason="rust-analyzer missing (lane-only mode)"
           fi
 
-          ts_reason="temporarily kept skip-safe in F53 backlog-clear"
-          js_reason="temporarily kept skip-safe in F53 backlog-clear"
-          go_reason="temporarily kept skip-safe in F53 backlog-clear"
-          java_reason="temporarily kept skip-safe in F53 backlog-clear"
-          ruby_reason="temporarily kept skip-safe in F53 backlog-clear"
-          python_reason="temporarily kept skip-safe in F53 backlog-clear"
+          if lane_allowed "typescript"; then
+            if [ "$ts_install" = "success" ] && has_cmd_help typescript-language-server; then
+              ts_reason="typescript-language-server available (install=${ts_install})"
+              set_gate_enabled "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
+              ts_enabled=1
+            else
+              ts_reason="typescript-language-server unavailable or install failed (install=${ts_install})"
+              set_gate_unset "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
+            fi
+          else
+            ts_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go})"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
+          fi
 
-          set_gate_unset "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
-          set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
-          set_gate_unset "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
-          set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
-          set_gate_unset "DIMPACT_E2E_STRICT_LSP_RUBY" "$ruby_reason"
-          set_gate_unset "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
+          if lane_allowed "javascript"; then
+            if [ "$ts_install" = "success" ] && has_cmd_help typescript-language-server; then
+              js_reason="typescript-language-server available (install=${ts_install})"
+              set_gate_enabled "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
+              js_enabled=1
+            else
+              js_reason="typescript-language-server unavailable or install failed (install=${ts_install})"
+              set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
+            fi
+          else
+            js_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go})"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
+          fi
+
+          if lane_allowed "go"; then
+            if [ "$go_install" = "success" ] && has_cmd_version gopls; then
+              go_reason="gopls available (install=${go_install})"
+              set_gate_enabled "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
+              go_enabled=1
+            else
+              go_reason="gopls unavailable or install failed (install=${go_install})"
+              set_gate_unset "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
+            fi
+          else
+            go_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go})"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
+          fi
+
+          if lane_allowed "java"; then
+            if [ "$java_install" = "success" ] && has_cmd_help jdtls; then
+              java_reason="jdtls available (install=${java_install})"
+              set_gate_enabled "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
+              java_enabled=1
+            else
+              java_reason="jdtls unavailable or install failed (install=${java_install})"
+              set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
+            fi
+          else
+            java_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go})"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
+          fi
+
+          if lane_allowed "ruby"; then
+            if [ "$ruby_install" = "success" ] && has_cmd_help ruby-lsp; then
+              ruby_reason="ruby-lsp available (install=${ruby_install})"
+              set_gate_enabled "DIMPACT_E2E_STRICT_LSP_RUBY" "$ruby_reason"
+              ruby_enabled=1
+            else
+              ruby_reason="ruby-lsp unavailable or install failed (install=${ruby_install})"
+              set_gate_unset "DIMPACT_E2E_STRICT_LSP_RUBY" "$ruby_reason"
+            fi
+          else
+            ruby_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go})"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_RUBY" "$ruby_reason"
+          fi
+
+          if lane_allowed "python"; then
+            if [ "$py_install" = "success" ] && has_cmd_help pyright-langserver; then
+              python_reason="pyright-langserver available (install=${py_install})"
+              set_gate_enabled "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
+              py_enabled=1
+            else
+              python_reason="pyright-langserver unavailable or install failed (install=${py_install})"
+              set_gate_unset "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
+            fi
+          else
+            python_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go})"
+            set_gate_unset "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
+          fi
+
+          strict_lsp_any=0
+          if [ "$enabled_count" -gt 0 ]; then
+            strict_lsp_any=1
+          fi
+
+          {
+            echo "strict_lsp_any=${strict_lsp_any}"
+            echo "strict_lsp_enabled_count=${enabled_count}"
+            echo "strict_lsp_typescript=${ts_enabled}"
+            echo "strict_lsp_javascript=${js_enabled}"
+            echo "strict_lsp_go=${go_enabled}"
+            echo "strict_lsp_java=${java_enabled}"
+            echo "strict_lsp_ruby=${ruby_enabled}"
+            echo "strict_lsp_python=${py_enabled}"
+          } >> "$GITHUB_OUTPUT"
 
           {
             echo "## strict real-LSP preflight"
@@ -315,6 +430,28 @@ jobs:
             echo "| java | ${DIMPACT_E2E_STRICT_LSP_JAVA:-unset} | ${java_reason} |"
             echo "| ruby | ${DIMPACT_E2E_STRICT_LSP_RUBY:-unset} | ${ruby_reason} |"
             echo "| python | ${DIMPACT_E2E_STRICT_LSP_PYTHON:-unset} | ${python_reason} |"
+            echo
+            echo "active lane policy: ${STRICT_LSP_ACTIVE_LANES:-go}"
+            echo "enabled strict lanes: ${enabled_count}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish install/preflight stabilization summary
+        if: always()
+        run: |
+          {
+            echo "## install + preflight stabilization summary"
+            echo
+            echo "| lane | install outcome | preflight enabled |"
+            echo "|---|---|---:|"
+            echo "| ts/js | ${{ steps.install_ts_js.outcome }} | ts=${{ steps.preflight.outputs.strict_lsp_typescript }} js=${{ steps.preflight.outputs.strict_lsp_javascript }} |"
+            echo "| python | ${{ steps.install_python.outcome }} | ${{ steps.preflight.outputs.strict_lsp_python }} |"
+            echo "| go | ${{ steps.install_go.outcome }} | ${{ steps.preflight.outputs.strict_lsp_go }} |"
+            echo "| java | ${{ steps.install_java.outcome }} | ${{ steps.preflight.outputs.strict_lsp_java }} |"
+            echo "| ruby | ${{ steps.install_ruby.outcome }} | ${{ steps.preflight.outputs.strict_lsp_ruby }} |"
+            echo
+            echo "active lane policy: ${STRICT_LSP_ACTIVE_LANES:-go}"
+            echo "strict lanes enabled count: ${{ steps.preflight.outputs.strict_lsp_enabled_count }}"
+            echo "strict lanes any enabled: ${{ steps.preflight.outputs.strict_lsp_any }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize strict real-LSP migration status + residual trend
@@ -498,6 +635,8 @@ jobs:
             echo "| timeout | ${{ steps.retry_policy.outputs.timeout }} | ${{ steps.retry_policy.outputs.timeout }} |"
             echo
             echo "retry enabled: ${{ steps.retry_policy.outputs.enabled }}"
+            echo "strict lanes any enabled (preflight): ${{ steps.preflight.outputs.strict_lsp_any }}"
+            echo "strict lanes enabled count (preflight): ${{ steps.preflight.outputs.strict_lsp_enabled_count }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retry setup actions for install/startup flaky types
@@ -535,6 +674,43 @@ jobs:
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/run-engine-lsp-strict-retry.log"
           exec > >(tee -a "$LOG") 2>&1
+
+          # Re-evaluate lane gates after retry setup so recovered installs can be exercised.
+          # Keep the same stabilization lane policy as preflight.
+          active_lanes=",${STRICT_LSP_ACTIVE_LANES:-go},"
+          lane_allowed() {
+            local lane="$1"
+            [[ "$active_lanes" == *",${lane},"* ]]
+          }
+
+          set_lane_gate_if_available() {
+            local lane="$1" key="$2" mode="$3" cmd="$4"
+            if ! lane_allowed "$lane"; then
+              unset "$key" || true
+              return
+            fi
+            if [ "$mode" = "help" ]; then
+              if command -v "$cmd" >/dev/null 2>&1 && "$cmd" --help >/dev/null 2>&1; then
+                export "$key"="1"
+                return
+              fi
+            else
+              if command -v "$cmd" >/dev/null 2>&1 && "$cmd" version >/dev/null 2>&1; then
+                export "$key"="1"
+                return
+              fi
+            fi
+            unset "$key" || true
+          }
+
+          set_lane_gate_if_available typescript DIMPACT_E2E_STRICT_LSP_TYPESCRIPT help typescript-language-server
+          set_lane_gate_if_available javascript DIMPACT_E2E_STRICT_LSP_JAVASCRIPT help typescript-language-server
+          set_lane_gate_if_available python DIMPACT_E2E_STRICT_LSP_PYTHON help pyright-langserver
+          set_lane_gate_if_available go DIMPACT_E2E_STRICT_LSP_GO version gopls
+          set_lane_gate_if_available java DIMPACT_E2E_STRICT_LSP_JAVA help jdtls
+          set_lane_gate_if_available ruby DIMPACT_E2E_STRICT_LSP_RUBY help ruby-lsp
+
+          echo "[retry] lane gates after setup: ts=${DIMPACT_E2E_STRICT_LSP_TYPESCRIPT:-unset} js=${DIMPACT_E2E_STRICT_LSP_JAVASCRIPT:-unset} py=${DIMPACT_E2E_STRICT_LSP_PYTHON:-unset} go=${DIMPACT_E2E_STRICT_LSP_GO:-unset} java=${DIMPACT_E2E_STRICT_LSP_JAVA:-unset} ruby=${DIMPACT_E2E_STRICT_LSP_RUBY:-unset}"
 
           STRICT_E2E_RETRY_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-e2e-retry.log"
           echo "::group::cargo test -q --test engine_lsp (strict real-LSP retry)"
