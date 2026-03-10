@@ -1,0 +1,119 @@
+{
+  "runId": "418b4f96-7cea-4256-ac3e-af08c4763cc4",
+  "generatedAt": "2026-03-10T15:35:52.952171+00:00",
+  "mainRequiredChecks": {
+    "requiredContexts": [
+      "check",
+      "test",
+      "engine_lsp_regression",
+      "lsp_graduation_check",
+      "precision_regression_gate"
+    ],
+    "latestMainCiRun": {
+      "conclusion": "success",
+      "createdAt": "2026-03-10T13:08:16Z",
+      "databaseId": 22903985642,
+      "displayTitle": "docs(release): add v0.5.2 release execution note for N52-21 (#385)",
+      "headSha": "6e37b39fc64cfe3072dab279f08aacbea6e9d3ab",
+      "status": "completed",
+      "updatedAt": "2026-03-10T13:14:25Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/22903985642"
+    },
+    "statusesOnLatestMainCiRun": [
+      {
+        "context": "check",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22903985642/job/66457531833"
+      },
+      {
+        "context": "test",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22903985642/job/66457531873"
+      },
+      {
+        "context": "engine_lsp_regression",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22903985642/job/66457531906"
+      },
+      {
+        "context": "lsp_graduation_check",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22903985642/job/66457531927"
+      },
+      {
+        "context": "precision_regression_gate",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22903985642/job/66457531842"
+      }
+    ],
+    "failingOrMissingCount": 0,
+    "failingOrMissing": []
+  },
+  "nightlyStrictLsp": {
+    "sampledRuns": 4,
+    "failureRuns": 4,
+    "failures": [
+      {
+        "runId": 22868304850,
+        "createdAt": "2026-03-09T18:21:10Z",
+        "updatedAt": "2026-03-09T18:21:35Z",
+        "headSha": "cf1ef0a5dd895a58f546af7a70af19a09aa03c91",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22868304850",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/22868304850/job/66340988824"
+          }
+        ]
+      },
+      {
+        "runId": 22826824760,
+        "createdAt": "2026-03-08T18:10:02Z",
+        "updatedAt": "2026-03-08T18:10:31Z",
+        "headSha": "8f02e39c2c3fc8036f53bfaebf64f0c49592acab",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22826824760",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/22826824760/job/66208370553"
+          }
+        ]
+      },
+      {
+        "runId": 22804383757,
+        "createdAt": "2026-03-07T18:09:47Z",
+        "updatedAt": "2026-03-07T18:10:09Z",
+        "headSha": "a439d743ac55bcde298f73715612c88abc0c2c2e",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22804383757",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/22804383757/job/66151033087"
+          }
+        ]
+      },
+      {
+        "runId": 22776166947,
+        "createdAt": "2026-03-06T18:16:45Z",
+        "updatedAt": "2026-03-06T18:17:20Z",
+        "headSha": "897d92570b1bcfcc649c204555b4f4ffb064d3e9",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/22776166947",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/22776166947/job/66069941836"
+          }
+        ]
+      }
+    ]
+  },
+  "summary": {
+    "mainRequiredFailures": 0,
+    "nightlyFailureRuns": 4,
+    "failureBacklogTotal": 4
+  }
+}
