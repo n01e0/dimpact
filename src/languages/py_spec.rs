@@ -206,6 +206,9 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']$"#).expect("valid py str lit regex");
         let re_ident = Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).expect("valid py ident regex");
 
+        let mut monkeypatch_bindings: std::collections::HashMap<String, Vec<(u32, String)>> =
+            std::collections::HashMap::new();
+
         for cap in re_dyn_attr.captures_iter(source) {
             let Some(full) = cap.get(0) else {
                 continue;
@@ -262,10 +265,35 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
             let Some(full) = cap.get(0) else {
                 continue;
             };
+            let Some(attr_raw) = cap.get(2).map(|m| m.as_str().trim().to_string()) else {
+                continue;
+            };
             let Some(bound_ident) = cap.get(3).map(|m| m.as_str().to_string()) else {
                 continue;
             };
             let ln = byte_to_line(&offs, full.start());
+
+            let attr_name = if let Some(c) = re_str_lit.captures(&attr_raw) {
+                c.get(1).map(|m| m.as_str().to_string())
+            } else if let Some(c) = re_ident.captures(&attr_raw) {
+                let var = c.get(1).map(|m| m.as_str()).unwrap_or("");
+                assigned_string.get(var).and_then(|vals| {
+                    vals.iter()
+                        .rev()
+                        .find(|(line, _)| *line <= ln)
+                        .map(|(_, v)| v.clone())
+                })
+            } else {
+                None
+            };
+
+            if let Some(attr_name) = attr_name {
+                monkeypatch_bindings
+                    .entry(attr_name)
+                    .or_default()
+                    .push((ln, bound_ident.clone()));
+            }
+
             let is_method = false;
             let key = (ln, bound_ident.clone(), None, is_method);
             if !seen.insert(key) {
@@ -279,6 +307,66 @@ impl LanguageAnalyzer for SpecPyAnalyzer {
                 qualifier: None,
                 is_method,
             });
+        }
+        for vals in monkeypatch_bindings.values_mut() {
+            vals.sort_by_key(|(ln, _)| *ln);
+        }
+
+        // Bridge monkeypatch bindings to dynamic getattr/setattr targets.
+        // If an attr name resolved from getattr/setattr was previously bound via
+        // setattr(..., attr_name, callable), emit an additional ref to the bound
+        // callable so callers of the dynamic attr path depend on the patched body.
+        if !monkeypatch_bindings.is_empty() {
+            for cap in re_dyn_attr.captures_iter(source) {
+                let Some(full) = cap.get(0) else {
+                    continue;
+                };
+                let Some(arg) = cap.get(3) else {
+                    continue;
+                };
+                let ln = byte_to_line(&offs, full.start());
+                let arg_raw = arg.as_str().trim();
+
+                let resolved_attr = if let Some(c) = re_str_lit.captures(arg_raw) {
+                    c.get(1).map(|m| m.as_str().to_string())
+                } else if let Some(c) = re_ident.captures(arg_raw) {
+                    let var = c.get(1).map(|m| m.as_str()).unwrap_or("");
+                    assigned_string.get(var).and_then(|vals| {
+                        vals.iter()
+                            .rev()
+                            .find(|(line, _)| *line <= ln)
+                            .map(|(_, v)| v.clone())
+                    })
+                } else {
+                    None
+                };
+
+                let Some(attr_name) = resolved_attr else {
+                    continue;
+                };
+                let Some(bound_ident) = monkeypatch_bindings.get(&attr_name).and_then(|vals| {
+                    vals.iter()
+                        .rev()
+                        .find(|(line, _)| *line <= ln)
+                        .map(|(_, ident)| ident.clone())
+                }) else {
+                    continue;
+                };
+
+                let is_method = false;
+                let key = (ln, bound_ident.clone(), None, is_method);
+                if !seen.insert(key) {
+                    continue;
+                }
+                out.push(UnresolvedRef {
+                    name: bound_ident,
+                    kind: RefKind::Call,
+                    file: path.to_string(),
+                    line: ln,
+                    qualifier: None,
+                    is_method,
+                });
+            }
         }
 
         // Decorator references can appear without explicit call syntax (e.g. @traced).

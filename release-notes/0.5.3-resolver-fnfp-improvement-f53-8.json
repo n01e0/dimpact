@@ -1,0 +1,39 @@
+{
+  "baselineCommit": "1d97e9973caf82f7cb8cfa66358ef18556cb5b04",
+  "headCommit": "1d97e9973caf82f7cb8cfa66358ef18556cb5b04",
+  "case": "python monkeypatch metaclass protocol v3 callers",
+  "changedSymbolsBefore": [
+    "patched_dispatch"
+  ],
+  "impactedBefore": [
+    "execute",
+    "install_patch"
+  ],
+  "changedSymbolsAfter": [
+    "patched_dispatch"
+  ],
+  "impactedAfter": [
+    "execute",
+    "install_patch",
+    "invoke_protocol"
+  ],
+  "oracleImpacted": [
+    "execute",
+    "install_patch",
+    "invoke_protocol"
+  ],
+  "before": {
+    "fn": [
+      "invoke_protocol"
+    ],
+    "fp": [],
+    "fnCount": 1,
+    "fpCount": 0
+  },
+  "after": {
+    "fn": [],
+    "fp": [],
+    "fnCount": 0,
+    "fpCount": 0
+  }
+}

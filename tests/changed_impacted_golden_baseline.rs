@@ -167,6 +167,13 @@ fn changed_impacted_golden_baseline_matrix_v73() {
     let python_monkey_after =
         python_monkey_before.replace("payload.strip().upper()", "payload.strip().lower()");
 
+    let python_monkey_v3_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol_v3.py"
+    ));
+    let python_monkey_v3_after =
+        python_monkey_v3_before.replace("payload.strip().upper()", "payload.strip().lower()");
+
     let cases = vec![
         (
             "typescript",
@@ -231,6 +238,18 @@ fn changed_impacted_golden_baseline_matrix_v73() {
             python_monkey_after.as_str(),
             BTreeSet::from(["patched_run".to_string()]),
             BTreeSet::from(["install_patch".to_string(), "execute".to_string()]),
+        ),
+        (
+            "python",
+            "demo/monkey_v3.py",
+            python_monkey_v3_before,
+            python_monkey_v3_after.as_str(),
+            BTreeSet::from(["patched_dispatch".to_string()]),
+            BTreeSet::from([
+                "execute".to_string(),
+                "install_patch".to_string(),
+                "invoke_protocol".to_string(),
+            ]),
         ),
     ];
 
