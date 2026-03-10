@@ -126,17 +126,61 @@ for e in entries:
     bucket[key][reason] += 1
     samples[key].setdefault(reason, e["message"])
 
+CATEGORY_BY_REASON = {
+    "env-gate-disabled": "env",
+    "server-missing": "server",
+    "strict-lsp-unavailable": "server",
+    "changed-symbols-unavailable": "capability",
+    "callers-impact-unavailable": "capability",
+    "callees-impact-unavailable": "capability",
+    "both-impact-unavailable": "capability",
+    "callers-not-reported": "capability",
+    "callees-not-reported": "capability",
+    "both-not-reported": "capability",
+}
+
 # F2 policy: keep only minimal, reasoned residuals.
 # - operational prerequisites: env-gate-disabled / server-missing
+# - capability residual: strict-LSP capability/coverage mismatch (needs follow-up)
 # - actionable residual: anything else
 OPERATIONAL_REASONS = {"env-gate-disabled", "server-missing"}
+CAPABILITY_REASONS = {
+    "changed-symbols-unavailable",
+    "callers-impact-unavailable",
+    "callees-impact-unavailable",
+    "both-impact-unavailable",
+    "callers-not-reported",
+    "callees-not-reported",
+    "both-not-reported",
+}
+
+lane_category = {}
+category_totals = defaultdict(int)
+for key, reasons in bucket.items():
+    cat_counts = {"env": 0, "server": 0, "capability": 0, "other": 0}
+    for reason, cnt in reasons.items():
+        cat = CATEGORY_BY_REASON.get(reason, "other")
+        cat_counts[cat] += cnt
+        category_totals[cat] += cnt
+    lane_category[key] = cat_counts
 
 actionable = []
 operational = []
+capability_residual = []
 for key in sorted(bucket.keys()):
     reasons = bucket[key]
     non_operational = {k: v for k, v in reasons.items() if k not in OPERATIONAL_REASONS}
     op_only = {k: v for k, v in reasons.items() if k in OPERATIONAL_REASONS}
+    cap_only = {k: v for k, v in reasons.items() if k in CAPABILITY_REASONS}
+
+    if cap_only:
+        capability_residual.append(
+            {
+                "lane": key,
+                "reasons": cap_only,
+                "note": "capability residual (strict-LSP coverage/behavior mismatch)",
+            }
+        )
 
     if non_operational:
         actionable.append(
@@ -164,16 +208,20 @@ report = {
     "source": str(src),
     "totalSkipPrints": len(entries),
     "lanes": {k: dict(v) for k, v in sorted(bucket.items())},
+    "laneCategory": {k: v for k, v in sorted(lane_category.items())},
+    "categoryTotals": {k: category_totals.get(k, 0) for k in ["env", "server", "capability", "other"]},
     "samples": {k: v for k, v in sorted(samples.items())},
     "actionableResidual": actionable,
     "operationalResidual": operational,
+    "capabilityResidual": capability_residual,
     "summary": {
         "actionableResidualLanes": len(actionable),
         "operationalResidualLanes": len(operational),
+        "capabilityResidualLanes": len(capability_residual),
     },
     "policy": {
         "phase": "F2",
-        "rule": "residual is minimal when only env-gate-disabled/server-missing remain",
+        "rule": "residual is minimal when only env/server remain; capability residuals are tracked separately",
     },
 }
 
@@ -201,7 +249,31 @@ for lane in sorted(bucket.keys()):
             md.append(f"|  | {r} | {rs[r]} |")
 
 md.append("")
-md.append("## 2) actionable residual (non-operational)")
+md.append("## 2) reclassification by category (env/server/capability)")
+md.append("")
+md.append("| lane | env | server | capability | other |")
+md.append("|---|---:|---:|---:|---:|")
+for lane in sorted(lane_category.keys()):
+    c = lane_category[lane]
+    md.append(f"| {lane} | {c['env']} | {c['server']} | {c['capability']} | {c['other']} |")
+md.append("")
+md.append("category totals:")
+md.append(
+    f"- env={category_totals.get('env',0)}, server={category_totals.get('server',0)}, capability={category_totals.get('capability',0)}, other={category_totals.get('other',0)}"
+)
+
+md.append("")
+md.append("## 3) capability residual lanes")
+md.append("")
+md.append(f"- lanes: **{len(capability_residual)}**")
+if not capability_residual:
+    md.append("- none (0)")
+else:
+    for c in capability_residual:
+        md.append(f"- `{c['lane']}`: {c['note']}")
+
+md.append("")
+md.append("## 4) actionable residual (non-operational)")
 md.append("")
 md.append(f"- lanes: **{len(actionable)}**")
 if not actionable:
@@ -211,7 +283,7 @@ else:
         md.append(f"- `{a['lane']}`: {a['note']}")
 
 md.append("")
-md.append("## 3) minimal residual with reasons (operational prerequisites)")
+md.append("## 5) minimal residual with reasons (operational prerequisites)")
 md.append("")
 md.append(f"- lanes: **{len(operational)}**")
 if not operational:
@@ -221,10 +293,11 @@ else:
         md.append(f"- `{o['lane']}`: {o['note']}")
 
 md.append("")
-md.append("## 4) policy used")
+md.append("## 6) policy used")
 md.append("")
 md.append("- residual is acceptable when only `env-gate-disabled` / `server-missing` remain")
-md.append("- any other reason is treated as actionable residual")
+md.append("- capability-classified residual is tracked separately for strict-LSP coverage follow-up")
+md.append("- any remaining non-operational reason is treated as actionable residual")
 
 out_md.parent.mkdir(parents=True, exist_ok=True)
 out_md.write_text("\n".join(md) + "\n", encoding="utf-8")
