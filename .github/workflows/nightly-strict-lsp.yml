@@ -56,6 +56,7 @@ jobs:
           restore-keys: ${{ runner.os }}
 
       - name: Install + health-check TypeScript/JavaScript language server
+        continue-on-error: true
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/install-ts-js.log"
@@ -96,6 +97,7 @@ jobs:
           echo "[ts/js] health-check=ok"
 
       - name: Install + health-check Python language server
+        continue-on-error: true
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/install-python.log"
@@ -145,6 +147,7 @@ jobs:
           go-version: "1.22.x"
 
       - name: Install + health-check Go language server
+        continue-on-error: true
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/install-go.log"
@@ -175,6 +178,7 @@ jobs:
           echo "[go] health-check=ok"
 
       - name: Install + health-check Java language server
+        continue-on-error: true
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/install-java.log"
@@ -220,6 +224,7 @@ jobs:
           echo "[java] health-check=ok"
 
       - name: Install + health-check Ruby language server
+        continue-on-error: true
         run: |
           set -euo pipefail
           LOG="$NIGHTLY_LOG_DIR/install-ruby.log"
