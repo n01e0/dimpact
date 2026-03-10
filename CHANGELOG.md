@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.1 - draft
+
+_Change range: `v0.5.0..HEAD`._
+
+### Major changes
+- Completed post-release dependency intake with risk-first handling:
+  - high-risk updates were validated first (`actions/setup-go`, `tree-sitter`, `rusqlite`)
+  - dependency update PRs (`#338-#347`) were classified and merged under CI-green gating
+- Added confidence-operation documentation and defaults for production use:
+  - per-language confidence distribution sampling report
+  - recommended `--min-confidence` default policy (`inferred` in current phase)
+  - operational guide for `--exclude-dynamic-fallback` (precision/recall usage patterns)
+- Expanded real-corpus quality tracking for Ruby/Python with fixtureized miss patterns:
+  - corpus FN/FP measurement artifacts for python/ruby lanes
+  - new hard fixtures for call-chain/alias-return miss patterns
+- Fixed callees-direction impact/oracle mismatch and validated numeric improvement:
+  - adjusted impacted-node inclusion and edge filtering behavior in `src/impact.rs`
+  - python corpus re-measure improved from `FN=9, FP=1` to `FN=0, FP=0`
+
+### Operational changes
+- Added CI stability evidence for `precision_regression_gate` over recent main runs.
+- Updated branch protection required checks on `main` to include `precision_regression_gate`.
+- Verified gate enforcement on post-update PR flow (required checks include `precision_regression_gate` and must pass before merge).
+
+### Notes
+- Ruby strict-oracle corpus lane remained environment-sensitive (initialize-timeout in sampled runs); python lane was fully re-measured after analyzer fix.
+- Release notes under `release-notes/0.5.1-*` capture detailed evidence and before/after measurement snapshots.
+
 ## 0.5.0 - draft
 
 _Change range: `v0.4.1..HEAD`._
