@@ -67,6 +67,20 @@ CLI Overview
   - `--seed-symbol LANG:PATH:KIND:NAME:LINE` : seed symbols by ID (repeatable)
   - `--seed-json PATH|'-'|JSON` : seed symbols via JSON array or file or stdin
   - `--per-seed`              : group impact per changed/seed symbol; when `--direction both`, outputs separate caller and callee results
+
+### Operational guide for `--exclude-dynamic-fallback`
+- Purpose: remove low-certainty `dynamic_fallback` edges from traversal/output when you want a precision-first view.
+- Recommended usage profile:
+  - CI / review gate (precision-first):
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence inferred --exclude-dynamic-fallback -f json`
+  - Recall investigation (intentionally broad):
+    - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence dynamic-fallback -f json`
+- Practical rules:
+  - `--exclude-dynamic-fallback` is effectively equivalent to `--min-confidence inferred` for edge filtering.
+  - If `--min-confidence inferred` is already set, adding `--exclude-dynamic-fallback` is explicit but functionally redundant.
+  - For strictest triage, use `--min-confidence confirmed` (the flag then has no additional effect).
+- Validation tip:
+  - Compare `confidence_filter.input_edge_count` vs `confidence_filter.kept_edge_count` in JSON/YAML output to confirm expected filtering.
   
 ### PDG Visualization
 - Generate PDG in `dot` format with `--with-pdg` and `-f dot`:
