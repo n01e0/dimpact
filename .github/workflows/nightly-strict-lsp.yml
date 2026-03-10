@@ -88,7 +88,7 @@ jobs:
           fi
           echo "[python] health-check=ok"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.22.x"
 
@@ -99,7 +99,7 @@ jobs:
           exec > >(tee -a "$LOG") 2>&1
           echo "[go] go=$(go version)"
 
-          if ! go install golang.org/x/tools/gopls@latest; then
+          if ! GOTOOLCHAIN=auto go install golang.org/x/tools/gopls@latest; then
             echo "::error::[go] go install failed (gopls@latest)"
             exit 1
           fi
@@ -477,7 +477,7 @@ jobs:
           echo "[retry] install/startup retry path"
 
           npm install -g typescript typescript-language-server pyright || true
-          go install golang.org/x/tools/gopls@latest || true
+          GOTOOLCHAIN=auto go install golang.org/x/tools/gopls@latest || true
 
           mkdir -p "$HOME/.local/jdtls" "$HOME/.local/bin"
           curl --retry 2 --retry-delay 2 --retry-all-errors -fsSL \
