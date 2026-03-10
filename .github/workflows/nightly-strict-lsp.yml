@@ -21,6 +21,8 @@ jobs:
     container: ghcr.io/n01e0/dimpact-ci:latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
 
       - name: Prepare nightly log directory
         run: |
@@ -305,13 +307,34 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Summarize strict real-LSP migration status (skip-safe/fail-fast)
+      - name: Summarize strict real-LSP migration status + residual trend
         if: always()
         run: |
           set -euo pipefail
           PROGRESS_MD="$NIGHTLY_LOG_DIR/strict-e2e-migration-summary.md"
+          RESIDUAL_AFTER_JSON="$NIGHTLY_LOG_DIR/strict-e2e-residual-after.json"
+          RESIDUAL_AFTER_MD="$NIGHTLY_LOG_DIR/strict-e2e-residual-after.md"
+          RESIDUAL_BEFORE_JSON="$NIGHTLY_LOG_DIR/strict-e2e-residual-before.json"
+          RESIDUAL_TREND_MD="$NIGHTLY_LOG_DIR/strict-e2e-residual-trend.md"
+
           bash scripts/summarize-strict-e2e-migration-progress.sh tests/engine_lsp.rs "$PROGRESS_MD"
+          bash scripts/summarize-strict-e2e-skips.sh tests/engine_lsp.rs "$RESIDUAL_AFTER_JSON" "$RESIDUAL_AFTER_MD"
+
+          if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git show HEAD^:tests/engine_lsp.rs > /tmp/engine_lsp.prev.rs
+            bash scripts/summarize-strict-e2e-skips.sh /tmp/engine_lsp.prev.rs "$RESIDUAL_BEFORE_JSON" /tmp/strict-e2e-residual-before.md
+          else
+            cp "$RESIDUAL_AFTER_JSON" "$RESIDUAL_BEFORE_JSON"
+          fi
+
+          python3 scripts/render-strict-e2e-residual-trend.py \
+            "$RESIDUAL_BEFORE_JSON" \
+            "$RESIDUAL_AFTER_JSON" \
+            > "$RESIDUAL_TREND_MD"
+
           cat "$PROGRESS_MD" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RESIDUAL_AFTER_MD" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RESIDUAL_TREND_MD" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run strict real-LSP engine_lsp suite (env-gated)
         id: strict_e2e_initial
