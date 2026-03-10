@@ -89,7 +89,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload check/clippy logs artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-check-logs
           path: |
@@ -146,7 +146,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload cargo test logs artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-test-logs
           path: cargo-test.log
@@ -207,7 +207,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload precision regression artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-precision-regression
           path: |
@@ -297,7 +297,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload graduation check log artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-lsp-graduation-check
           path: lsp-graduation-check.log
