@@ -656,6 +656,71 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                 });
             }
         }
+
+        // Dynamic method definitions via define_method(...)
+        // Capture literal/symbol names so callers-impact can traverse those nodes.
+        use regex::Regex;
+        let re_symbol_lit = Regex::new(r#"^:([A-Za-z_][A-Za-z0-9_?!]*)$"#).unwrap();
+        let re_string_lit = Regex::new(r#"^[\"']([A-Za-z_][A-Za-z0-9_?!]*)[\"']$"#).unwrap();
+        let mut seen_dynamic_methods: std::collections::HashSet<(String, u32)> = out
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Method))
+            .map(|s| (s.name.clone(), s.range.start_line))
+            .collect();
+
+        for caps in self.runner.run_captures(source, &self.queries.calls) {
+            let Some(name_cap) = caps.iter().find(|c| c.name == "name") else {
+                continue;
+            };
+            let call_name = source[name_cap.start..name_cap.end].trim();
+            if call_name != "define_method" {
+                continue;
+            }
+            let Some(callnode) = caps.iter().find(|c| c.name == "call") else {
+                continue;
+            };
+            let ln = byte_to_line(&offs, callnode.start);
+            let text = &source[callnode.start..callnode.end];
+            let Some(raw_arg) = extract_call_args(text, "define_method", 1)
+                .into_iter()
+                .next()
+            else {
+                continue;
+            };
+            let arg = strip_ruby_inline_comment(raw_arg.as_str());
+            let dynamic_name = re_symbol_lit
+                .captures(&arg)
+                .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+                .or_else(|| {
+                    re_string_lit
+                        .captures(&arg)
+                        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+                });
+            let Some(name) = dynamic_name else {
+                continue;
+            };
+            if !seen_dynamic_methods.insert((name.clone(), ln)) {
+                continue;
+            }
+            let start_idx = (ln.saturating_sub(1)) as usize;
+            let mut el = ln;
+            if start_idx < lines.len() {
+                let end_idx = find_ruby_block_end(&lines, start_idx);
+                el = ((end_idx as u32) + 1).max(ln);
+            }
+            out.push(Symbol {
+                id: SymbolId::new("ruby", path, &SymbolKind::Method, &name, ln),
+                name,
+                kind: SymbolKind::Method,
+                file: path.to_string(),
+                range: TextRange {
+                    start_line: ln,
+                    end_line: el,
+                },
+                language: "ruby".to_string(),
+            });
+        }
+
         out
     }
 
@@ -799,7 +864,44 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
             resolve_dynamic_names(arg_raw, ln).into_iter().next()
         };
 
-        for caps in self.runner.run_captures(source, &self.queries.calls) {
+        let call_caps = self.runner.run_captures(source, &self.queries.calls);
+        let mut alias_method_targets: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for caps in &call_caps {
+            let name_cap = caps.iter().find(|c| c.name == "name");
+            let Some(n) = name_cap else {
+                continue;
+            };
+            let name = source[n.start..n.end].trim();
+            if name != "alias_method" {
+                continue;
+            }
+            let Some(callnode) = caps.iter().find(|c| c.name == "call") else {
+                continue;
+            };
+            let ln = byte_to_line(&offs, callnode.start);
+            let text = &source[callnode.start..callnode.end];
+            let args = extract_call_args(text, "alias_method", 2);
+            if args.len() < 2 {
+                continue;
+            }
+            let alias_names = resolve_dynamic_names(&args[0], ln);
+            let original_names = resolve_dynamic_names(&args[1], ln);
+            if alias_names.is_empty() || original_names.is_empty() {
+                continue;
+            }
+            for alias in alias_names {
+                alias_method_targets
+                    .entry(alias)
+                    .or_default()
+                    .extend(original_names.clone());
+            }
+        }
+        for targets in alias_method_targets.values_mut() {
+            *targets = dedup_names(targets.clone());
+        }
+
+        for caps in call_caps {
             let name_cap = caps.iter().find(|c| c.name == "name");
             if let Some(n) = name_cap {
                 let name = source[n.start..n.end].to_string();
@@ -821,7 +923,14 @@ impl LanguageAnalyzer for SpecRubyAnalyzer {
                         let resolved_names = resolve_dynamic_names(&arg_raw, ln);
                         if !resolved_names.is_empty() {
                             suppress_base_call_ref = true;
+                            let mut expanded_names = Vec::new();
                             for resolved in resolved_names {
+                                expanded_names.push(resolved.clone());
+                                if let Some(alias_targets) = alias_method_targets.get(&resolved) {
+                                    expanded_names.extend(alias_targets.clone());
+                                }
+                            }
+                            for resolved in dedup_names(expanded_names) {
                                 out.push(UnresolvedRef {
                                     name: resolved,
                                     kind: RefKind::Call,
@@ -1507,6 +1616,14 @@ end
             "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_dsl_method_missing_chain_v4.rb"
         ));
         let ana = SpecRubyAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/ruby_dynamic_dsl_chain_v4.rb", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "emit_created" && matches!(s.kind, SymbolKind::Method)
+        }));
+        assert!(syms.iter().any(|s| {
+            s.name == "emit_cancelled" && matches!(s.kind, SymbolKind::Method)
+        }));
 
         let refs = ana.unresolved_refs("pkg/ruby_dynamic_dsl_chain_v4.rb", src);
         let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
