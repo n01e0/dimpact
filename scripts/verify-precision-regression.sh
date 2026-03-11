@@ -3,8 +3,8 @@ set -euo pipefail
 
 FN_THRESHOLD="${DIMPACT_PRECISION_FN_MAX:-0}"
 FP_THRESHOLD="${DIMPACT_PRECISION_FP_MAX:-0}"
-DEFAULT_FN_THRESHOLD_BY_LANG="go=0,java=0,python=0,ruby=0,rust=0,tsx=0,typescript=0"
-DEFAULT_FP_THRESHOLD_BY_LANG="go=0,java=0,python=0,ruby=0,rust=0,tsx=0,typescript=0"
+DEFAULT_FN_THRESHOLD_BY_LANG="typescript=0,javascript=0,tsx=0,rust=0,go=0,java=0,ruby=0,python=0"
+DEFAULT_FP_THRESHOLD_BY_LANG="typescript=0,javascript=0,tsx=0,rust=0,go=0,java=0,ruby=0,python=0"
 FN_THRESHOLD_BY_LANG="${DIMPACT_PRECISION_FN_MAX_BY_LANG:-$DEFAULT_FN_THRESHOLD_BY_LANG}"
 FP_THRESHOLD_BY_LANG="${DIMPACT_PRECISION_FP_MAX_BY_LANG:-$DEFAULT_FP_THRESHOLD_BY_LANG}"
 REPORT_PATH="precision-regression-report.json"

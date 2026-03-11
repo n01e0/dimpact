@@ -20,8 +20,8 @@ env:
   DIMPACT_PRECISION_FN_MAX: "0"
   DIMPACT_PRECISION_FP_MAX: "0"
   # Language-specific threshold tuning (lang=threshold, comma-separated)
-  DIMPACT_PRECISION_FN_MAX_BY_LANG: "typescript=0,tsx=0,rust=0,go=0,java=0,ruby=0,python=0"
-  DIMPACT_PRECISION_FP_MAX_BY_LANG: "typescript=0,tsx=0,rust=0,go=0,java=0,ruby=0,python=0"
+  DIMPACT_PRECISION_FN_MAX_BY_LANG: "typescript=0,javascript=0,tsx=0,rust=0,go=0,java=0,ruby=0,python=0"
+  DIMPACT_PRECISION_FP_MAX_BY_LANG: "typescript=0,javascript=0,tsx=0,rust=0,go=0,java=0,ruby=0,python=0"
 
 jobs:
   check:
