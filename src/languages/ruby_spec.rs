@@ -1501,6 +1501,48 @@ end
     }
 
     #[test]
+    fn ruby_dynamic_fixture_dsl_method_missing_dispatch_chain_v4() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_dsl_method_missing_chain_v4.rb"
+        ));
+        let ana = SpecRubyAnalyzer::new();
+
+        let refs = ana.unresolved_refs("pkg/ruby_dynamic_dsl_chain_v4.rb", src);
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]", r.name, r.line, q),
+                None => format!("{}@{}", r.name, r.line),
+            })
+            .collect();
+
+        assert!(names.contains(&"alias_method"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"define_method"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"dispatch_created"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"dispatch_cancelled"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"emit_created"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"emit_cancelled"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"decorate_created"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"decorate_cancelled"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"route_created"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"route_unknown"), "refs={refs_dbg:?}");
+        assert!(names.contains(&"persist_unknown"), "refs={refs_dbg:?}");
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "method_missing" && r.qualifier.is_none() && r.is_method),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "respond_to_missing?" && r.qualifier.is_none() && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+    }
+
+    #[test]
     fn ruby_dynamic_fixture_resolver_combo_regression() {
         let src = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
