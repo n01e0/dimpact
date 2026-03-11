@@ -15,8 +15,8 @@ env:
   CARGO_TERM_COLOR: always
   NIGHTLY_LOG_DIR: ${{ github.workspace }}/nightly-logs
   # Lane-level strict real-LSP policy (fail-fast promotion order).
-  # Q54-2 promotes TS/JS alongside Go; remaining lanes stay skip-safe.
-  STRICT_LSP_ACTIVE_LANES: "go,typescript,javascript"
+  # Q54-3 promotes Java alongside existing Go+TS/JS lanes; remaining lanes stay skip-safe.
+  STRICT_LSP_ACTIVE_LANES: "go,typescript,javascript,java"
 
 jobs:
   strict_real_lsp_e2e:
@@ -273,7 +273,7 @@ jobs:
           java_install='${{ steps.install_java.outcome }}'
           ruby_install='${{ steps.install_ruby.outcome }}'
 
-          active_lanes=",${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript},"
+          active_lanes=",${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java},"
           lane_allowed() {
             local lane="$1"
             [[ "$active_lanes" == *",${lane},"* ]]
@@ -328,7 +328,7 @@ jobs:
               set_gate_unset "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
             fi
           else
-            ts_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript})"
+            ts_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java})"
             set_gate_unset "DIMPACT_E2E_STRICT_LSP_TYPESCRIPT" "$ts_reason"
           fi
 
@@ -342,7 +342,7 @@ jobs:
               set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
             fi
           else
-            js_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript})"
+            js_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java})"
             set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVASCRIPT" "$js_reason"
           fi
 
@@ -356,7 +356,7 @@ jobs:
               set_gate_unset "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
             fi
           else
-            go_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript})"
+            go_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java})"
             set_gate_unset "DIMPACT_E2E_STRICT_LSP_GO" "$go_reason"
           fi
 
@@ -370,7 +370,7 @@ jobs:
               set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
             fi
           else
-            java_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript})"
+            java_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java})"
             set_gate_unset "DIMPACT_E2E_STRICT_LSP_JAVA" "$java_reason"
           fi
 
@@ -384,7 +384,7 @@ jobs:
               set_gate_unset "DIMPACT_E2E_STRICT_LSP_RUBY" "$ruby_reason"
             fi
           else
-            ruby_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript})"
+            ruby_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java})"
             set_gate_unset "DIMPACT_E2E_STRICT_LSP_RUBY" "$ruby_reason"
           fi
 
@@ -398,7 +398,7 @@ jobs:
               set_gate_unset "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
             fi
           else
-            python_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript})"
+            python_reason="disabled by STRICT_LSP_ACTIVE_LANES policy (active=${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java})"
             set_gate_unset "DIMPACT_E2E_STRICT_LSP_PYTHON" "$python_reason"
           fi
 
@@ -431,7 +431,7 @@ jobs:
             echo "| ruby | ${DIMPACT_E2E_STRICT_LSP_RUBY:-unset} | ${ruby_reason} |"
             echo "| python | ${DIMPACT_E2E_STRICT_LSP_PYTHON:-unset} | ${python_reason} |"
             echo
-            echo "active lane policy: ${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript}"
+            echo "active lane policy: ${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java}"
             echo "enabled strict lanes: ${enabled_count}"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -449,7 +449,7 @@ jobs:
             echo "| java | ${{ steps.install_java.outcome }} | ${{ steps.preflight.outputs.strict_lsp_java }} |"
             echo "| ruby | ${{ steps.install_ruby.outcome }} | ${{ steps.preflight.outputs.strict_lsp_ruby }} |"
             echo
-            echo "active lane policy: ${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript}"
+            echo "active lane policy: ${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java}"
             echo "strict lanes enabled count: ${{ steps.preflight.outputs.strict_lsp_enabled_count }}"
             echo "strict lanes any enabled: ${{ steps.preflight.outputs.strict_lsp_any }}"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -677,7 +677,7 @@ jobs:
 
           # Re-evaluate lane gates after retry setup so recovered installs can be exercised.
           # Keep the same stabilization lane policy as preflight.
-          active_lanes=",${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript},"
+          active_lanes=",${STRICT_LSP_ACTIVE_LANES:-go,typescript,javascript,java},"
           lane_allowed() {
             local lane="$1"
             [[ "$active_lanes" == *",${lane},"* ]]
