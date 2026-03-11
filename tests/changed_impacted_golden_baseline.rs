@@ -174,6 +174,36 @@ fn changed_impacted_golden_baseline_matrix_v73() {
     let python_monkey_v3_after =
         python_monkey_v3_before.replace("payload.strip().upper()", "payload.strip().lower()");
 
+    let ruby_dynamic_v4_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ruby/analyzer_hard_cases_dynamic_dsl_method_missing_chain_v4.rb"
+    ));
+    let ruby_dynamic_v4_after =
+        ruby_dynamic_v4_before.replace("send(target, payload)", "send(target, payload.to_s)");
+
+    let python_monkey_v4_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol_v4.py"
+    ));
+    let python_monkey_v4_after = python_monkey_v4_before
+        .replace("return payload.strip().lower()", "return payload.strip().upper()");
+
+    let go_fp_v4_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/go/analyzer_hard_cases_extraction_fp_points_v4.go"
+    ));
+    let go_fp_v4_after = go_fp_v4_before.replace(
+        "return r.inner.Handle(ctx)",
+        "return r.inner.Handle(context.Background())",
+    );
+
+    let java_fp_v4_before = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/java/analyzer_hard_cases_extraction_fp_points_v4.java"
+    ));
+    let java_fp_v4_after =
+        java_fp_v4_before.replace("return payload.trim();", "return payload.strip();");
+
     let go_comment_fp_before = r#"package demo
 
 func helper() int { return 1 }
@@ -244,6 +274,18 @@ class Demo {
             BTreeSet::new(),
         ),
         (
+            "java",
+            "demo/ExtractionFpPointsV4.java",
+            java_fp_v4_before,
+            java_fp_v4_after.as_str(),
+            BTreeSet::from([
+                "DefaultRouter".to_string(),
+                "ExtractionFpPointsV4".to_string(),
+                "dispatch".to_string(),
+            ]),
+            BTreeSet::from(["Router".to_string(), "run".to_string()]),
+        ),
+        (
             "go",
             "demo/a.go",
             go_before,
@@ -260,12 +302,32 @@ class Demo {
             BTreeSet::new(),
         ),
         (
+            "go",
+            "demo/go_fp_v4.go",
+            go_fp_v4_before,
+            go_fp_v4_after.as_str(),
+            BTreeSet::from(["dispatch".to_string()]),
+            BTreeSet::from(["run".to_string()]),
+        ),
+        (
             "ruby",
             "demo/a.rb",
             ruby_before,
             ruby_after.as_str(),
             BTreeSet::from(["DynamicDispatch".to_string(), "target_sym".to_string()]),
             BTreeSet::from(["execute".to_string()]),
+        ),
+        (
+            "ruby",
+            "demo/ruby_v4.rb",
+            ruby_dynamic_v4_before,
+            ruby_dynamic_v4_after.as_str(),
+            BTreeSet::from([
+                "DynamicDslMethodMissingChainV4".to_string(),
+                "emit_cancelled".to_string(),
+                "emit_created".to_string(),
+            ]),
+            BTreeSet::from(["method_missing".to_string()]),
         ),
         (
             "python",
@@ -292,6 +354,21 @@ class Demo {
             BTreeSet::from([
                 "execute".to_string(),
                 "install_patch".to_string(),
+                "invoke_protocol".to_string(),
+            ]),
+        ),
+        (
+            "python",
+            "demo/monkey_v4.py",
+            python_monkey_v4_before,
+            python_monkey_v4_after.as_str(),
+            BTreeSet::from(["patched_process".to_string()]),
+            BTreeSet::from([
+                "__getattr__".to_string(),
+                "_make".to_string(),
+                "execute".to_string(),
+                "install_patch".to_string(),
+                "invoke_class".to_string(),
                 "invoke_protocol".to_string(),
             ]),
         ),
