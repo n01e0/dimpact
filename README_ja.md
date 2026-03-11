@@ -104,6 +104,23 @@ dimpact id --name foo -f json
 - 確認ポイント:
   - JSON/YAML の `confidence_filter.input_edge_count` と `confidence_filter.kept_edge_count` を比較し、想定どおりに除外されたか確認します。
 
+## 言語別 推奨 `--min-confidence`（Q54-10）
+
+Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.md`）に基づく、現時点の運用推奨値です。
+
+| 言語 | 推奨 `--min-confidence` | 観測 inferred edge 数 | 理由 |
+| --- | --- | ---: | --- |
+| typescript | `inferred` | 3 | サンプルの impacted edge が inferred。`confirmed` だと観測シグナルを落とす |
+| tsx | `inferred` | 0 | サンプルでは impacted edge なし。運用一貫性のため global default に合わせる |
+| rust | `inferred` | 0 | サンプルでは impacted edge なし。運用一貫性のため global default に合わせる |
+| java | `inferred` | 19 | サンプルの impacted edge が inferred。`confirmed` だと観測シグナルを落とす |
+| go | `inferred` | 0 | サンプルでは impacted edge なし。運用一貫性のため global default に合わせる |
+| ruby | `inferred` | 6 | サンプルの impacted edge が inferred。`confirmed` だと観測シグナルを落とす |
+| python | `inferred` | 12 | サンプルの impacted edge が inferred。`confirmed` だと観測シグナルを落とす |
+
+- 推奨 global default は `inferred`。
+- 誤判定コストが高い厳格レビュー/CI トリアージでは `--op-profile precision-first`（または `--min-confidence confirmed --exclude-dynamic-fallback`）を使用してください。
+
 ## PDG 可視化
 `--with-pdg` と `-f dot` を組み合わせて PDG を dot 形式で出力できます。
 ```bash
