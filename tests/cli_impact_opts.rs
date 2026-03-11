@@ -375,3 +375,142 @@ fn cli_impact_confidence_fixture_compares_confirmed_vs_inferred() {
     assert!(!inferred_edges.is_empty());
     assert!(confirmed_edges.is_empty());
 }
+
+#[test]
+fn cli_impact_op_profile_balanced_matches_min_confidence_inferred() {
+    let (_tmp, repo) = setup_repo_triple();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut prof_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let prof_assert = prof_cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--op-profile")
+        .arg("balanced")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff.clone())
+        .assert()
+        .success();
+    let prof_v: serde_json::Value =
+        serde_json::from_slice(prof_assert.get_output().stdout.as_ref()).unwrap();
+
+    let mut explicit_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let explicit_assert = explicit_cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--min-confidence")
+        .arg("inferred")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff)
+        .assert()
+        .success();
+    let explicit_v: serde_json::Value =
+        serde_json::from_slice(explicit_assert.get_output().stdout.as_ref()).unwrap();
+
+    let prof_impacted: std::collections::BTreeSet<&str> = prof_v["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    let explicit_impacted: std::collections::BTreeSet<&str> = explicit_v["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert_eq!(prof_impacted, explicit_impacted);
+
+    let prof_edges = prof_v["edges"].as_array().unwrap();
+    let explicit_edges = explicit_v["edges"].as_array().unwrap();
+    assert_eq!(prof_edges.len(), explicit_edges.len());
+
+    let cf = &prof_v["confidence_filter"];
+    assert_eq!(cf["min_confidence"], "inferred");
+    assert_eq!(cf["exclude_dynamic_fallback"], false);
+}
+
+#[test]
+fn cli_impact_op_profile_precision_first_matches_confirmed_plus_exclude_dynamic_fallback() {
+    let (_tmp, repo) = setup_repo_triple();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut prof_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let prof_assert = prof_cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--op-profile")
+        .arg("precision-first")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff.clone())
+        .assert()
+        .success();
+    let prof_v: serde_json::Value =
+        serde_json::from_slice(prof_assert.get_output().stdout.as_ref()).unwrap();
+
+    let mut explicit_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let explicit_assert = explicit_cmd
+        .current_dir(&repo)
+        .arg("--mode")
+        .arg("impact")
+        .arg("--direction")
+        .arg("callers")
+        .arg("--with-edges")
+        .arg("--min-confidence")
+        .arg("confirmed")
+        .arg("--exclude-dynamic-fallback")
+        .arg("--lang")
+        .arg("rust")
+        .arg("--format")
+        .arg("json")
+        .write_stdin(diff)
+        .assert()
+        .success();
+    let explicit_v: serde_json::Value =
+        serde_json::from_slice(explicit_assert.get_output().stdout.as_ref()).unwrap();
+
+    let prof_impacted: std::collections::BTreeSet<&str> = prof_v["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    let explicit_impacted: std::collections::BTreeSet<&str> = explicit_v["impacted_symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert_eq!(prof_impacted, explicit_impacted);
+
+    let prof_edges = prof_v["edges"].as_array().unwrap();
+    let explicit_edges = explicit_v["edges"].as_array().unwrap();
+    assert_eq!(prof_edges.len(), explicit_edges.len());
+
+    let cf = &prof_v["confidence_filter"];
+    assert_eq!(cf["min_confidence"], "confirmed");
+    assert_eq!(cf["exclude_dynamic_fallback"], true);
+}
