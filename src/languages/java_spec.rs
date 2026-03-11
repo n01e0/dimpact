@@ -1114,4 +1114,65 @@ public class Main {
             Some("java::util::function::BiFunction")
         );
     }
+
+    #[test]
+    fn java_hard_case_fixture_extraction_fp_points_v4() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/java/analyzer_hard_cases_extraction_fp_points_v4.java"
+        ));
+        let ana = SpecJavaAnalyzer::new();
+
+        let syms = ana.symbols_in_file("demo/ExtractionFpPointsV4.java", src);
+        assert!(syms.iter().any(|s| {
+            s.name == "ExtractionFpPointsV4" && matches!(s.kind, SymbolKind::Struct)
+        }));
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "run" && matches!(s.kind, SymbolKind::Method))
+        );
+
+        let refs = ana.unresolved_refs("demo/ExtractionFpPointsV4.java", src);
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "dispatch" && r.qualifier.as_deref() == Some("router") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "invoke" && r.qualifier.is_none() && !r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "apply" && r.qualifier.as_deref() == Some("fn") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+
+        assert!(
+            !refs.iter().any(|r| r.name == "missing"),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            !refs.iter().any(|r| r.name == "helper"),
+            "refs={refs_dbg:?}"
+        );
+
+        let imports = ana.imports_in_file("demo/ExtractionFpPointsV4.java", src);
+        assert_eq!(
+            imports.get("Function").map(String::as_str),
+            Some("java::util::function::Function")
+        );
+    }
 }
