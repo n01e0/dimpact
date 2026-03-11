@@ -1,0 +1,65 @@
+{
+  "runId": "791a60bd-36db-42b5-a573-7d230690c672",
+  "generatedAt": "2026-03-11T08:18:50.099157+00:00",
+  "sourceReport": "/tmp/q54-10-precision.json",
+  "gateStatus": "passed",
+  "distributionByLanguage": {
+    "typescript": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 3,
+      "dynamic-fallback": 0,
+      "total_edges": 3
+    },
+    "tsx": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 0,
+      "dynamic-fallback": 0,
+      "total_edges": 0
+    },
+    "rust": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 0,
+      "dynamic-fallback": 0,
+      "total_edges": 0
+    },
+    "java": {
+      "cases": 2,
+      "confirmed": 0,
+      "inferred": 19,
+      "dynamic-fallback": 0,
+      "total_edges": 19
+    },
+    "go": {
+      "cases": 2,
+      "confirmed": 0,
+      "inferred": 0,
+      "dynamic-fallback": 0,
+      "total_edges": 0
+    },
+    "ruby": {
+      "cases": 1,
+      "confirmed": 0,
+      "inferred": 6,
+      "dynamic-fallback": 0,
+      "total_edges": 6
+    },
+    "python": {
+      "cases": 2,
+      "confirmed": 0,
+      "inferred": 12,
+      "dynamic-fallback": 0,
+      "total_edges": 12
+    }
+  },
+  "overall": {
+    "cases": 10,
+    "confirmed": 0,
+    "inferred": 40,
+    "dynamic-fallback": 0,
+    "total_edges": 40
+  },
+  "reproductionCommand": "bash scripts/verify-precision-regression.sh --report /tmp/q54-10-precision.json"
+}
