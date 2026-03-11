@@ -100,3 +100,15 @@ fail-fast 化したレーンで以下が連続した場合は一時的に skip-s
 ### 判定
 - 現時点の GA 判定チェックはすべて pass。
 - required-check 相当の CI レーン（`lsp_graduation_check`）と nightly レーンの両方で同スクリプトを実行する構成。
+
+## Q54 quality-gates 反映サマリ
+
+- Q54-1 で strict real-LSP skip-safe 残件を再棚卸し（language × direction）し、actionable residual は 0 を確認。
+- Q54-2〜Q54-4 で fail-fast 昇格を段階適用し、nightly policy `STRICT_LSP_ACTIVE_LANES` は
+  `go,typescript,javascript,java,ruby,python` まで拡張済み。
+- これにより、strict real-LSP 対象6言語は policy 上すべて active fail-fast 側。
+- 参照:
+  - `release-notes/0.5.4-strict-real-lsp-skip-safe-inventory-q54-1.md`
+  - `release-notes/0.5.4-ts-js-fail-fast-promotion-q54-2.md`
+  - `release-notes/0.5.4-go-java-fail-fast-promotion-q54-3.md`
+  - `release-notes/0.5.4-ruby-python-fail-fast-promotion-q54-4.md`
