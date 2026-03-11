@@ -87,6 +87,23 @@ CLI Overview
     - `git diff --no-ext-diff | dimpact impact --direction callers --with-edges --min-confidence dynamic-fallback -f json`
 - Validation tip:
   - Compare `confidence_filter.input_edge_count` vs `confidence_filter.kept_edge_count` in JSON/YAML output to confirm expected filtering.
+
+### Recommended `--min-confidence` by language (Q54-10)
+
+Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10.md`), the current operational recommendations are:
+
+| Language | Recommended `--min-confidence` | observed inferred edges | Rationale |
+| --- | --- | ---: | --- |
+| typescript | `inferred` | 3 | sampled impacted edges are inferred; `confirmed` would drop observed signal |
+| tsx | `inferred` | 0 | no impacted edges in sampled corpus; keep global default for consistency |
+| rust | `inferred` | 0 | no impacted edges in sampled corpus; keep global default for consistency |
+| java | `inferred` | 19 | sampled impacted edges are inferred; `confirmed` would drop observed signal |
+| go | `inferred` | 0 | no impacted edges in sampled corpus; keep global default for consistency |
+| ruby | `inferred` | 6 | sampled impacted edges are inferred; `confirmed` would drop observed signal |
+| python | `inferred` | 12 | sampled impacted edges are inferred; `confirmed` would drop observed signal |
+
+- Recommended global default: `inferred`.
+- For strict review/CI triage where false positives are costly, use `--op-profile precision-first` (or `--min-confidence confirmed --exclude-dynamic-fallback`).
   
 ### PDG Visualization
 - Generate PDG in `dot` format with `--with-pdg` and `-f dot`:
