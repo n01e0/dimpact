@@ -1,0 +1,43 @@
+{
+  "runId": "791a60bd-36db-42b5-a573-7d230690c672",
+  "taskId": "Q54-8",
+  "baselineCommit": "218e5626074a680610be4eb941642e359782d798",
+  "headCommit": "218e5626074a680610be4eb941642e359782d798",
+  "case": {
+    "id": "ruby-define_method-dynamic-chain-v4",
+    "language": "ruby",
+    "fixture": "tests/fixtures/ruby/analyzer_hard_cases_dynamic_dsl_method_missing_chain_v4.rb",
+    "mutation": {
+      "from": "send(target, payload)",
+      "to": "send(target, payload.to_s)"
+    },
+    "oracleImpacted": [
+      "method_missing"
+    ],
+    "changedSymbolsBefore": [
+      "DynamicDslMethodMissingChainV4"
+    ],
+    "impactedBefore": [],
+    "changedSymbolsAfter": [
+      "DynamicDslMethodMissingChainV4",
+      "emit_created"
+    ],
+    "impactedAfter": [
+      "method_missing"
+    ],
+    "before": {
+      "fn": [
+        "method_missing"
+      ],
+      "fp": [],
+      "fnCount": 1,
+      "fpCount": 0
+    },
+    "after": {
+      "fn": [],
+      "fp": [],
+      "fnCount": 0,
+      "fpCount": 0
+    }
+  }
+}
