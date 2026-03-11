@@ -704,5 +704,66 @@ func run() int {
                 && r.line == 20
         }));
     }
+
+    #[test]
+    fn go_hard_case_fixture_extraction_fp_points_v4() {
+        let src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/go/analyzer_hard_cases_extraction_fp_points_v4.go"
+        ));
+        let ana = SpecGoAnalyzer::new();
+
+        let syms = ana.symbols_in_file("pkg/hard_v4_go_fp_points.go", src);
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "dispatch" && matches!(s.kind, SymbolKind::Method))
+        );
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "run" && matches!(s.kind, SymbolKind::Function))
+        );
+
+        let refs = ana.unresolved_refs("pkg/hard_v4_go_fp_points.go", src);
+        let refs_dbg: Vec<_> = refs
+            .iter()
+            .map(|r| match &r.qualifier {
+                Some(q) => format!("{}@{}[{}]/{}", r.name, r.line, q, r.is_method),
+                None => format!("{}@{}/{}", r.name, r.line, r.is_method),
+            })
+            .collect();
+
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "Handle" && r.qualifier.as_deref() == Some("r.inner") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "dispatch" && r.qualifier.as_deref() == Some("route") && r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.name == "invoke" && r.qualifier.is_none() && !r.is_method),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            refs.iter().any(|r| {
+                r.name == "Sprintf" && r.qualifier.as_deref() == Some("fmt") && !r.is_method
+            }),
+            "refs={refs_dbg:?}"
+        );
+
+        assert!(
+            !refs.iter().any(|r| r.name == "Missing"),
+            "refs={refs_dbg:?}"
+        );
+        assert!(
+            !refs.iter().any(|r| r.name == "Printf"),
+            "refs={refs_dbg:?}"
+        );
+    }
 }
 
