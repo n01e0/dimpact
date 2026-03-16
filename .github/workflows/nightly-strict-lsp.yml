@@ -52,7 +52,7 @@ jobs:
           mkdir -p "$NIGHTLY_LOG_DIR"
 
       - name: Cache CARGO_HOME
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo
           key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
