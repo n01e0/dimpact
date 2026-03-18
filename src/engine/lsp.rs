@@ -1230,36 +1230,22 @@ impl super::AnalysisEngine for LspEngine {
                                 let (callees, extra_edges) =
                                     scan_callees_for_changed(&mut _sess, &changed.changed_symbols);
                                 if !callees.is_empty() {
-                                    let mut files: Vec<String> =
-                                        callees.iter().map(|s| s.file.clone()).collect();
-                                    files.sort();
-                                    files.dedup();
-                                    let edges = if opts.with_edges.unwrap_or(false) {
-                                        extra_edges
-                                    } else {
-                                        Vec::new()
-                                    };
-                                    let mut impacted_by_file: std::collections::HashMap<
-                                        String,
-                                        Vec<crate::ir::Symbol>,
-                                    > = std::collections::HashMap::new();
-                                    for s in &callees {
-                                        impacted_by_file
-                                            .entry(s.file.clone())
-                                            .or_default()
-                                            .push(s.clone());
+                                    let mut summary_depth_by_symbol_id =
+                                        std::collections::HashMap::new();
+                                    for sym in &callees {
+                                        record_lsp_min_depth(
+                                            &mut summary_depth_by_symbol_id,
+                                            &sym.id.0,
+                                            1,
+                                        );
                                     }
-                                    for v in impacted_by_file.values_mut() {
-                                        v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-                                        v.dedup_by(|a, b| a.id.0 == b.id.0);
-                                    }
-                                    return Ok(crate::impact::ImpactOutput {
-                                        changed_symbols: changed.changed_symbols.clone(),
-                                        impacted_symbols: callees,
-                                        impacted_files: files,
-                                        edges,
-                                        impacted_by_file,
-                                    });
+                                    return Ok(build_impact_output(
+                                        changed.changed_symbols.clone(),
+                                        callees,
+                                        extra_edges,
+                                        summary_depth_by_symbol_id,
+                                        opts.with_edges.unwrap_or(false),
+                                    ));
                                 }
                             }
                             // LSPでの全体グラフ構築にトライ
@@ -1474,6 +1460,8 @@ fn lsp_impact_bfs(
     let mut node_map: std::collections::HashMap<String, crate::ir::Symbol> =
         std::collections::HashMap::new();
     let mut edges: Vec<crate::ir::reference::Reference> = Vec::new();
+    let mut summary_depth_by_symbol_id: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     // roots: prepareCallHierarchy for each changed symbol
     let mut seeded_roots = 0usize;
@@ -1619,15 +1607,13 @@ fn lsp_impact_bfs(
     }
     // If no roots prepared, return empty impact (caller will decide LSP内フォールバックやTSフォールバック)
     if seeded_roots == 0 {
-        let impacted_symbols: Vec<crate::ir::Symbol> = Vec::new();
-        let impacted_files: Vec<String> = Vec::new();
-        return Ok(crate::impact::ImpactOutput {
-            changed_symbols: changed,
-            impacted_symbols,
-            impacted_files,
-            edges: Vec::new(),
-            impacted_by_file: std::collections::HashMap::new(),
-        });
+        return Ok(build_impact_output(
+            changed,
+            Vec::new(),
+            Vec::new(),
+            summary_depth_by_symbol_id,
+            opts.with_edges.unwrap_or(false),
+        ));
     }
 
     while let Some((item, d)) = q.pop_front() {
@@ -1651,6 +1637,7 @@ fn lsp_impact_bfs(
                     edges: &mut edges,
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
+                    summary_depth_by_symbol_id: &mut summary_depth_by_symbol_id,
                 };
                 let incoming = sess.req_incoming_calls(&item).unwrap_or_default();
                 for inc in &incoming {
@@ -1660,15 +1647,7 @@ fn lsp_impact_bfs(
                 }
                 // Supplement callers via references only for roots when callHierarchy yields nothing.
                 if incoming.is_empty() && d == 0 {
-                    enqueue_callers_via_references(
-                        sess,
-                        &cur_sym,
-                        &mut q,
-                        &mut edges,
-                        &mut seen_keys,
-                        &mut node_map,
-                        d + 1,
-                    );
+                    enqueue_callers_via_references(sess, &cur_sym, &mut env, d + 1);
                 }
             }
             crate::impact::ImpactDirection::Callees => {
@@ -1677,6 +1656,7 @@ fn lsp_impact_bfs(
                     edges: &mut edges,
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
+                    summary_depth_by_symbol_id: &mut summary_depth_by_symbol_id,
                 };
                 for out in sess.req_outgoing_calls(&item).unwrap_or_default() {
                     if let Some(to) = out.get("to") {
@@ -1684,15 +1664,7 @@ fn lsp_impact_bfs(
                     }
                 }
                 // Also scan body to enrich outgoing even when some were found
-                let _ = scan_and_enqueue_callees(
-                    sess,
-                    &cur_sym,
-                    &mut q,
-                    &mut edges,
-                    &mut seen_keys,
-                    &mut node_map,
-                    d + 1,
-                );
+                let _ = scan_and_enqueue_callees(sess, &cur_sym, &mut env, d + 1);
             }
             crate::impact::ImpactDirection::Both => {
                 let mut env = EnqueueEnv {
@@ -1700,6 +1672,7 @@ fn lsp_impact_bfs(
                     edges: &mut edges,
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
+                    summary_depth_by_symbol_id: &mut summary_depth_by_symbol_id,
                 };
                 let incoming = sess.req_incoming_calls(&item).unwrap_or_default();
                 for inc in &incoming {
@@ -1708,75 +1681,39 @@ fn lsp_impact_bfs(
                     }
                 }
                 if incoming.is_empty() && d == 0 {
-                    enqueue_callers_via_references(
-                        sess,
-                        &cur_sym,
-                        &mut q,
-                        &mut edges,
-                        &mut seen_keys,
-                        &mut node_map,
-                        d + 1,
-                    );
+                    enqueue_callers_via_references(sess, &cur_sym, &mut env, d + 1);
                 }
                 let mut env2 = EnqueueEnv {
                     q: &mut q,
                     edges: &mut edges,
                     seen_keys: &mut seen_keys,
                     node_map: &mut node_map,
+                    summary_depth_by_symbol_id: &mut summary_depth_by_symbol_id,
                 };
                 for out in sess.req_outgoing_calls(&item).unwrap_or_default() {
                     if let Some(to) = out.get("to") {
                         enqueue_edge(&mut env2, to, &cur_sym, d + 1, false);
                     }
                 }
-                let _ = scan_and_enqueue_callees(
-                    sess,
-                    &cur_sym,
-                    &mut q,
-                    &mut edges,
-                    &mut seen_keys,
-                    &mut node_map,
-                    d + 1,
-                );
+                let _ = scan_and_enqueue_callees(sess, &cur_sym, &mut env2, d + 1);
             }
         }
     }
 
     let changed_ids: HashSet<String> = changed.iter().map(|s| s.id.0.clone()).collect();
-    let mut impacted_symbols: Vec<crate::ir::Symbol> = node_map
+    let impacted_symbols: Vec<crate::ir::Symbol> = node_map
         .values()
         .filter(|s| !changed_ids.contains(&s.id.0))
         .cloned()
         .collect();
-    impacted_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-    impacted_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
-    let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
-    impacted_files.sort();
-    impacted_files.dedup();
-    let edges = if opts.with_edges.unwrap_or(false) {
-        edges
-    } else {
-        Vec::new()
-    };
-    let mut impacted_by_file: std::collections::HashMap<String, Vec<crate::ir::Symbol>> =
-        std::collections::HashMap::new();
-    for s in &impacted_symbols {
-        impacted_by_file
-            .entry(s.file.clone())
-            .or_default()
-            .push(s.clone());
-    }
-    for v in impacted_by_file.values_mut() {
-        v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-        v.dedup_by(|a, b| a.id.0 == b.id.0);
-    }
-    Ok(crate::impact::ImpactOutput {
-        changed_symbols: changed,
+
+    Ok(build_impact_output(
+        changed,
         impacted_symbols,
-        impacted_files,
         edges,
-        impacted_by_file,
-    })
+        summary_depth_by_symbol_id,
+        opts.with_edges.unwrap_or(false),
+    ))
 }
 
 // Heuristic: scan the function source for simple callsites like `name(` or `path::name(`,
@@ -1784,10 +1721,7 @@ fn lsp_impact_bfs(
 fn scan_and_enqueue_callees(
     sess: &mut LspSession,
     cur_sym: &crate::ir::Symbol,
-    q: &mut std::collections::VecDeque<(serde_json::Value, usize)>,
-    edges: &mut Vec<crate::ir::reference::Reference>,
-    seen_keys: &mut std::collections::HashSet<String>,
-    node_map: &mut std::collections::HashMap<String, crate::ir::Symbol>,
+    env: &mut EnqueueEnv<'_>,
     next_depth: usize,
 ) -> usize {
     use std::io::Read;
@@ -1907,14 +1841,19 @@ fn scan_and_enqueue_callees(
                                             it.get("name").and_then(|n| n.as_str()).unwrap_or(""),
                                             it.get("kind").and_then(|k| k.as_u64()).unwrap_or(0)
                                         );
-                                        if seen_keys.insert(key) {
+                                        if env.seen_keys.insert(key) {
                                             // enqueue node and edge cur_sym -> it
-                                            q.push_back((it.clone(), next_depth));
+                                            env.q.push_back((it.clone(), next_depth));
                                             if let Some(sym_to) = item_to_symbol(&it) {
-                                                node_map
+                                                env.node_map
                                                     .entry(sym_to.id.0.clone())
                                                     .or_insert(sym_to.clone());
-                                                edges.push(crate::ir::reference::Reference {
+                                                record_lsp_min_depth(
+                                                    env.summary_depth_by_symbol_id,
+                                                    &sym_to.id.0,
+                                                    next_depth,
+                                                );
+                                                env.edges.push(crate::ir::reference::Reference {
                                                     from: cur_sym.id.clone(),
                                                     to: sym_to.id.clone(),
                                                     kind: crate::ir::reference::RefKind::Call,
@@ -1943,10 +1882,7 @@ fn scan_and_enqueue_callees(
 fn enqueue_callers_via_references(
     sess: &mut LspSession,
     cur_sym: &crate::ir::Symbol,
-    q: &mut std::collections::VecDeque<(serde_json::Value, usize)>,
-    edges: &mut Vec<crate::ir::reference::Reference>,
-    seen_keys: &mut std::collections::HashSet<String>,
-    node_map: &mut std::collections::HashMap<String, crate::ir::Symbol>,
+    env: &mut EnqueueEnv<'_>,
     next_depth: usize,
 ) {
     let uri = path_to_uri(std::path::Path::new(&cur_sym.file));
@@ -2041,13 +1977,18 @@ fn enqueue_callers_via_references(
                     it.get("name").and_then(|n| n.as_str()).unwrap_or(""),
                     it.get("kind").and_then(|k| k.as_u64()).unwrap_or(0)
                 );
-                if seen_keys.insert(key) {
-                    q.push_back((it.clone(), next_depth));
+                if env.seen_keys.insert(key) {
+                    env.q.push_back((it.clone(), next_depth));
                     if let Some(sym_from) = item_to_symbol(&it) {
-                        node_map
+                        env.node_map
                             .entry(sym_from.id.0.clone())
                             .or_insert(sym_from.clone());
-                        edges.push(crate::ir::reference::Reference {
+                        record_lsp_min_depth(
+                            env.summary_depth_by_symbol_id,
+                            &sym_from.id.0,
+                            next_depth,
+                        );
+                        env.edges.push(crate::ir::reference::Reference {
                             from: sym_from.id.clone(),
                             to: cur_sym.id.clone(),
                             kind: crate::ir::reference::RefKind::Call,
@@ -2229,6 +2170,25 @@ struct EnqueueEnv<'a> {
     edges: &'a mut Vec<crate::ir::reference::Reference>,
     seen_keys: &'a mut std::collections::HashSet<String>,
     node_map: &'a mut std::collections::HashMap<String, crate::ir::Symbol>,
+    summary_depth_by_symbol_id: &'a mut std::collections::HashMap<String, usize>,
+}
+
+#[derive(Default)]
+struct LspImpactBuild {
+    impacted_symbols: Vec<crate::ir::Symbol>,
+    edges: Vec<crate::ir::reference::Reference>,
+    summary_depth_by_symbol_id: std::collections::HashMap<String, usize>,
+}
+
+fn record_lsp_min_depth(
+    min_depth_by_symbol_id: &mut std::collections::HashMap<String, usize>,
+    symbol_id: &str,
+    depth: usize,
+) {
+    min_depth_by_symbol_id
+        .entry(symbol_id.to_string())
+        .and_modify(|current| *current = (*current).min(depth))
+        .or_insert(depth);
 }
 
 fn enqueue_edge(
@@ -2244,6 +2204,7 @@ fn enqueue_edge(
             env.q.push_back((next_item.clone(), next_depth));
         }
         env.node_map.entry(key.clone()).or_insert(sym.clone());
+        record_lsp_min_depth(env.summary_depth_by_symbol_id, &key, next_depth);
         let (from, to) = if is_incoming {
             (sym.clone(), cur_sym.clone())
         } else {
@@ -2262,17 +2223,11 @@ fn enqueue_edge(
 
 fn build_impact_output(
     changed: Vec<crate::ir::Symbol>,
-    mut impacted_symbols: Vec<crate::ir::Symbol>,
+    impacted_symbols: Vec<crate::ir::Symbol>,
     mut edges: Vec<crate::ir::reference::Reference>,
+    summary_depth_by_symbol_id: std::collections::HashMap<String, usize>,
     with_edges: bool,
 ) -> crate::impact::ImpactOutput {
-    impacted_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-    impacted_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
-
-    let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
-    impacted_files.sort();
-    impacted_files.dedup();
-
     if !with_edges {
         edges.clear();
     } else {
@@ -2286,45 +2241,33 @@ fn build_impact_output(
         edges.dedup_by(|a, b| a.from.0 == b.from.0 && a.to.0 == b.to.0 && a.line == b.line);
     }
 
-    let mut impacted_by_file: std::collections::HashMap<String, Vec<crate::ir::Symbol>> =
-        std::collections::HashMap::new();
-    for s in &impacted_symbols {
-        impacted_by_file
-            .entry(s.file.clone())
-            .or_default()
-            .push(s.clone());
-    }
-    for v in impacted_by_file.values_mut() {
-        v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-        v.dedup_by(|a, b| a.id.0 == b.id.0);
-    }
-
-    crate::impact::ImpactOutput {
-        changed_symbols: changed,
+    crate::impact::finalize_impact_output(
+        changed,
         impacted_symbols,
-        impacted_files,
         edges,
-        impacted_by_file,
-    }
+        &summary_depth_by_symbol_id,
+    )
 }
 
-fn lsp_impact_references(
+fn lsp_impact_references_build(
     sess: &mut LspSession,
-    changed: Vec<crate::ir::Symbol>,
+    changed: &[crate::ir::Symbol],
     opts: &crate::impact::ImpactOptions,
-) -> anyhow::Result<crate::impact::ImpactOutput> {
+) -> anyhow::Result<LspImpactBuild> {
     use std::collections::{HashMap, HashSet, VecDeque};
     let mut q: VecDeque<(crate::ir::Symbol, usize)> = VecDeque::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut nodes: HashSet<String> = HashSet::new();
+    let mut seen_edges: HashSet<String> = HashSet::new();
+    let mut queued_nodes: HashSet<String> = HashSet::new();
     let mut node_map: std::collections::HashMap<String, crate::ir::Symbol> =
         std::collections::HashMap::new();
     let mut edges: Vec<crate::ir::reference::Reference> = Vec::new();
     let mut doc_items_cache: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+    let mut summary_depth_by_symbol_id: HashMap<String, usize> = HashMap::new();
 
     for s in changed.iter() {
         q.push_back((s.clone(), 0));
         node_map.insert(s.id.0.clone(), s.clone());
+        queued_nodes.insert(s.id.0.clone());
     }
     while let Some((sym, d)) = q.pop_front() {
         if let Some(maxd) = opts.max_depth
@@ -2396,7 +2339,8 @@ fn lsp_impact_references(
             {
                 let key = caller.id.0.clone();
                 node_map.entry(key.clone()).or_insert(caller.clone());
-                if seen.insert(format!("edge:{}->{}", caller.id.0, sym.id.0)) {
+                record_lsp_min_depth(&mut summary_depth_by_symbol_id, &key, d + 1);
+                if seen_edges.insert(format!("edge:{}->{}", caller.id.0, sym.id.0)) {
                     edges.push(crate::ir::reference::Reference {
                         from: caller.id.clone(),
                         to: sym.id.clone(),
@@ -2406,8 +2350,7 @@ fn lsp_impact_references(
                         certainty: crate::ir::reference::EdgeCertainty::Confirmed,
                     });
                 }
-                if !nodes.contains(&caller.id.0) {
-                    nodes.insert(caller.id.0.clone());
+                if queued_nodes.insert(caller.id.0.clone()) {
                     q.push_back((caller, d + 1));
                 }
             }
@@ -2420,10 +2363,25 @@ fn lsp_impact_references(
         .cloned()
         .collect();
 
-    Ok(build_impact_output(
-        changed,
+    Ok(LspImpactBuild {
         impacted_symbols,
         edges,
+        summary_depth_by_symbol_id,
+    })
+}
+
+fn lsp_impact_references(
+    sess: &mut LspSession,
+    changed: Vec<crate::ir::Symbol>,
+    opts: &crate::impact::ImpactOptions,
+) -> anyhow::Result<crate::impact::ImpactOutput> {
+    let build = lsp_impact_references_build(sess, &changed, opts)?;
+
+    Ok(build_impact_output(
+        changed,
+        build.impacted_symbols,
+        build.edges,
+        build.summary_depth_by_symbol_id,
         opts.with_edges.unwrap_or(false),
     ))
 }
@@ -2450,15 +2408,23 @@ fn lsp_impact_references_definition(
 
     let mut impacted_symbols: Vec<crate::ir::Symbol> = Vec::new();
     let mut edges: Vec<crate::ir::reference::Reference> = Vec::new();
+    let mut summary_depth_by_symbol_id: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     if want_callers {
-        let callers_out = lsp_impact_references(sess, changed.clone(), opts)?;
-        impacted_symbols.extend(callers_out.impacted_symbols);
-        edges.extend(callers_out.edges);
+        let callers_build = lsp_impact_references_build(sess, &changed, opts)?;
+        impacted_symbols.extend(callers_build.impacted_symbols);
+        edges.extend(callers_build.edges);
+        for (symbol_id, depth) in callers_build.summary_depth_by_symbol_id {
+            record_lsp_min_depth(&mut summary_depth_by_symbol_id, &symbol_id, depth);
+        }
     }
 
     if want_callees {
         let (callees, callee_edges) = scan_callees_for_changed(sess, &changed);
+        for sym in &callees {
+            record_lsp_min_depth(&mut summary_depth_by_symbol_id, &sym.id.0, 1);
+        }
         impacted_symbols.extend(callees);
         edges.extend(callee_edges);
     }
@@ -2467,6 +2433,7 @@ fn lsp_impact_references_definition(
         changed,
         impacted_symbols,
         edges,
+        summary_depth_by_symbol_id,
         opts.with_edges.unwrap_or(false),
     ))
 }
