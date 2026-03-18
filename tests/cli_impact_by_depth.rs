@@ -81,6 +81,23 @@ fn by_depth_tuples(output: &serde_json::Value) -> Vec<(u64, u64, u64)> {
         .collect()
 }
 
+fn risk_tuple(output: &serde_json::Value) -> (&str, u64, u64, u64, u64) {
+    let risk = &output["summary"]["risk"];
+    (
+        risk["level"].as_str().expect("risk.level"),
+        risk["direct_hits"].as_u64().expect("risk.direct_hits"),
+        risk["transitive_hits"]
+            .as_u64()
+            .expect("risk.transitive_hits"),
+        risk["impacted_files"]
+            .as_u64()
+            .expect("risk.impacted_files"),
+        risk["impacted_symbols"]
+            .as_u64()
+            .expect("risk.impacted_symbols"),
+    )
+}
+
 #[test]
 fn cli_impact_by_depth_callers_basic_depth_bucketing() {
     let (_tmp, repo) = setup_repo_chain();
@@ -96,6 +113,7 @@ fn cli_impact_by_depth_callers_basic_depth_bucketing() {
         .collect();
     assert_eq!(impacted_names, BTreeSet::from(["mid", "top"]));
     assert_eq!(by_depth_tuples(&v), vec![(1, 1, 1), (2, 1, 1)]);
+    assert_eq!(risk_tuple(&v), ("medium", 1, 1, 1, 2));
     assert!(!v["edges"].as_array().unwrap().is_empty());
 }
 
@@ -108,6 +126,7 @@ fn cli_impact_by_depth_present_without_edges_output() {
 
     assert!(v["edges"].as_array().unwrap().is_empty());
     assert_eq!(by_depth_tuples(&v), vec![(1, 1, 1), (2, 1, 1)]);
+    assert_eq!(risk_tuple(&v), ("medium", 1, 1, 1, 2));
 }
 
 #[test]
@@ -122,6 +141,7 @@ fn cli_impact_by_depth_per_seed_nests_under_output() {
     assert_eq!(grouped[0]["changed_symbol"]["name"].as_str(), Some("leaf"));
     let output = &grouped[0]["impacts"][0]["output"];
     assert_eq!(by_depth_tuples(output), vec![(1, 1, 1), (2, 1, 1)]);
+    assert_eq!(risk_tuple(output), ("medium", 1, 1, 1, 2));
 }
 
 #[test]
@@ -134,6 +154,7 @@ fn cli_impact_by_depth_confidence_filter_updates_summary() {
     assert!(v["impacted_symbols"].as_array().unwrap().is_empty());
     assert!(v["edges"].as_array().unwrap().is_empty());
     assert!(by_depth_tuples(&v).is_empty());
+    assert_eq!(risk_tuple(&v), ("low", 0, 0, 0, 0));
     assert_eq!(v["confidence_filter"]["kept_edge_count"].as_u64(), Some(0));
     assert!(
         v["confidence_filter"]["input_edge_count"]
