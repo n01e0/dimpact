@@ -41,6 +41,8 @@ impl Default for ImpactOptions {
 pub struct ImpactSummary {
     #[serde(default)]
     pub by_depth: Vec<ImpactDepthBucket>,
+    #[serde(default)]
+    pub affected_modules: Vec<ImpactAffectedModule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk: Option<ImpactRiskSummary>,
 }
@@ -48,6 +50,13 @@ pub struct ImpactSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactDepthBucket {
     pub depth: usize,
+    pub symbol_count: usize,
+    pub file_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactAffectedModule {
+    pub module: String,
     pub symbol_count: usize,
     pub file_count: usize,
 }
@@ -149,6 +158,46 @@ pub(crate) fn build_risk_summary(
     }
 }
 
+fn affected_module_for_file(file: &str) -> String {
+    let normalized = file.strip_prefix("./").unwrap_or(file).replace('\\', "/");
+    let path = std::path::Path::new(&normalized);
+
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty() && *parent != std::path::Path::new("."))
+        .map(|parent| parent.to_string_lossy().replace('\\', "/"))
+        .unwrap_or(normalized)
+}
+
+pub(crate) fn build_affected_modules_summary(
+    impacted_symbols: &[Symbol],
+) -> Vec<ImpactAffectedModule> {
+    let mut modules: HashMap<String, (usize, HashSet<String>)> = HashMap::new();
+
+    for sym in impacted_symbols {
+        let module = affected_module_for_file(&sym.file);
+        let (symbol_count, files) = modules
+            .entry(module)
+            .or_insert_with(|| (0usize, HashSet::new()));
+        *symbol_count += 1;
+        files.insert(sym.file.clone());
+    }
+
+    let mut summary: Vec<ImpactAffectedModule> = modules
+        .into_iter()
+        .map(|(module, (symbol_count, files))| ImpactAffectedModule {
+            module,
+            symbol_count,
+            file_count: files.len(),
+        })
+        .collect();
+    summary.sort_by(|a, b| {
+        b.symbol_count
+            .cmp(&a.symbol_count)
+            .then_with(|| a.module.cmp(&b.module))
+    });
+    summary
+}
+
 fn record_min_depth(
     min_depth_by_symbol_id: &mut HashMap<String, usize>,
     symbol_id: &str,
@@ -186,6 +235,7 @@ pub(crate) fn finalize_impact_output(
         v.dedup_by(|a, b| a.id.0 == b.id.0);
     }
     let by_depth = build_by_depth_summary(&impacted_symbols, min_depth_by_symbol_id);
+    let affected_modules = build_affected_modules_summary(&impacted_symbols);
     let risk = build_risk_summary(&by_depth, impacted_files.len(), impacted_symbols.len());
 
     ImpactOutput {
@@ -196,6 +246,7 @@ pub(crate) fn finalize_impact_output(
         impacted_by_file,
         summary: ImpactSummary {
             by_depth,
+            affected_modules,
             risk: Some(risk),
         },
     }
