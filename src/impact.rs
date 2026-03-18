@@ -37,6 +37,38 @@ impl Default for ImpactOptions {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ImpactSummary {
+    #[serde(default)]
+    pub by_depth: Vec<ImpactDepthBucket>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<ImpactRiskSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactDepthBucket {
+    pub depth: usize,
+    pub symbol_count: usize,
+    pub file_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactRiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactRiskSummary {
+    pub level: ImpactRiskLevel,
+    pub direct_hits: usize,
+    pub transitive_hits: usize,
+    pub impacted_files: usize,
+    pub impacted_symbols: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactOutput {
     pub changed_symbols: Vec<Symbol>,
@@ -44,6 +76,129 @@ pub struct ImpactOutput {
     pub impacted_files: Vec<String>,
     pub edges: Vec<Reference>,
     pub impacted_by_file: std::collections::HashMap<String, Vec<Symbol>>, // file -> impacted symbols in that file
+    #[serde(default)]
+    pub summary: ImpactSummary,
+}
+
+pub(crate) fn build_by_depth_summary(
+    impacted_symbols: &[Symbol],
+    min_depth_by_symbol_id: &HashMap<String, usize>,
+) -> Vec<ImpactDepthBucket> {
+    let mut buckets: std::collections::BTreeMap<usize, (usize, HashSet<String>)> =
+        std::collections::BTreeMap::new();
+    for sym in impacted_symbols {
+        let Some(depth) = min_depth_by_symbol_id.get(&sym.id.0).copied() else {
+            continue;
+        };
+        if depth == 0 {
+            continue;
+        }
+        let (symbol_count, files) = buckets.entry(depth).or_insert_with(|| (0, HashSet::new()));
+        *symbol_count += 1;
+        files.insert(sym.file.clone());
+    }
+    buckets
+        .into_iter()
+        .map(|(depth, (symbol_count, files))| ImpactDepthBucket {
+            depth,
+            symbol_count,
+            file_count: files.len(),
+        })
+        .collect()
+}
+
+pub(crate) fn build_risk_summary(
+    by_depth: &[ImpactDepthBucket],
+    impacted_files: usize,
+    impacted_symbols: usize,
+) -> ImpactRiskSummary {
+    let direct_hits = by_depth
+        .iter()
+        .find(|bucket| bucket.depth == 1)
+        .map(|bucket| bucket.symbol_count)
+        .unwrap_or(0);
+    let transitive_hits = by_depth
+        .iter()
+        .filter(|bucket| bucket.depth >= 2)
+        .map(|bucket| bucket.symbol_count)
+        .sum();
+
+    let level = if direct_hits >= 3
+        || (direct_hits >= 2 && transitive_hits >= 2)
+        || (direct_hits >= 1 && transitive_hits >= 4)
+        || impacted_files >= 4
+        || impacted_symbols >= 8
+    {
+        ImpactRiskLevel::High
+    } else if direct_hits >= 1
+        || transitive_hits >= 3
+        || impacted_files >= 2
+        || impacted_symbols >= 4
+    {
+        ImpactRiskLevel::Medium
+    } else {
+        ImpactRiskLevel::Low
+    };
+
+    ImpactRiskSummary {
+        level,
+        direct_hits,
+        transitive_hits,
+        impacted_files,
+        impacted_symbols,
+    }
+}
+
+fn record_min_depth(
+    min_depth_by_symbol_id: &mut HashMap<String, usize>,
+    symbol_id: &str,
+    depth: usize,
+) {
+    min_depth_by_symbol_id
+        .entry(symbol_id.to_string())
+        .and_modify(|current| *current = (*current).min(depth))
+        .or_insert(depth);
+}
+
+pub(crate) fn finalize_impact_output(
+    changed_symbols: Vec<Symbol>,
+    mut impacted_symbols: Vec<Symbol>,
+    edges: Vec<Reference>,
+    min_depth_by_symbol_id: &HashMap<String, usize>,
+) -> ImpactOutput {
+    impacted_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    impacted_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
+
+    let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
+    impacted_files.sort();
+    impacted_files.dedup();
+
+    let mut impacted_by_file: std::collections::HashMap<String, Vec<Symbol>> =
+        std::collections::HashMap::new();
+    for s in &impacted_symbols {
+        impacted_by_file
+            .entry(s.file.clone())
+            .or_default()
+            .push(s.clone());
+    }
+    for v in impacted_by_file.values_mut() {
+        v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        v.dedup_by(|a, b| a.id.0 == b.id.0);
+    }
+    let by_depth = build_by_depth_summary(&impacted_symbols, min_depth_by_symbol_id);
+    let risk = build_risk_summary(&by_depth, impacted_files.len(), impacted_symbols.len());
+
+    ImpactOutput {
+        changed_symbols,
+        impacted_symbols,
+        impacted_files,
+        edges,
+        impacted_by_file,
+        summary: ImpactSummary {
+            by_depth,
+            risk: Some(risk),
+        },
+    }
 }
 
 /// Return true if `path` is under any of the given `ignore_dirs` prefixes.
@@ -558,19 +713,24 @@ pub fn compute_impact(
         rev.entry(to).or_default().push(from);
     }
 
-    let changed_ids: HashSet<&str> = changed.iter().map(|s| s.id.0.as_str()).collect();
+    let changed_ids: HashSet<String> = changed.iter().map(|s| s.id.0.clone()).collect();
 
-    let mut seen: HashSet<&str> = HashSet::new();
-    let mut reached_changed_via_callees: HashSet<&str> = HashSet::new();
-    let mut q: VecDeque<(&str, usize)> = VecDeque::new();
+    let mut min_depth_by_symbol_id: HashMap<String, usize> = HashMap::new();
+    let mut summary_depth_by_symbol_id: HashMap<String, usize> = HashMap::new();
+    let mut reached_changed_via_callees: HashSet<String> = HashSet::new();
+    let mut q: VecDeque<(String, usize)> = VecDeque::new();
     // Seed queue with non-ignored changed symbols
     for s in changed {
         if !path_is_ignored(&s.file, &opts.ignore_dirs) {
-            q.push_back((s.id.0.as_str(), 0));
+            record_min_depth(&mut min_depth_by_symbol_id, &s.id.0, 0);
+            q.push_back((s.id.0.clone(), 0));
         }
     }
     while let Some((cur, d)) = q.pop_front() {
-        if !seen.insert(cur) {
+        if min_depth_by_symbol_id
+            .get(cur.as_str())
+            .is_some_and(|best| d > *best)
+        {
             continue;
         }
         if let Some(maxd) = opts.max_depth
@@ -580,71 +740,98 @@ pub fn compute_impact(
         }
         match opts.direction {
             ImpactDirection::Callers => {
-                if let Some(nbs) = rev.get(cur) {
+                if let Some(nbs) = rev.get(cur.as_str()) {
                     for &n in nbs {
-                        q.push_back((n, d + 1));
+                        let next_depth = d + 1;
+                        record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
+                        if min_depth_by_symbol_id
+                            .get(n)
+                            .is_none_or(|best| next_depth < *best)
+                        {
+                            record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            q.push_back((n.to_string(), next_depth));
+                        }
                     }
                 }
             }
             ImpactDirection::Callees => {
-                if let Some(nbs) = fwd.get(cur) {
+                if let Some(nbs) = fwd.get(cur.as_str()) {
                     for &n in nbs {
+                        let next_depth = d + 1;
+                        record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
                         if changed_ids.contains(n) && n != cur {
-                            reached_changed_via_callees.insert(n);
+                            reached_changed_via_callees.insert(n.to_string());
                         }
-                        q.push_back((n, d + 1));
+                        if min_depth_by_symbol_id
+                            .get(n)
+                            .is_none_or(|best| next_depth < *best)
+                        {
+                            record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            q.push_back((n.to_string(), next_depth));
+                        }
                     }
                 }
             }
             ImpactDirection::Both => {
-                if let Some(nbs) = rev.get(cur) {
+                if let Some(nbs) = rev.get(cur.as_str()) {
                     for &n in nbs {
-                        q.push_back((n, d + 1));
+                        let next_depth = d + 1;
+                        record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
+                        if min_depth_by_symbol_id
+                            .get(n)
+                            .is_none_or(|best| next_depth < *best)
+                        {
+                            record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            q.push_back((n.to_string(), next_depth));
+                        }
                     }
                 }
-                if let Some(nbs) = fwd.get(cur) {
+                if let Some(nbs) = fwd.get(cur.as_str()) {
                     for &n in nbs {
-                        q.push_back((n, d + 1));
+                        let next_depth = d + 1;
+                        record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
+                        if min_depth_by_symbol_id
+                            .get(n)
+                            .is_none_or(|best| next_depth < *best)
+                        {
+                            record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            q.push_back((n.to_string(), next_depth));
+                        }
                     }
                 }
             }
         }
     }
 
-    let mut impacted_ids: HashSet<&str> = seen
-        .into_iter()
-        .filter(|id| !changed_ids.contains(*id))
+    let mut impacted_ids: HashSet<String> = min_depth_by_symbol_id
+        .keys()
+        .filter(|id| !changed_ids.contains(id.as_str()))
+        .cloned()
         .collect();
     if matches!(opts.direction, ImpactDirection::Callees) {
-        impacted_ids.extend(reached_changed_via_callees);
+        for id in reached_changed_via_callees {
+            impacted_ids.insert(id);
+        }
     }
 
     let mut impacted_symbols: Vec<Symbol> = impacted_ids
         .into_iter()
-        .filter_map(|id| by_id.get(id).cloned().cloned())
+        .filter_map(|id| by_id.get(id.as_str()).cloned().cloned())
         .collect();
     // Filter out symbols located in ignored directories
     if !opts.ignore_dirs.is_empty() {
         impacted_symbols.retain(|s| !path_is_ignored(&s.file, &opts.ignore_dirs));
     }
-    impacted_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-    impacted_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
-
-    let mut impacted_files: Vec<String> = impacted_symbols.iter().map(|s| s.file.clone()).collect();
-    impacted_files.sort();
-    impacted_files.dedup();
 
     let edges = if opts.with_edges.unwrap_or(false) {
         // Keep the primary relationship graph for changed+impacted nodes.
         // For callees mode we avoid inbound context edges from outside the explored node set
         // to keep oracle comparison stable (e.g. exclude f10->f09 when f10 is outside scope).
-        let impacted_id_set: std::collections::HashSet<&str> = impacted_symbols
-            .iter()
-            .map(|s| s.id.0.as_str())
-            .collect();
+        let impacted_id_set: std::collections::HashSet<&str> =
+            impacted_symbols.iter().map(|s| s.id.0.as_str()).collect();
         let node_set: std::collections::HashSet<&str> = changed_ids
             .iter()
-            .copied()
+            .map(String::as_str)
             .chain(impacted_id_set.iter().copied())
             .collect();
         refs.iter()
@@ -662,25 +849,13 @@ pub fn compute_impact(
     } else {
         Vec::new()
     };
-    let mut impacted_by_file: std::collections::HashMap<String, Vec<Symbol>> =
-        std::collections::HashMap::new();
-    for s in &impacted_symbols {
-        impacted_by_file
-            .entry(s.file.clone())
-            .or_default()
-            .push(s.clone());
-    }
-    for v in impacted_by_file.values_mut() {
-        v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
-        v.dedup_by(|a, b| a.id.0 == b.id.0);
-    }
-    ImpactOutput {
-        changed_symbols: changed.to_vec(),
+
+    finalize_impact_output(
+        changed.to_vec(),
         impacted_symbols,
-        impacted_files,
         edges,
-        impacted_by_file,
-    }
+        &summary_depth_by_symbol_id,
+    )
 }
 
 #[cfg(test)]
@@ -800,5 +975,67 @@ fn foo() { bar(); }
             "pkg::service::main"
         );
         assert_eq!(module_path_for_file("demo/Ops.java"), "demo::Ops");
+    }
+
+    #[test]
+    fn build_risk_summary_marks_small_transitive_only_impact_low() {
+        let risk = build_risk_summary(
+            &[ImpactDepthBucket {
+                depth: 2,
+                symbol_count: 1,
+                file_count: 1,
+            }],
+            1,
+            1,
+        );
+        assert_eq!(risk.level, ImpactRiskLevel::Low);
+        assert_eq!(risk.direct_hits, 0);
+        assert_eq!(risk.transitive_hits, 1);
+    }
+
+    #[test]
+    fn build_risk_summary_marks_direct_impact_medium() {
+        let risk = build_risk_summary(
+            &[
+                ImpactDepthBucket {
+                    depth: 1,
+                    symbol_count: 1,
+                    file_count: 1,
+                },
+                ImpactDepthBucket {
+                    depth: 2,
+                    symbol_count: 1,
+                    file_count: 1,
+                },
+            ],
+            1,
+            2,
+        );
+        assert_eq!(risk.level, ImpactRiskLevel::Medium);
+        assert_eq!(risk.direct_hits, 1);
+        assert_eq!(risk.transitive_hits, 1);
+    }
+
+    #[test]
+    fn build_risk_summary_marks_large_direct_plus_transitive_impact_high() {
+        let risk = build_risk_summary(
+            &[
+                ImpactDepthBucket {
+                    depth: 1,
+                    symbol_count: 2,
+                    file_count: 2,
+                },
+                ImpactDepthBucket {
+                    depth: 2,
+                    symbol_count: 2,
+                    file_count: 1,
+                },
+            ],
+            3,
+            4,
+        );
+        assert_eq!(risk.level, ImpactRiskLevel::High);
+        assert_eq!(risk.direct_hits, 2);
+        assert_eq!(risk.transitive_hits, 2);
     }
 }
