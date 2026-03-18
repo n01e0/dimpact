@@ -14,8 +14,8 @@ pub use diff::{Change, ChangeKind, DiffParseError, FileChanges, parse_unified_di
 pub use engine::EngineConfig;
 pub use engine::{AnalysisEngine, EngineKind};
 pub use impact::{
-    ImpactDepthBucket, ImpactDirection, ImpactOptions, ImpactOutput, ImpactSummary,
-    build_project_graph, compute_impact, path_is_ignored,
+    ImpactDepthBucket, ImpactDirection, ImpactOptions, ImpactOutput, ImpactRiskLevel,
+    ImpactRiskSummary, ImpactSummary, build_project_graph, compute_impact, path_is_ignored,
 };
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
 pub use languages::LanguageKind;

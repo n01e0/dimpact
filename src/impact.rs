@@ -41,6 +41,8 @@ impl Default for ImpactOptions {
 pub struct ImpactSummary {
     #[serde(default)]
     pub by_depth: Vec<ImpactDepthBucket>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<ImpactRiskSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,6 +50,23 @@ pub struct ImpactDepthBucket {
     pub depth: usize,
     pub symbol_count: usize,
     pub file_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactRiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactRiskSummary {
+    pub level: ImpactRiskLevel,
+    pub direct_hits: usize,
+    pub transitive_hits: usize,
+    pub impacted_files: usize,
+    pub impacted_symbols: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,7 +83,7 @@ pub struct ImpactOutput {
 pub(crate) fn build_by_depth_summary(
     impacted_symbols: &[Symbol],
     min_depth_by_symbol_id: &HashMap<String, usize>,
-) -> ImpactSummary {
+) -> Vec<ImpactDepthBucket> {
     let mut buckets: std::collections::BTreeMap<usize, (usize, HashSet<String>)> =
         std::collections::BTreeMap::new();
     for sym in impacted_symbols {
@@ -78,15 +97,55 @@ pub(crate) fn build_by_depth_summary(
         *symbol_count += 1;
         files.insert(sym.file.clone());
     }
-    ImpactSummary {
-        by_depth: buckets
-            .into_iter()
-            .map(|(depth, (symbol_count, files))| ImpactDepthBucket {
-                depth,
-                symbol_count,
-                file_count: files.len(),
-            })
-            .collect(),
+    buckets
+        .into_iter()
+        .map(|(depth, (symbol_count, files))| ImpactDepthBucket {
+            depth,
+            symbol_count,
+            file_count: files.len(),
+        })
+        .collect()
+}
+
+pub(crate) fn build_risk_summary(
+    by_depth: &[ImpactDepthBucket],
+    impacted_files: usize,
+    impacted_symbols: usize,
+) -> ImpactRiskSummary {
+    let direct_hits = by_depth
+        .iter()
+        .find(|bucket| bucket.depth == 1)
+        .map(|bucket| bucket.symbol_count)
+        .unwrap_or(0);
+    let transitive_hits = by_depth
+        .iter()
+        .filter(|bucket| bucket.depth >= 2)
+        .map(|bucket| bucket.symbol_count)
+        .sum();
+
+    let level = if direct_hits >= 3
+        || (direct_hits >= 2 && transitive_hits >= 2)
+        || (direct_hits >= 1 && transitive_hits >= 4)
+        || impacted_files >= 4
+        || impacted_symbols >= 8
+    {
+        ImpactRiskLevel::High
+    } else if direct_hits >= 1
+        || transitive_hits >= 3
+        || impacted_files >= 2
+        || impacted_symbols >= 4
+    {
+        ImpactRiskLevel::Medium
+    } else {
+        ImpactRiskLevel::Low
+    };
+
+    ImpactRiskSummary {
+        level,
+        direct_hits,
+        transitive_hits,
+        impacted_files,
+        impacted_symbols,
     }
 }
 
@@ -126,7 +185,8 @@ pub(crate) fn finalize_impact_output(
         v.sort_by(|a, b| a.id.0.cmp(&b.id.0));
         v.dedup_by(|a, b| a.id.0 == b.id.0);
     }
-    let summary = build_by_depth_summary(&impacted_symbols, min_depth_by_symbol_id);
+    let by_depth = build_by_depth_summary(&impacted_symbols, min_depth_by_symbol_id);
+    let risk = build_risk_summary(&by_depth, impacted_files.len(), impacted_symbols.len());
 
     ImpactOutput {
         changed_symbols,
@@ -134,7 +194,10 @@ pub(crate) fn finalize_impact_output(
         impacted_files,
         edges,
         impacted_by_file,
-        summary,
+        summary: ImpactSummary {
+            by_depth,
+            risk: Some(risk),
+        },
     }
 }
 
@@ -912,5 +975,67 @@ fn foo() { bar(); }
             "pkg::service::main"
         );
         assert_eq!(module_path_for_file("demo/Ops.java"), "demo::Ops");
+    }
+
+    #[test]
+    fn build_risk_summary_marks_small_transitive_only_impact_low() {
+        let risk = build_risk_summary(
+            &[ImpactDepthBucket {
+                depth: 2,
+                symbol_count: 1,
+                file_count: 1,
+            }],
+            1,
+            1,
+        );
+        assert_eq!(risk.level, ImpactRiskLevel::Low);
+        assert_eq!(risk.direct_hits, 0);
+        assert_eq!(risk.transitive_hits, 1);
+    }
+
+    #[test]
+    fn build_risk_summary_marks_direct_impact_medium() {
+        let risk = build_risk_summary(
+            &[
+                ImpactDepthBucket {
+                    depth: 1,
+                    symbol_count: 1,
+                    file_count: 1,
+                },
+                ImpactDepthBucket {
+                    depth: 2,
+                    symbol_count: 1,
+                    file_count: 1,
+                },
+            ],
+            1,
+            2,
+        );
+        assert_eq!(risk.level, ImpactRiskLevel::Medium);
+        assert_eq!(risk.direct_hits, 1);
+        assert_eq!(risk.transitive_hits, 1);
+    }
+
+    #[test]
+    fn build_risk_summary_marks_large_direct_plus_transitive_impact_high() {
+        let risk = build_risk_summary(
+            &[
+                ImpactDepthBucket {
+                    depth: 1,
+                    symbol_count: 2,
+                    file_count: 2,
+                },
+                ImpactDepthBucket {
+                    depth: 2,
+                    symbol_count: 2,
+                    file_count: 1,
+                },
+            ],
+            3,
+            4,
+        );
+        assert_eq!(risk.level, ImpactRiskLevel::High);
+        assert_eq!(risk.direct_hits, 2);
+        assert_eq!(risk.transitive_hits, 2);
     }
 }
