@@ -67,6 +67,61 @@ dimpact id --name foo -f json
     - `input_edge_count`
     - `kept_edge_count`
 
+### 新しい `summary` 出力の見方（JSON/YAML）
+- `impact` の JSON/YAML には、詳細な symbol/edge 一覧を読む前の一次判断用として `summary` ブロックが含まれます。
+- 現在の summary 項目:
+  - `summary.by_depth`
+    - 変更/シードシンボルから impacted symbol までの最短 hop 数ごとの集計
+    - `depth=1` は direct hit
+    - `depth>=2` は transitive な波及
+  - `summary.risk`
+    - direct hit 数、transitive hit 数、影響 file 数、影響 symbol 数から作る軽量な初期リスク評価
+    - レビュー/CI トリアージ向けの目安であり、生のグラフ確認の代替ではありません
+  - `summary.affected_modules`
+    - impacted symbol を path ベースで軽量にグルーピングしたもの
+    - 「次にどのディレクトリ / モジュールを開くべきか」を決めるための補助です
+- JSON のイメージ:
+  ```json
+  {
+    "changed_symbols": [...],
+    "impacted_symbols": [...],
+    "impacted_files": [...],
+    "edges": [...],
+    "impacted_by_file": {...},
+    "summary": {
+      "by_depth": [
+        { "depth": 1, "symbol_count": 3, "file_count": 2 },
+        { "depth": 2, "symbol_count": 7, "file_count": 4 }
+      ],
+      "risk": {
+        "level": "medium",
+        "direct_hits": 3,
+        "transitive_hits": 7,
+        "impacted_files": 4,
+        "impacted_symbols": 10
+      },
+      "affected_modules": [
+        { "module": "src/engine", "symbol_count": 4, "file_count": 2 },
+        { "module": "src/bin", "symbol_count": 2, "file_count": 1 }
+      ]
+    },
+    "confidence_filter": {
+      "min_confidence": "inferred",
+      "exclude_dynamic_fallback": false,
+      "input_edge_count": 20,
+      "kept_edge_count": 12
+    }
+  }
+  ```
+- 運用上の読み順:
+  - まず `by_depth` で direct / transitive を分けて見る
+  - 次に `risk` でレビュー優先度や CI 上の注意度をざっくり判断する
+  - `affected_modules` で、次に見るべきディレクトリ / モジュールを絞る
+  - 最後に `impacted_symbols` / `edges` で具体的な伝播経路を確認する
+- `confidence_filter` は `summary` の中ではなく、引き続きトップレベル sibling として出ます。
+- `--per-seed` 指定時は、各変更/シードシンボルごとの `impacts[].output.summary` 配下に同じ summary が入ります。
+- DOT/HTML 出力は互換維持で、今回の summary は JSON/YAML 利用を主対象としています。
+
 ### Impact オプション（`impact` サブコマンド）
 - `--direction callers|callees|both` : 方向 (既定: callers)
 - `--max-depth N`               : 最大探索深度 (既定: 100)
