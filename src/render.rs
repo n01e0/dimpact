@@ -144,6 +144,7 @@ mod impact_render_tests {
             impacted_files: vec!["f.rs".into()],
             edges: edges.clone(),
             impacted_by_file: std::collections::HashMap::new(),
+            summary: crate::impact::ImpactSummary::default(),
         };
         let dot = to_dot(&out);
         assert!(
@@ -161,6 +162,7 @@ mod impact_render_tests {
             impacted_files: vec!["src/lib.rs".into()],
             edges: vec![],
             impacted_by_file: std::collections::HashMap::new(),
+            summary: crate::impact::ImpactSummary::default(),
         };
         let html = super::to_html(&out);
         assert!(html.contains("<!doctype html>"));
