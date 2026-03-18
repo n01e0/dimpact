@@ -50,7 +50,62 @@ CLI Overview
     - `exclude_dynamic_fallback`
     - `input_edge_count`
     - `kept_edge_count`
-  
+
+### Reading the new `summary` output (JSON/YAML)
+- `impact` JSON/YAML now includes a `summary` block intended for quick triage before you inspect the full symbol/edge lists.
+- Current summary fields:
+  - `summary.by_depth`
+    - shortest-hop buckets from the changed/seed symbols to impacted symbols
+    - `depth=1` is the direct hit set
+    - `depth>=2` shows transitive spread
+  - `summary.risk`
+    - lightweight first-pass severity estimate built from direct hits, transitive hits, impacted file count, and impacted symbol count
+    - meant for review/CI triage, not as a replacement for inspecting the raw graph
+  - `summary.affected_modules`
+    - lightweight path-based grouping of impacted symbols
+    - useful for answering “which area of the repo should I inspect next?”
+- Typical JSON shape:
+  ```json
+  {
+    "changed_symbols": [...],
+    "impacted_symbols": [...],
+    "impacted_files": [...],
+    "edges": [...],
+    "impacted_by_file": {...},
+    "summary": {
+      "by_depth": [
+        { "depth": 1, "symbol_count": 3, "file_count": 2 },
+        { "depth": 2, "symbol_count": 7, "file_count": 4 }
+      ],
+      "risk": {
+        "level": "medium",
+        "direct_hits": 3,
+        "transitive_hits": 7,
+        "impacted_files": 4,
+        "impacted_symbols": 10
+      },
+      "affected_modules": [
+        { "module": "src/engine", "symbol_count": 4, "file_count": 2 },
+        { "module": "src/bin", "symbol_count": 2, "file_count": 1 }
+      ]
+    },
+    "confidence_filter": {
+      "min_confidence": "inferred",
+      "exclude_dynamic_fallback": false,
+      "input_edge_count": 20,
+      "kept_edge_count": 12
+    }
+  }
+  ```
+- Operational intent:
+  - start with `by_depth` to separate direct vs transitive impact
+  - use `risk` to prioritize review/CI follow-up
+  - use `affected_modules` to decide which directories/modules to open next
+  - then inspect `impacted_symbols` / `edges` for the concrete graph details
+- `confidence_filter` remains a top-level sibling of `summary`, not a field inside it.
+- With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol.
+- DOT/HTML output stays compatible; the new summary fields are for JSON/YAML consumption.
+
 - Impact Options (subcommand `impact`):
   - `--direction callers|callees|both` : traversal direction (default: callers)
   - `--max-depth N`             : max traversal depth (default: 100)
