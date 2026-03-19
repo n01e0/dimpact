@@ -51,6 +51,38 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_two_arg_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    let src = r#"fn callee(a: i32, b: i32) -> i32 { b + 1 }
+fn caller() {
+    let x = 1;
+    let y = 2;
+    let out = callee(x, y);
+    println!("{}", out);
+}
+"#;
+    fs::write(path.join("f.rs"), src).unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    let src2 = r#"fn callee(a: i32, b: i32) -> i32 { b + 1 }
+fn caller() {
+    let x = 3;
+    let y = 2;
+    let out = callee(x, y);
+    println!("{}", out);
+}
+"#;
+    fs::write(path.join("f.rs"), src2).unwrap();
+
+    (dir, path)
+}
+
 #[test]
 fn pdg_propagation_adds_var_to_callee_edge() {
     let (_tmp, repo) = setup_repo();
@@ -138,6 +170,36 @@ fn pdg_propagation_adds_direct_summary_bridge_for_single_line_callee() {
     assert!(
         stdout.contains("\"f.rs:use:x:4\" -> \"f.rs:def:y:4\""),
         "expected summary bridge from callsite arg use into assigned def, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn pdg_propagation_does_not_leak_irrelevant_two_arg_bridge() {
+    let (_tmp, repo) = setup_two_arg_repo();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("impact")
+        .arg("--with-propagation")
+        .arg("--format")
+        .arg("dot")
+        .write_stdin(diff)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
+    assert!(
+        stdout.contains("\"f.rs:use:y:5\" -> \"f.rs:def:out:5\""),
+        "expected later arg to keep its summary bridge, got:\n{}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("\"f.rs:use:x:5\" -> \"f.rs:def:out:5\""),
+        "unexpected irrelevant arg bridge leaked into output, got:\n{}",
         stdout
     );
 }
