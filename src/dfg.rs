@@ -1090,6 +1090,7 @@ mod pdg_tests {
             file: "f.rs".to_string(),
             line: 10,
             certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+            provenance: crate::ir::reference::EdgeProvenance::CallGraph,
         };
         let dfg = DataFlowGraph {
             nodes: Vec::new(),
@@ -1132,6 +1133,7 @@ mod pdg_tests {
             file: "f.rs".to_string(),
             line: 10,
             certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+            provenance: crate::ir::reference::EdgeProvenance::CallGraph,
         };
         let pdg = PdgBuilder::build(&dfg, std::slice::from_ref(&ref_sym));
         // Check call edge added
@@ -1189,6 +1191,7 @@ mod pdg_tests {
             file: "f.rs".to_string(),
             line: 10,
             certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+            provenance: crate::ir::reference::EdgeProvenance::CallGraph,
         }];
         let index = crate::ir::reference::SymbolIndex::build(vec![Symbol {
             id: SymbolId("rust:f.rs:fn:callee:1".to_string()),
@@ -1272,6 +1275,7 @@ mod pdg_tests {
             file: "f.rs".to_string(),
             line: 10,
             certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+            provenance: crate::ir::reference::EdgeProvenance::CallGraph,
         }];
         let index = crate::ir::reference::SymbolIndex::build(vec![Symbol {
             id: SymbolId("rust:f.rs:fn:callee:1".to_string()),

@@ -1,10 +1,21 @@
 use crate::ir::{Symbol, SymbolId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum RefKind {
     Call,
+    Data,
+    Control,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeProvenance {
+    #[default]
+    CallGraph,
+    LocalDfg,
+    SymbolicPropagation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -17,7 +28,7 @@ pub struct UnresolvedRef {
     pub is_method: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeCertainty {
     #[default]
@@ -34,6 +45,7 @@ pub struct Reference {
     pub file: String,
     pub line: u32,
     pub certainty: EdgeCertainty,
+    pub provenance: EdgeProvenance,
 }
 
 #[derive(Serialize)]
@@ -45,6 +57,7 @@ struct ReferenceSer<'a> {
     line: u32,
     certainty: &'a EdgeCertainty,
     confidence: &'a EdgeCertainty,
+    provenance: &'a EdgeProvenance,
 }
 
 #[derive(Deserialize)]
@@ -58,6 +71,8 @@ struct ReferenceDe {
     certainty: Option<EdgeCertainty>,
     #[serde(default)]
     confidence: Option<EdgeCertainty>,
+    #[serde(default)]
+    provenance: EdgeProvenance,
 }
 
 impl Serialize for Reference {
@@ -73,6 +88,7 @@ impl Serialize for Reference {
             line: self.line,
             certainty: &self.certainty,
             confidence: &self.certainty,
+            provenance: &self.provenance,
         }
         .serialize(serializer)
     }
@@ -91,6 +107,7 @@ impl<'de> Deserialize<'de> for Reference {
             file: raw.file,
             line: raw.line,
             certainty: raw.certainty.or(raw.confidence).unwrap_or_default(),
+            provenance: raw.provenance,
         })
     }
 }
@@ -147,6 +164,7 @@ mod tests {
             file: "src/lib.rs".to_string(),
             line: 42,
             certainty,
+            provenance: EdgeProvenance::CallGraph,
         }
     }
 
@@ -157,6 +175,7 @@ mod tests {
 
         assert_eq!(v["certainty"], "dynamic_fallback");
         assert_eq!(v["confidence"], "dynamic_fallback");
+        assert_eq!(v["provenance"], "call_graph");
     }
 
     #[test]
@@ -221,5 +240,21 @@ confidence: inferred
         let out = serde_yaml::to_string(&r).expect("yaml serialize");
         assert!(out.contains("certainty: inferred"));
         assert!(out.contains("confidence: inferred"));
+        assert!(out.contains("provenance: call_graph"));
+    }
+
+    #[test]
+    fn deserialize_defaults_provenance_to_call_graph() {
+        let raw = serde_json::json!({
+            "from": "a::f",
+            "to": "b::g",
+            "kind": "call",
+            "file": "src/lib.rs",
+            "line": 42,
+            "certainty": "confirmed"
+        });
+
+        let r: Reference = serde_json::from_value(raw).expect("deserialize reference");
+        assert_eq!(r.provenance, EdgeProvenance::CallGraph);
     }
 }

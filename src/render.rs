@@ -128,6 +128,7 @@ mod impact_render_tests {
                 file: "f.rs".into(),
                 line: 2,
                 certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
             },
             Reference {
                 from: b.id.clone(),
@@ -136,6 +137,7 @@ mod impact_render_tests {
                 file: "f.rs".into(),
                 line: 3,
                 certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
             },
         ];
         let out = ImpactOutput {
@@ -413,13 +415,27 @@ mod html {
                     crate::ir::reference::EdgeCertainty::Inferred => "inferred",
                     crate::ir::reference::EdgeCertainty::DynamicFallback => "dynamic_fallback",
                 };
+                let kind = match e.kind {
+                    crate::ir::reference::RefKind::Call => "call",
+                    crate::ir::reference::RefKind::Data => "data",
+                    crate::ir::reference::RefKind::Control => "control",
+                };
+                let provenance = match e.provenance {
+                    crate::ir::reference::EdgeProvenance::CallGraph => "call_graph",
+                    crate::ir::reference::EdgeProvenance::LocalDfg => "local_dfg",
+                    crate::ir::reference::EdgeProvenance::SymbolicPropagation => {
+                        "symbolic_propagation"
+                    }
+                };
                 edges.push(json!({
                     "data": {
                         "id": format!("{}->{}", e.from.0, e.to.0),
                         "source": e.from.0,
                         "target": e.to.0,
+                        "kind": kind,
                         "certainty": certainty,
                         "confidence": certainty,
+                        "provenance": provenance,
                     }
                 }));
 
@@ -501,7 +517,7 @@ mod html {
                 return String::new();
             }
             let mut buf = String::from(
-                "<div class=\"sec card\"><h2>Edges</h2><table><thead><tr><th>From</th><th>To</th><th>Certainty</th></tr></thead><tbody>",
+                "<div class=\"sec card\"><h2>Edges</h2><table><thead><tr><th>From</th><th>To</th><th>Kind</th><th>Certainty</th><th>Provenance</th></tr></thead><tbody>",
             );
             for e in &self.out.edges {
                 let certainty = match e.certainty {
@@ -509,11 +525,25 @@ mod html {
                     crate::ir::reference::EdgeCertainty::Inferred => "inferred",
                     crate::ir::reference::EdgeCertainty::DynamicFallback => "dynamic_fallback",
                 };
+                let kind = match e.kind {
+                    crate::ir::reference::RefKind::Call => "call",
+                    crate::ir::reference::RefKind::Data => "data",
+                    crate::ir::reference::RefKind::Control => "control",
+                };
+                let provenance = match e.provenance {
+                    crate::ir::reference::EdgeProvenance::CallGraph => "call_graph",
+                    crate::ir::reference::EdgeProvenance::LocalDfg => "local_dfg",
+                    crate::ir::reference::EdgeProvenance::SymbolicPropagation => {
+                        "symbolic_propagation"
+                    }
+                };
                 buf.push_str(&format!(
-                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td></tr>",
+                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>",
                     h(&e.from.0),
                     h(&e.to.0),
-                    h(certainty)
+                    h(kind),
+                    h(certainty),
+                    h(provenance)
                 ));
             }
             buf.push_str("</tbody></table></div>");

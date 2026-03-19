@@ -1859,7 +1859,8 @@ fn scan_and_enqueue_callees(
                                                     kind: crate::ir::reference::RefKind::Call,
                                                     file: cur_sym.file.clone(),
                                                     line: li as u32 + 1,
-                                                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                                                    certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                                                    provenance: crate::ir::reference::EdgeProvenance::CallGraph,
                                                 });
                                                 added += 1;
                                             }
@@ -1995,6 +1996,7 @@ fn enqueue_callers_via_references(
                             file: sym_from.file.clone(),
                             line: sym_from.range.start_line,
                             certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                            provenance: crate::ir::reference::EdgeProvenance::CallGraph,
                         });
                     }
                 }
@@ -2132,6 +2134,7 @@ fn scan_callees_symbols(
                                     file: cur_sym.file.clone(),
                                     line: li as u32 + 1,
                                     certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                                    provenance: crate::ir::reference::EdgeProvenance::CallGraph,
                                 });
                             }
                         }
@@ -2217,6 +2220,7 @@ fn enqueue_edge(
             file: from.file.clone(),
             line: from.range.start_line,
             certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+            provenance: crate::ir::reference::EdgeProvenance::CallGraph,
         });
     }
 }
@@ -2348,6 +2352,7 @@ fn lsp_impact_references_build(
                         file: caller.file.clone(),
                         line: caller.range.start_line,
                         certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                        provenance: crate::ir::reference::EdgeProvenance::CallGraph,
                     });
                 }
                 if queued_nodes.insert(caller.id.0.clone()) {
@@ -2899,6 +2904,7 @@ fn lsp_build_project_graph(
                     file: caller.file.clone(),
                     line: caller.range.start_line,
                     certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                    provenance: crate::ir::reference::EdgeProvenance::CallGraph,
                 });
             }
         }
