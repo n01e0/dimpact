@@ -134,7 +134,7 @@ pub(crate) fn build_risk_summary(
 
     let level = if direct_hits >= 3
         || (direct_hits >= 2 && transitive_hits >= 2)
-        || (direct_hits >= 1 && transitive_hits >= 4)
+        || (direct_hits >= 1 && transitive_hits >= 3)
         || impacted_files >= 4
         || impacted_symbols >= 8
     {
@@ -1065,6 +1065,29 @@ fn foo() { bar(); }
         assert_eq!(risk.level, ImpactRiskLevel::Medium);
         assert_eq!(risk.direct_hits, 1);
         assert_eq!(risk.transitive_hits, 1);
+    }
+
+    #[test]
+    fn build_risk_summary_marks_direct_plus_three_transitive_impact_high() {
+        let risk = build_risk_summary(
+            &[
+                ImpactDepthBucket {
+                    depth: 1,
+                    symbol_count: 1,
+                    file_count: 1,
+                },
+                ImpactDepthBucket {
+                    depth: 2,
+                    symbol_count: 3,
+                    file_count: 1,
+                },
+            ],
+            1,
+            4,
+        );
+        assert_eq!(risk.level, ImpactRiskLevel::High);
+        assert_eq!(risk.direct_hits, 1);
+        assert_eq!(risk.transitive_hits, 3);
     }
 
     #[test]
