@@ -59,11 +59,17 @@ CLI Overview
     - `depth=1` is the direct hit set
     - `depth>=2` shows transitive spread
   - `summary.risk`
-    - lightweight first-pass severity estimate built from direct hits, transitive hits, impacted file count, and impacted symbol count
-    - meant for review/CI triage, not as a replacement for inspecting the raw graph
+    - lightweight first-pass triage priority built from direct hits, transitive hits, impacted file count, and impacted symbol count
+    - read it as review/CI priority, not as a production-severity prediction or a replacement for inspecting the raw graph
+    - rough reading guide:
+      - `low`: likely local; start near the changed code
+      - `medium`: not huge, but callers or nearby files are worth checking
+      - `high`: broad enough that you should assume caller-side spread and inspect the graph early
   - `summary.affected_modules`
     - lightweight path-based grouping of impacted symbols
     - useful for answering “which area of the repo should I inspect next?”
+    - entry-like files are normalized for readability: `src/main.rs` / `src/lib.rs` / `src/engine/mod.rs` collapse to their parent path, and root-level entry files collapse to `(root)`
+- There is still no `summary.affected_processes`; that remains intentionally deferred until entrypoint heuristics and fixtures are strong enough.
 - Typical JSON shape:
   ```json
   {
@@ -86,7 +92,7 @@ CLI Overview
       },
       "affected_modules": [
         { "module": "src/engine", "symbol_count": 4, "file_count": 2 },
-        { "module": "src/bin", "symbol_count": 2, "file_count": 1 }
+        { "module": "(root)", "symbol_count": 2, "file_count": 1 }
       ]
     },
     "confidence_filter": {
@@ -99,8 +105,8 @@ CLI Overview
   ```
 - Operational intent:
   - start with `by_depth` to separate direct vs transitive impact
-  - use `risk` to prioritize review/CI follow-up
-  - use `affected_modules` to decide which directories/modules to open next
+  - use `risk` to decide how aggressively to triage the diff (`low` = local-first, `medium` = nearby spread worth checking, `high` = broad-wave suspicion)
+  - use `affected_modules` to decide which directories/modules to open next; `(root)` means the repo-root entry area, not a literal module named `main.rs`
   - then inspect `impacted_symbols` / `edges` for the concrete graph details
 - `confidence_filter` remains a top-level sibling of `summary`, not a field inside it.
 - With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol.
