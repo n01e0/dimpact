@@ -158,12 +158,31 @@ pub(crate) fn build_risk_summary(
     }
 }
 
+fn is_entry_like_module_file(name: &str) -> bool {
+    matches!(
+        name,
+        "main.rs" | "lib.rs" | "mod.rs" | "index.js" | "index.ts" | "index.tsx" | "__init__.py"
+    )
+}
+
 fn affected_module_for_file(file: &str) -> String {
     let normalized = file.strip_prefix("./").unwrap_or(file).replace('\\', "/");
     let path = std::path::Path::new(&normalized);
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty() && *parent != std::path::Path::new("."));
 
-    path.parent()
-        .filter(|parent| !parent.as_os_str().is_empty() && *parent != std::path::Path::new("."))
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(is_entry_like_module_file)
+    {
+        return parent
+            .map(|parent| parent.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| "(root)".to_string());
+    }
+
+    parent
         .map(|parent| parent.to_string_lossy().replace('\\', "/"))
         .unwrap_or(normalized)
 }
@@ -193,6 +212,7 @@ pub(crate) fn build_affected_modules_summary(
     summary.sort_by(|a, b| {
         b.symbol_count
             .cmp(&a.symbol_count)
+            .then_with(|| (a.module == "(root)").cmp(&(b.module == "(root)")))
             .then_with(|| a.module.cmp(&b.module))
     });
     summary
@@ -1026,6 +1046,59 @@ fn foo() { bar(); }
             "pkg::service::main"
         );
         assert_eq!(module_path_for_file("demo/Ops.java"), "demo::Ops");
+    }
+
+    #[test]
+    fn affected_module_for_file_normalizes_entry_like_labels() {
+        assert_eq!(affected_module_for_file("main.rs"), "(root)");
+        assert_eq!(affected_module_for_file("src/main.rs"), "src");
+        assert_eq!(affected_module_for_file("src/lib.rs"), "src");
+        assert_eq!(affected_module_for_file("src/engine/mod.rs"), "src/engine");
+        assert_eq!(affected_module_for_file("web/index.ts"), "web");
+        assert_eq!(affected_module_for_file("pkg/__init__.py"), "pkg");
+        assert_eq!(affected_module_for_file("foo.rs"), "foo.rs");
+    }
+
+    #[test]
+    fn build_affected_modules_summary_keeps_root_after_named_dirs_on_tie() {
+        let make_symbol = |file: &str, name: &str, line: u32| Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                file,
+                &crate::ir::SymbolKind::Function,
+                name,
+                line,
+            ),
+            name: name.to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: file.to_string(),
+            range: crate::ir::TextRange {
+                start_line: line,
+                end_line: line,
+            },
+            language: "rust".to_string(),
+        };
+
+        let summary = build_affected_modules_summary(&[
+            make_symbol("main.rs", "main", 1),
+            make_symbol("main.rs", "root_one", 2),
+            make_symbol("alpha/first.rs", "alpha_one", 3),
+            make_symbol("alpha/second.rs", "alpha_two", 4),
+            make_symbol("beta/first.rs", "beta_one", 5),
+        ]);
+
+        let observed: Vec<(String, usize, usize)> = summary
+            .into_iter()
+            .map(|item| (item.module, item.symbol_count, item.file_count))
+            .collect();
+        assert_eq!(
+            observed,
+            vec![
+                ("alpha".to_string(), 2, 2),
+                ("(root)".to_string(), 2, 1),
+                ("beta".to_string(), 1, 1),
+            ]
+        );
     }
 
     #[test]

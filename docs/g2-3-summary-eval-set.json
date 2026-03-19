@@ -39,7 +39,7 @@
         },
         "affected_modules": [
           {
-            "module": "main.rs",
+            "module": "(root)",
             "symbol_count": 2,
             "file_count": 1
           }
@@ -107,7 +107,7 @@
             "file_count": 2
           },
           {
-            "module": "main.rs",
+            "module": "(root)",
             "symbol_count": 2,
             "file_count": 1
           },
@@ -152,7 +152,7 @@
         },
         "affected_modules": [
           {
-            "module": "main.rs",
+            "module": "(root)",
             "symbol_count": 2,
             "file_count": 1
           }
