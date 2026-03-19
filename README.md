@@ -120,8 +120,8 @@ CLI Overview
   - `--exclude-dynamic-fallback`: exclude `dynamic_fallback` edges from traversal/output
   - `--op-profile PROFILE`      : operational preset (`balanced|precision-first`)
   - `--ignore-dir DIR`          : ignore directories by relative prefix (repeatable)
-  - `--with-pdg`                : use PDG-based dependence analysis (Rust/Ruby for DFG)
-  - `--with-propagation`        : enable symbolic propagation across variables and functions (implies PDG)
+  - `--with-pdg`                : add local PDG/DFG edges on top of normal impact traversal (Rust/Ruby local DFG)
+  - `--with-propagation`        : add symbolic propagation bridges on top of PDG (call-site / summary-oriented heuristics)
   - `--engine auto|ts|lsp`      : analysis engine (default: auto)
   - `--auto-policy compat|strict-if-available` : policy for `--engine auto` (default: compat)
   - `--engine-lsp-strict`       : strict mode for LSP engine
@@ -166,10 +166,47 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - Recommended global default: `inferred`.
 - For strict review/CI triage where false positives are costly, use `--op-profile precision-first` (or `--min-confidence confirmed --exclude-dynamic-fallback`).
   
+### PDG / propagation: when to use which
+- `--with-pdg`
+  - best when you want extra local data/control-dependence context around the changed or seeded file
+  - useful for Rust/Ruby cases where plain call-graph impact is too coarse or misses alias/control-flow relationships
+- `--with-propagation`
+  - builds on `--with-pdg`
+  - best when you want call-site and function-summary bridges, especially for argument → callee → assigned-result style flows
+  - use this when you suspect false negatives around local variable flow, alias chains, or short inter-procedural propagation
+- `--per-seed`
+  - works with both normal impact and the PDG / propagation path
+  - useful when you want to compare how each changed/seed symbol fans out independently
+
+### Current limits of the PDG / propagation path
+- Scope is intentionally local today:
+  - Rust/Ruby get local DFG construction for changed files (diff mode) or seed files (seed mode)
+  - other languages still mostly fall back to the normal call-graph signal even if you pass `--with-pdg`
+- It is **not** a project-wide PDG yet:
+  - current behavior is closer to `global call graph + local DFG augmentation`
+  - propagation is mostly call-site / summary-oriented, not a whole-program symbolic executor
+- `-f dot` changes meaning when PDG is enabled:
+  - normal `impact -f dot` shows the impact graph
+  - `impact --with-pdg -f dot` shows the raw PDG/DFG-style graph instead
+- Engine integration is still uneven:
+  - the normal impact path goes through the selected engine abstraction
+  - PDG / propagation currently layer extra local graph construction on top of cached graph data
+
+### Practical guidance
+- Start with normal `impact` when you want stable repo-wide caller/callee answers.
+- Add `--with-pdg` when you want better local explanation around Rust/Ruby data/control dependencies.
+- Escalate to `--with-propagation` when the interesting question is "does this value/argument/result flow across the call boundary?"
+- If you need to review one seed at a time, add `--per-seed` to any of the above.
+- If you are working in Go/Java/Python/JS/TS/TSX, do not assume `--with-pdg` adds much today; treat it as experimental unless the fixture/regression says otherwise.
+
 ### PDG Visualization
 - Generate PDG in `dot` format with `--with-pdg` and `-f dot`:
   ```
   git diff --no-ext-diff | dimpact impact --with-pdg -f dot
+  ```
+- Generate the propagation-augmented graph with `--with-propagation` and `-f dot`:
+  ```
+  git diff --no-ext-diff | dimpact impact --with-propagation -f dot
   ```
 
 Path highlighting in DOT/HTML

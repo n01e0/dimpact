@@ -136,8 +136,8 @@ dimpact id --name foo -f json
 - `--exclude-dynamic-fallback`  : `dynamic_fallback` エッジを探索/出力から除外
 - `--op-profile PROFILE`        : 運用プリセット（`balanced|precision-first`）
 - `--ignore-dir DIR`            : 相対パスプレフィックスでディレクトリを無視（繰り返し可）
-- `--with-pdg`                  : PDG ベースの依存解析を使用 (Rust/Ruby の DFG)
-- `--with-propagation`          : 変数・関数をまたいだシンボリック伝播を有効化 (PDG を含む)
+- `--with-pdg`                  : 通常 impact にローカルな PDG/DFG エッジを追加 (Rust/Ruby のローカル DFG)
+- `--with-propagation`          : PDG の上にシンボリック伝播 bridge を追加（call-site / function summary ヒューリスティック）
 - `--engine auto|ts|lsp`        : 分析エンジン (既定: auto)
 - `--auto-policy compat|strict-if-available` : `--engine auto` 用ポリシー (既定: compat)
 - `--engine-lsp-strict`         : strict モードで LSP を実行（フォールバックなし）
@@ -182,10 +182,47 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - 推奨 global default は `inferred`。
 - 誤判定コストが高い厳格レビュー/CI トリアージでは `--op-profile precision-first`（または `--min-confidence confirmed --exclude-dynamic-fallback`）を使用してください。
 
+## PDG / propagation の使い分け
+- `--with-pdg`
+  - 変更ファイルや seed ファイルの近傍で、追加の data/control dependence を見たいとき向けです
+  - plain な call graph だけでは粗すぎる Rust/Ruby の alias / control-flow 周辺で特に有効です
+- `--with-propagation`
+  - `--with-pdg` の上に乗る拡張です
+  - 引数 → callee → 代入先 のような call-site bridge や function summary bridge を見たいときに使います
+  - local variable flow、alias chain、短い inter-procedural propagation の false negative を疑うときに向いています
+- `--per-seed`
+  - 通常 impact だけでなく PDG / propagation path でも使えます
+  - changed/seed symbol ごとの波及を個別に見たいときに便利です
+
+## 現在の PDG / propagation の限界
+- いまはローカル寄りの実装です
+  - Rust/Ruby では changed file（diff モード）または seed file（seed モード）に対してローカル DFG を構築します
+  - それ以外の言語では `--with-pdg` を付けても、実質的には通常の call graph シグナルに寄る場面が多いです
+- **project-wide PDG** ではありません
+  - 現状は `global call graph + local DFG augmentation` に近い挙動です
+  - propagation も whole-program symbolic execution ではなく、call-site / summary 中心の heuristic です
+- `-f dot` の意味が切り替わります
+  - 通常の `impact -f dot` は impact graph
+  - `impact --with-pdg -f dot` は raw な PDG/DFG 風グラフです
+- エンジン統合もまだ完全ではありません
+  - 通常 impact path は選択した engine abstraction を通ります
+  - PDG / propagation は現在、cache 済み graph の上にローカル graph 構築を重ねる経路です
+
+## 実運用の目安
+- repo 全体で安定した caller/callee の答えが欲しいなら、まず通常の `impact` を使う
+- Rust/Ruby の data/control dependency を少し厚く見たいなら `--with-pdg` を足す
+- 「この値・引数・結果は call 境界を越えて伝播するか？」が本題なら `--with-propagation` まで上げる
+- seed ごとに分けて見たいなら、上のどれに対しても `--per-seed` を足す
+- Go/Java/Python/JS/TS/TSX では、現時点の `--with-pdg` に大きな上積みを期待しすぎない方が安全です。fixture / regression で確認できる範囲の experimental 機能として扱ってください
+
 ## PDG 可視化
 `--with-pdg` と `-f dot` を組み合わせて PDG を dot 形式で出力できます。
 ```bash
 git diff --no-ext-diff | dimpact impact --with-pdg -f dot
+```
+`--with-propagation` と `-f dot` を組み合わせると、伝播 bridge を含んだ graph を出力できます。
+```bash
+git diff --no-ext-diff | dimpact impact --with-propagation -f dot
 ```
 
 ## DOT/HTML での経路ハイライト
