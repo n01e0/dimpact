@@ -1,0 +1,423 @@
+{
+  "generated_by": "scripts/collect-summary-eval.py",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "defaults": {
+    "command": "dimpact impact --direction callers --format json",
+    "note": "case-specific confidence flags are fixed per case for stable comparison"
+  },
+  "cases": [
+    {
+      "case_id": "rust-callers-chain",
+      "lang": "rust",
+      "shape": "chain",
+      "anchor_band": "medium",
+      "focus": "minimal direct/transitive baseline",
+      "source": "synthetic fixture mirrored from tests/cli_impact_by_depth.rs",
+      "cli_args": [
+        "--min-confidence",
+        "inferred"
+      ],
+      "summary": {
+        "by_depth": [
+          {
+            "depth": 1,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 2,
+            "symbol_count": 1,
+            "file_count": 1
+          }
+        ],
+        "risk": {
+          "level": "medium",
+          "direct_hits": 1,
+          "transitive_hits": 1,
+          "impacted_files": 1,
+          "impacted_symbols": 2
+        },
+        "affected_modules": [
+          {
+            "module": "main.rs",
+            "symbol_count": 2,
+            "file_count": 1
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "rust-confidence-filter-empty",
+      "lang": "rust",
+      "shape": "filtered-empty",
+      "anchor_band": "low",
+      "focus": "confidence filter shrink-to-empty floor",
+      "source": "synthetic fixture mirrored from tests/cli_impact_by_depth.rs",
+      "cli_args": [
+        "--min-confidence",
+        "confirmed"
+      ],
+      "summary": {
+        "by_depth": [],
+        "risk": {
+          "level": "low",
+          "direct_hits": 0,
+          "transitive_hits": 0,
+          "impacted_files": 0,
+          "impacted_symbols": 0
+        },
+        "affected_modules": []
+      }
+    },
+    {
+      "case_id": "rust-module-fanout",
+      "lang": "rust",
+      "shape": "fan-out",
+      "anchor_band": "high",
+      "focus": "affected_modules ordering and grouping baseline",
+      "source": "synthetic fixture mirrored from tests/cli_impact_affected_modules.rs",
+      "cli_args": [
+        "--min-confidence",
+        "inferred"
+      ],
+      "summary": {
+        "by_depth": [
+          {
+            "depth": 1,
+            "symbol_count": 4,
+            "file_count": 4
+          },
+          {
+            "depth": 2,
+            "symbol_count": 1,
+            "file_count": 1
+          }
+        ],
+        "risk": {
+          "level": "high",
+          "direct_hits": 4,
+          "transitive_hits": 1,
+          "impacted_files": 4,
+          "impacted_symbols": 5
+        },
+        "affected_modules": [
+          {
+            "module": "alpha",
+            "symbol_count": 2,
+            "file_count": 2
+          },
+          {
+            "module": "main.rs",
+            "symbol_count": 2,
+            "file_count": 1
+          },
+          {
+            "module": "beta",
+            "symbol_count": 1,
+            "file_count": 1
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "rust-confidence-hard",
+      "lang": "rust",
+      "shape": "local-dispatch",
+      "anchor_band": "medium",
+      "focus": "localized hard fixture with small caller spread",
+      "source": "tests/fixtures/rust/analyzer_hard_cases_confidence_compare.rs",
+      "cli_args": [
+        "--min-confidence",
+        "inferred"
+      ],
+      "summary": {
+        "by_depth": [
+          {
+            "depth": 1,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 2,
+            "symbol_count": 1,
+            "file_count": 1
+          }
+        ],
+        "risk": {
+          "level": "medium",
+          "direct_hits": 1,
+          "transitive_hits": 1,
+          "impacted_files": 1,
+          "impacted_symbols": 2
+        },
+        "affected_modules": [
+          {
+            "module": "main.rs",
+            "symbol_count": 2,
+            "file_count": 1
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "python-monkeypatch-v4",
+      "lang": "python",
+      "shape": "dynamic-fan-out",
+      "anchor_band": "high",
+      "focus": "dynamic caller spread and high-risk anchor",
+      "source": "tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol_v4.py",
+      "cli_args": [
+        "--min-confidence",
+        "inferred"
+      ],
+      "summary": {
+        "by_depth": [
+          {
+            "depth": 1,
+            "symbol_count": 3,
+            "file_count": 1
+          },
+          {
+            "depth": 2,
+            "symbol_count": 3,
+            "file_count": 1
+          }
+        ],
+        "risk": {
+          "level": "high",
+          "direct_hits": 3,
+          "transitive_hits": 3,
+          "impacted_files": 1,
+          "impacted_symbols": 6
+        },
+        "affected_modules": [
+          {
+            "module": "demo",
+            "symbol_count": 6,
+            "file_count": 1
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-method-missing-v4",
+      "lang": "ruby",
+      "shape": "dynamic",
+      "anchor_band": "high",
+      "focus": "dynamic Ruby boundary case for underestimation checks",
+      "source": "tests/fixtures/ruby/analyzer_hard_cases_dynamic_dsl_method_missing_chain_v4.rb",
+      "cli_args": [
+        "--min-confidence",
+        "inferred"
+      ],
+      "summary": {
+        "by_depth": [
+          {
+            "depth": 1,
+            "symbol_count": 1,
+            "file_count": 1
+          }
+        ],
+        "risk": {
+          "level": "medium",
+          "direct_hits": 1,
+          "transitive_hits": 0,
+          "impacted_files": 1,
+          "impacted_symbols": 1
+        },
+        "affected_modules": [
+          {
+            "module": "demo",
+            "symbol_count": 1,
+            "file_count": 1
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "go-heavy-diff",
+      "lang": "go",
+      "shape": "wide-fan-out",
+      "anchor_band": "high",
+      "focus": "high-risk scale anchor from repo diff fixture",
+      "source": "bench-fixtures/go-heavy.diff",
+      "cli_args": [
+        "--min-confidence",
+        "inferred"
+      ],
+      "summary": {
+        "by_depth": [
+          {
+            "depth": 1,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 2,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 3,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 4,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 5,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 6,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 7,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 8,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 9,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 10,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 11,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 12,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 13,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 14,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 15,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 16,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 17,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 18,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 19,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 20,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 21,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 22,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 23,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 24,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 25,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 26,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 27,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 28,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 29,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 30,
+            "symbol_count": 1,
+            "file_count": 1
+          },
+          {
+            "depth": 31,
+            "symbol_count": 1,
+            "file_count": 1
+          }
+        ],
+        "risk": {
+          "level": "high",
+          "direct_hits": 1,
+          "transitive_hits": 30,
+          "impacted_files": 1,
+          "impacted_symbols": 31
+        },
+        "affected_modules": [
+          {
+            "module": "bench-fixtures/go-heavy",
+            "symbol_count": 31,
+            "file_count": 1
+          }
+        ]
+      }
+    }
+  ]
+}
