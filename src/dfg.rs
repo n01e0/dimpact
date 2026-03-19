@@ -64,6 +64,8 @@ impl DfgBuilder for RustDfgBuilder {
         // Map variable name -> set of line numbers where it's defined
         let mut def_lines_by_name: HashMap<String, HashSet<u32>> = HashMap::new();
         let mut seen_node_ids: HashSet<String> = HashSet::new();
+        let line_offsets = crate::languages::util::line_offsets(source);
+        let mut ignored_use_byte_ranges: Vec<(usize, usize)> = Vec::new();
         // Interprocedural analysis: parameters and assignments via AST
         {
             // Parse Rust AST to extract definitions
@@ -71,7 +73,6 @@ impl DfgBuilder for RustDfgBuilder {
             let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
             parser.set_language(&lang).expect("set language");
             if let Some(tree) = parser.parse(source, None) {
-                let offs = crate::languages::util::line_offsets(source);
                 let mut cursor = tree.root_node().walk();
                 let mut stack = vec![tree.root_node()];
                 while let Some(node) = stack.pop() {
@@ -80,35 +81,38 @@ impl DfgBuilder for RustDfgBuilder {
                         stack.push(child);
                     }
                     // Function parameters: treat as definitions
-                    if node.kind() == "function_item"
-                        && let Some(params_node) = node.child_by_field_name("parameters")
-                    {
-                        for param in params_node.named_children(&mut cursor) {
-                            if param.kind() == "parameter"
-                                && let Some(pat) = param.child_by_field_name("pattern")
-                            {
-                                let name = pat.utf8_text(source.as_bytes()).unwrap_or("");
-                                if !name.is_empty() {
-                                    let sl = crate::languages::util::byte_to_line(
-                                        &offs,
-                                        pat.start_byte(),
-                                    );
-                                    let node_id = format!("{}:def:{}:{}", path, name, sl);
-                                    if seen_node_ids.insert(node_id.clone()) {
-                                        nodes.push(DfgNode {
-                                            id: node_id.clone(),
-                                            name: name.to_string(),
-                                            file: path.to_string(),
-                                            line: sl,
-                                        });
-                                        def_records_by_name
-                                            .entry(name.to_string())
-                                            .or_default()
-                                            .push((sl, node_id.clone()));
-                                        param_def_records_by_name
-                                            .entry(name.to_string())
-                                            .or_default()
-                                            .push((sl, node_id.clone()));
+                    if node.kind() == "function_item" {
+                        if let Some(body) = node.child_by_field_name("body") {
+                            ignored_use_byte_ranges.push((node.start_byte(), body.start_byte()));
+                        }
+                        if let Some(params_node) = node.child_by_field_name("parameters") {
+                            for param in params_node.named_children(&mut cursor) {
+                                if param.kind() == "parameter"
+                                    && let Some(pat) = param.child_by_field_name("pattern")
+                                {
+                                    let name = pat.utf8_text(source.as_bytes()).unwrap_or("");
+                                    if !name.is_empty() {
+                                        let sl = crate::languages::util::byte_to_line(
+                                            &line_offsets,
+                                            pat.start_byte(),
+                                        );
+                                        let node_id = format!("{}:def:{}:{}", path, name, sl);
+                                        if seen_node_ids.insert(node_id.clone()) {
+                                            nodes.push(DfgNode {
+                                                id: node_id.clone(),
+                                                name: name.to_string(),
+                                                file: path.to_string(),
+                                                line: sl,
+                                            });
+                                            def_records_by_name
+                                                .entry(name.to_string())
+                                                .or_default()
+                                                .push((sl, node_id.clone()));
+                                            param_def_records_by_name
+                                                .entry(name.to_string())
+                                                .or_default()
+                                                .push((sl, node_id.clone()));
+                                        }
                                     }
                                 }
                             }
@@ -121,7 +125,10 @@ impl DfgBuilder for RustDfgBuilder {
                     {
                         let name = lhs.utf8_text(source.as_bytes()).unwrap_or("");
                         if !name.is_empty() {
-                            let sl = crate::languages::util::byte_to_line(&offs, lhs.start_byte());
+                            let sl = crate::languages::util::byte_to_line(
+                                &line_offsets,
+                                lhs.start_byte(),
+                            );
                             let node_id = format!("{}:def:{}:{}", path, name, sl);
                             if seen_node_ids.insert(node_id.clone()) {
                                 nodes.push(DfgNode {
@@ -236,43 +243,49 @@ impl DfgBuilder for RustDfgBuilder {
         }
 
         // Second pass: collect uses and link to reaching defs (SSA-like)
-        for (idx, line) in source.lines().enumerate() {
-            let line_no = (idx + 1) as u32;
-            for token in line.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                if token.is_empty() || reserved.contains(&token) {
-                    continue;
+        let token_re = regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]*").unwrap();
+        for m in token_re.find_iter(source) {
+            let token = m.as_str();
+            if reserved.contains(&token) {
+                continue;
+            }
+            if ignored_use_byte_ranges
+                .iter()
+                .any(|(start, end)| m.start() >= *start && m.start() < *end)
+            {
+                continue;
+            }
+            let line_no = crate::languages::util::byte_to_line(&line_offsets, m.start());
+            // Skip uses on same line as definition
+            if def_lines_by_name
+                .get(token)
+                .is_some_and(|lines| lines.contains(&line_no))
+            {
+                continue;
+            }
+            let reaching = reaching_def_ids_ssa_like_with_same_line_params(
+                token,
+                line_no,
+                &def_records_by_name,
+                &param_def_records_by_name,
+                &control_ranges,
+            );
+            if !reaching.is_empty() {
+                let node_id = format!("{}:use:{}:{}", path, token, line_no);
+                if seen_node_ids.insert(node_id.clone()) {
+                    nodes.push(DfgNode {
+                        id: node_id.clone(),
+                        name: token.to_string(),
+                        file: path.to_string(),
+                        line: line_no,
+                    });
                 }
-                // Skip uses on same line as definition
-                if def_lines_by_name
-                    .get(token)
-                    .is_some_and(|lines| lines.contains(&line_no))
-                {
-                    continue;
-                }
-                let reaching = reaching_def_ids_ssa_like_with_same_line_params(
-                    token,
-                    line_no,
-                    &def_records_by_name,
-                    &param_def_records_by_name,
-                    &control_ranges,
-                );
-                if !reaching.is_empty() {
-                    let node_id = format!("{}:use:{}:{}", path, token, line_no);
-                    if seen_node_ids.insert(node_id.clone()) {
-                        nodes.push(DfgNode {
-                            id: node_id.clone(),
-                            name: token.to_string(),
-                            file: path.to_string(),
-                            line: line_no,
-                        });
-                    }
-                    for def_id in reaching {
-                        edges.push(DfgEdge {
-                            from: def_id,
-                            to: node_id.clone(),
-                            kind: DependencyKind::Data,
-                        });
-                    }
+                for def_id in reaching {
+                    edges.push(DfgEdge {
+                        from: def_id,
+                        to: node_id.clone(),
+                        kind: DependencyKind::Data,
+                    });
                 }
             }
         }
@@ -650,47 +663,85 @@ impl PdgBuilder {
 
             // Connect call-site propagation through callee summary (input -> impacted).
             if let Some(summary) = summary_by_fn.get(&r.to.0) {
-                let mut summary_connected = false;
-                for flow in &summary.flows {
-                    if flow.impacted_node_ids.is_empty() {
-                        continue;
-                    }
-                    summary_connected = true;
+                let active_flows: Vec<&FunctionInputImpact> = summary
+                    .flows
+                    .iter()
+                    .filter(|flow| !flow.impacted_node_ids.is_empty())
+                    .collect();
+                if active_flows.is_empty() {
+                    continue;
+                }
 
-                    for u in &callsite_uses {
+                if callsite_uses.len() == summary.inputs.len() && !callsite_uses.is_empty() {
+                    let use_by_input: std::collections::HashMap<&str, &String> = summary
+                        .inputs
+                        .iter()
+                        .zip(callsite_uses.iter())
+                        .map(|(input, use_id)| (input.as_str(), use_id))
+                        .collect();
+
+                    for flow in &active_flows {
+                        let Some(mapped_use) = use_by_input.get(flow.input_node_id.as_str()) else {
+                            continue;
+                        };
                         push_unique_edge(
                             pdg,
                             &mut seen_edges,
-                            u.clone(),
+                            (*mapped_use).clone(),
                             flow.input_node_id.clone(),
                             DependencyKind::Data,
                         );
-                    }
-                    for impacted in &flow.impacted_node_ids {
-                        for d in &callsite_defs {
+                        for impacted in &flow.impacted_node_ids {
+                            for d in &callsite_defs {
+                                push_unique_edge(
+                                    pdg,
+                                    &mut seen_edges,
+                                    impacted.clone(),
+                                    d.clone(),
+                                    DependencyKind::Data,
+                                );
+                            }
+                        }
+                        if callsite_defs.len() == 1 {
                             push_unique_edge(
                                 pdg,
                                 &mut seen_edges,
-                                impacted.clone(),
-                                d.clone(),
+                                (*mapped_use).clone(),
+                                callsite_defs[0].clone(),
                                 DependencyKind::Data,
                             );
                         }
                     }
-                }
-
-                // Direct summary bridge at call-site: args/use -> assigned defs.
-                if summary_connected {
-                    for u in &callsite_uses {
-                        for d in &callsite_defs {
-                            push_unique_edge(
-                                pdg,
-                                &mut seen_edges,
-                                u.clone(),
-                                d.clone(),
-                                DependencyKind::Data,
-                            );
+                } else if summary.inputs.len() == 1 && callsite_uses.len() == 1 {
+                    let only_use = callsite_uses[0].clone();
+                    for flow in &active_flows {
+                        push_unique_edge(
+                            pdg,
+                            &mut seen_edges,
+                            only_use.clone(),
+                            flow.input_node_id.clone(),
+                            DependencyKind::Data,
+                        );
+                        for impacted in &flow.impacted_node_ids {
+                            for d in &callsite_defs {
+                                push_unique_edge(
+                                    pdg,
+                                    &mut seen_edges,
+                                    impacted.clone(),
+                                    d.clone(),
+                                    DependencyKind::Data,
+                                );
+                            }
                         }
+                    }
+                    if callsite_defs.len() == 1 {
+                        push_unique_edge(
+                            pdg,
+                            &mut seen_edges,
+                            only_use,
+                            callsite_defs[0].clone(),
+                            DependencyKind::Data,
+                        );
                     }
                 }
             }
@@ -764,7 +815,7 @@ impl PdgBuilder {
                 continue;
             }
 
-            let in_range_ids: BTreeSet<String> = pdg
+            let in_range_ids: Vec<String> = pdg
                 .nodes
                 .iter()
                 .filter(|n| {
@@ -780,38 +831,42 @@ impl PdgBuilder {
             }
             let in_range_set: HashSet<&str> = in_range_ids.iter().map(|id| id.as_str()).collect();
 
-            let mut param_like_inputs: Vec<String> = in_range_ids
-                .iter()
-                .filter(|id| id.contains(":def:"))
-                .filter(|id| {
-                    nodes_by_id
-                        .get(id.as_str())
-                        .is_some_and(|n| n.line == s.range.start_line)
-                })
-                .cloned()
-                .collect();
-            param_like_inputs.sort();
-            param_like_inputs.dedup();
+            let mut param_like_inputs: Vec<String> = Vec::new();
+            for id in &in_range_ids {
+                if !id.contains(":def:") {
+                    continue;
+                }
+                if !nodes_by_id
+                    .get(id.as_str())
+                    .is_some_and(|n| n.line == s.range.start_line)
+                {
+                    continue;
+                }
+                if !param_like_inputs.iter().any(|seen| seen == id) {
+                    param_like_inputs.push(id.clone());
+                }
+            }
 
-            let mut inputs: Vec<String> = if !param_like_inputs.is_empty() {
+            let inputs: Vec<String> = if !param_like_inputs.is_empty() {
                 // Prefer parameter-like defs on function start line as summary inputs.
                 param_like_inputs
             } else {
                 // Fallback: entry defs with no incoming in-range data edges.
-                in_range_ids
-                    .iter()
-                    .filter(|id| id.contains(":def:"))
-                    .filter(|id| {
-                        in_adj
-                            .get(id.as_str())
-                            .map(|froms| froms.iter().all(|f| !in_range_set.contains(*f)))
-                            .unwrap_or(true)
-                    })
-                    .cloned()
-                    .collect()
+                let mut roots = Vec::new();
+                for id in &in_range_ids {
+                    if !id.contains(":def:") {
+                        continue;
+                    }
+                    let is_root = in_adj
+                        .get(id.as_str())
+                        .map(|froms| froms.iter().all(|f| !in_range_set.contains(*f)))
+                        .unwrap_or(true);
+                    if is_root && !roots.iter().any(|seen| seen == id) {
+                        roots.push(id.clone());
+                    }
+                }
+                roots
             };
-            inputs.sort();
-            inputs.dedup();
             if inputs.is_empty() {
                 continue;
             }
@@ -1157,6 +1212,92 @@ mod pdg_tests {
         }));
         assert!(pdg.edges.iter().any(|e| {
             e.kind == DependencyKind::Data && e.from == "f.rs:use:x:10" && e.to == "f.rs:def:y:10"
+        }));
+    }
+
+    #[test]
+    fn propagation_summary_bridge_maps_later_arg_without_leaking_earlier_arg() {
+        use crate::ir::{Symbol, SymbolKind, TextRange};
+
+        let mut pdg = DataFlowGraph {
+            nodes: vec![
+                DfgNode {
+                    id: "f.rs:use:x:10".to_string(),
+                    name: "x".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                DfgNode {
+                    id: "f.rs:use:y:10".to_string(),
+                    name: "y".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                DfgNode {
+                    id: "f.rs:def:out:10".to_string(),
+                    name: "out".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                DfgNode {
+                    id: "f.rs:def:a:1".to_string(),
+                    name: "a".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 1,
+                },
+                DfgNode {
+                    id: "f.rs:def:b:1".to_string(),
+                    name: "b".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 1,
+                },
+                DfgNode {
+                    id: "f.rs:use:b:2".to_string(),
+                    name: "b".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 2,
+                },
+            ],
+            edges: vec![DfgEdge {
+                from: "f.rs:def:b:1".to_string(),
+                to: "f.rs:use:b:2".to_string(),
+                kind: DependencyKind::Data,
+            }],
+        };
+
+        let refs = vec![Reference {
+            from: SymbolId("rust:f.rs:fn:caller:9".to_string()),
+            to: SymbolId("rust:f.rs:fn:callee:1".to_string()),
+            kind: crate::ir::reference::RefKind::Call,
+            file: "f.rs".to_string(),
+            line: 10,
+            certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+        }];
+        let index = crate::ir::reference::SymbolIndex::build(vec![Symbol {
+            id: SymbolId("rust:f.rs:fn:callee:1".to_string()),
+            name: "callee".to_string(),
+            kind: SymbolKind::Function,
+            file: "f.rs".to_string(),
+            range: TextRange {
+                start_line: 1,
+                end_line: 2,
+            },
+            language: "rust".to_string(),
+        }]);
+
+        PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
+
+        assert!(pdg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data && e.from == "f.rs:use:y:10" && e.to == "f.rs:def:b:1"
+        }));
+        assert!(pdg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data && e.from == "f.rs:use:y:10" && e.to == "f.rs:def:out:10"
+        }));
+        assert!(!pdg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data && e.from == "f.rs:use:x:10" && e.to == "f.rs:def:b:1"
+        }));
+        assert!(!pdg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data && e.from == "f.rs:use:x:10" && e.to == "f.rs:def:out:10"
         }));
     }
 
