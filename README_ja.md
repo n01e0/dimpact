@@ -75,11 +75,17 @@ dimpact id --name foo -f json
     - `depth=1` は direct hit
     - `depth>=2` は transitive な波及
   - `summary.risk`
-    - direct hit 数、transitive hit 数、影響 file 数、影響 symbol 数から作る軽量な初期リスク評価
-    - レビュー/CI トリアージ向けの目安であり、生のグラフ確認の代替ではありません
+    - direct hit 数、transitive hit 数、影響 file 数、影響 symbol 数から作る軽量な一次トリアージ優先度
+    - 本番障害の severity 予測ではなく、レビュー/CI でどれくらい慎重に見るべきかの目安です
+    - ざっくりした読み方:
+      - `low`: まず局所 diff とみなして変更近傍から見る
+      - `medium`: 近い caller や周辺 file まで確認候補に入れる
+      - `high`: caller 側へ広く波及している前提で早めにグラフを確認する
   - `summary.affected_modules`
     - impacted symbol を path ベースで軽量にグルーピングしたもの
     - 「次にどのディレクトリ / モジュールを開くべきか」を決めるための補助です
+    - 読みやすさのため、`src/main.rs` / `src/lib.rs` / `src/engine/mod.rs` のような entry-like file は親ディレクトリへ畳み、repo root の entry file は `(root)` と表示されます
+- 現時点では `summary.affected_processes` はありません。entrypoint 判定の heuristic と fixture を固めるまで意図的に見送っています。
 - JSON のイメージ:
   ```json
   {
@@ -102,7 +108,7 @@ dimpact id --name foo -f json
       },
       "affected_modules": [
         { "module": "src/engine", "symbol_count": 4, "file_count": 2 },
-        { "module": "src/bin", "symbol_count": 2, "file_count": 1 }
+        { "module": "(root)", "symbol_count": 2, "file_count": 1 }
       ]
     },
     "confidence_filter": {
@@ -115,8 +121,8 @@ dimpact id --name foo -f json
   ```
 - 運用上の読み順:
   - まず `by_depth` で direct / transitive を分けて見る
-  - 次に `risk` でレビュー優先度や CI 上の注意度をざっくり判断する
-  - `affected_modules` で、次に見るべきディレクトリ / モジュールを絞る
+  - 次に `risk` でどれくらい強くトリアージすべきかを判断する（`low` = 局所優先、`medium` = 近傍 caller まで確認、`high` = 広い波及を疑う）
+  - `affected_modules` で、次に見るべきディレクトリ / モジュールを絞る。`(root)` は `main.rs` という file 名そのものではなく、repo root の entry 周辺を指します
   - 最後に `impacted_symbols` / `edges` で具体的な伝播経路を確認する
 - `confidence_filter` は `summary` の中ではなく、引き続きトップレベル sibling として出ます。
 - `--per-seed` 指定時は、各変更/シードシンボルごとの `impacts[].output.summary` 配下に同じ summary が入ります。
