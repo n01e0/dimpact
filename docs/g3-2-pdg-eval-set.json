@@ -1,0 +1,252 @@
+{
+  "generated_by": "manual G3-2 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "fixed evaluation set for PDG / propagation improvement work",
+  "defaults": {
+    "lanes": [
+      "baseline",
+      "pdg",
+      "propagation"
+    ],
+    "note": "use dot for graph-shape cases and json --with-edges for symbol-level FP/FN guard cases"
+  },
+  "cases": [
+    {
+      "case_id": "rust-callsite-summary-bridge",
+      "lang": "rust",
+      "source_kind": "mirrored_test_fixture",
+      "source": "tests/cli_pdg_propagation.rs",
+      "failure_kind": "fn",
+      "primary_view": "dot",
+      "focus": "callsite use -> callee -> assigned def bridge",
+      "direction": "callees",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--direction",
+          "callees",
+          "--format",
+          "dot"
+        ],
+        "pdg": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "builder": "mirror tests/cli_pdg_propagation.rs::setup_repo()",
+        "initial_file": "f.rs",
+        "mutation": {
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        }
+      },
+      "observables": {
+        "want": [
+          "propagation lane should contain a bridge from callsite use(x) into callee-related nodes",
+          "propagation lane should connect callee-side flow back to assigned def(y)"
+        ],
+        "avoid": [
+          "broad unrelated callsite-node fan-out"
+        ]
+      }
+    },
+    {
+      "case_id": "rust-alias-reassignment-latest-def",
+      "lang": "rust",
+      "source_kind": "mirrored_unit_test_shape",
+      "source": "src/dfg.rs::rust_alias_chain_and_reassignment_prefers_latest_def",
+      "failure_kind": "fn_fp",
+      "primary_view": "dot",
+      "focus": "alias chain plus latest-def preference under reassignment",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "builder": "mirror the unit-test source as a temporary repo fixture",
+        "initial_file": "f.rs",
+        "initial_source": "let mut a = seed;\nlet b = a;\na = other;\nlet c = a;\nlet d = b;\n",
+        "mutation_note": "use a one-line change on the final alias assignment so the diff selects the same enclosing function/file while preserving the latest-def shape"
+      },
+      "observables": {
+        "want": [
+          "edge def:a:3 -> def:c:4",
+          "alias chain def:a:1 -> def:b:2 and def:b:2 -> def:d:5"
+        ],
+        "avoid": [
+          "stale edge def:a:1 -> def:c:4"
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-callees-chain-alias-return",
+      "lang": "ruby",
+      "source_kind": "fixture",
+      "source": "tests/fixtures/ruby/analyzer_hard_cases_callees_chain_alias_return.rb",
+      "failure_kind": "fn",
+      "primary_view": "dot+json",
+      "focus": "temp alias / return-flow chain from real-corpus-shaped Ruby fixture",
+      "direction": "callers",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--direction",
+          "callers",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "pdg": [
+          "impact",
+          "--direction",
+          "callers",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callers",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "repo_file": "demo/chain.rb",
+        "mutation": {
+          "replace": "v + inc",
+          "with": "(v + inc) + 1"
+        }
+      },
+      "observables": {
+        "want": [
+          "caller chain should remain visible through temp alias / return-flow steps",
+          "propagation lane should preserve interpretable local data-flow around v = fNN and v + inc"
+        ],
+        "avoid": [
+          "chain collapse around temp alias nodes",
+          "spurious fan-out outside the linear chain"
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-dynamic-alias-define-method-no-leak",
+      "lang": "ruby",
+      "source_kind": "fixture",
+      "source": "tests/fixtures/ruby/analyzer_hard_cases_dynamic_alias_define_method.rb",
+      "failure_kind": "fp",
+      "primary_view": "json",
+      "focus": "alias / define_method should not leak into unrelated dynamic target",
+      "direction": "callers",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--direction",
+          "callers",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callers",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "repo_file": "demo/alias_define.rb",
+        "mutation": {
+          "replace": ":ok",
+          "with": ":ko"
+        }
+      },
+      "observables": {
+        "want": [
+          "original -> aliased_* -> defined_* -> execute path remains intact"
+        ],
+        "avoid": [
+          "defined_only appearing as an impacted/unrelated dynamic target"
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-dynamic-send-public-send-target-separation",
+      "lang": "ruby",
+      "source_kind": "fixture",
+      "source": "tests/fixtures/ruby/analyzer_hard_cases_dynamic_send_public_send.rb",
+      "failure_kind": "fn_fp",
+      "primary_view": "json",
+      "focus": "dynamic send/public_send target separation",
+      "direction": "callers",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--direction",
+          "callers",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callers",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "repo_file": "demo/send_public_send.rb",
+        "mutation": {
+          "replace": "send(:target_sym)",
+          "with": "send(:target_sym).to_s"
+        }
+      },
+      "observables": {
+        "want": [
+          "local-var mediated target edges remain visible",
+          "target_sym and target_str stay distinguishable"
+        ],
+        "avoid": [
+          "smearing all dynamic targets into one broad impacted set"
+        ]
+      }
+    }
+  ]
+}
