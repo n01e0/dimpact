@@ -2250,6 +2250,7 @@ fn build_impact_output(
         impacted_symbols,
         edges,
         &summary_depth_by_symbol_id,
+        std::collections::HashMap::new(),
     )
 }
 

@@ -79,12 +79,23 @@ pub struct ImpactRiskSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactWitness {
+    pub symbol_id: String,
+    pub depth: usize,
+    pub root_symbol_id: String,
+    pub via_symbol_id: String,
+    pub edge: Reference,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactOutput {
     pub changed_symbols: Vec<Symbol>,
     pub impacted_symbols: Vec<Symbol>,
     pub impacted_files: Vec<String>,
     pub edges: Vec<Reference>,
     pub impacted_by_file: std::collections::HashMap<String, Vec<Symbol>>, // file -> impacted symbols in that file
+    #[serde(default)]
+    pub impacted_witnesses: std::collections::HashMap<String, ImpactWitness>,
     #[serde(default)]
     pub summary: ImpactSummary,
 }
@@ -234,6 +245,7 @@ pub(crate) fn finalize_impact_output(
     mut impacted_symbols: Vec<Symbol>,
     edges: Vec<Reference>,
     min_depth_by_symbol_id: &HashMap<String, usize>,
+    impacted_witnesses: std::collections::HashMap<String, ImpactWitness>,
 ) -> ImpactOutput {
     impacted_symbols.sort_by(|a, b| a.id.0.cmp(&b.id.0));
     impacted_symbols.dedup_by(|a, b| a.id.0 == b.id.0);
@@ -264,6 +276,7 @@ pub(crate) fn finalize_impact_output(
         impacted_files,
         edges,
         impacted_by_file,
+        impacted_witnesses,
         summary: ImpactSummary {
             by_depth,
             affected_modules,
@@ -776,25 +789,29 @@ pub fn compute_impact(
         index.symbols.iter().map(|s| (s.id.0.as_str(), s)).collect();
 
     // Build adjacency maps
-    let mut fwd: HashMap<&str, Vec<&str>> = HashMap::new(); // from -> [to]
-    let mut rev: HashMap<&str, Vec<&str>> = HashMap::new(); // to -> [from]
+    let mut fwd: HashMap<&str, Vec<&Reference>> = HashMap::new(); // from -> [edge]
+    let mut rev: HashMap<&str, Vec<&Reference>> = HashMap::new(); // to -> [edge]
     for e in refs {
         let from = e.from.0.as_str();
         let to = e.to.0.as_str();
-        fwd.entry(from).or_default().push(to);
-        rev.entry(to).or_default().push(from);
+        fwd.entry(from).or_default().push(e);
+        rev.entry(to).or_default().push(e);
     }
 
     let changed_ids: HashSet<String> = changed.iter().map(|s| s.id.0.clone()).collect();
 
     let mut min_depth_by_symbol_id: HashMap<String, usize> = HashMap::new();
     let mut summary_depth_by_symbol_id: HashMap<String, usize> = HashMap::new();
+    let mut witness_depth_by_symbol_id: HashMap<String, usize> = HashMap::new();
+    let mut witness_by_symbol_id: HashMap<String, (String, Reference)> = HashMap::new();
+    let mut root_by_symbol_id: HashMap<String, String> = HashMap::new();
     let mut reached_changed_via_callees: HashSet<String> = HashSet::new();
     let mut q: VecDeque<(String, usize)> = VecDeque::new();
     // Seed queue with non-ignored changed symbols
     for s in changed {
         if !path_is_ignored(&s.file, &opts.ignore_dirs) {
             record_min_depth(&mut min_depth_by_symbol_id, &s.id.0, 0);
+            root_by_symbol_id.insert(s.id.0.clone(), s.id.0.clone());
             q.push_back((s.id.0.clone(), 0));
         }
     }
@@ -812,8 +829,9 @@ pub fn compute_impact(
         }
         match opts.direction {
             ImpactDirection::Callers => {
-                if let Some(nbs) = rev.get(cur.as_str()) {
-                    for &n in nbs {
+                if let Some(edges) = rev.get(cur.as_str()) {
+                    for edge in edges {
+                        let n = edge.from.0.as_str();
                         let next_depth = d + 1;
                         record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
                         if min_depth_by_symbol_id
@@ -821,32 +839,63 @@ pub fn compute_impact(
                             .is_none_or(|best| next_depth < *best)
                         {
                             record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            witness_depth_by_symbol_id.insert(n.to_string(), next_depth);
+                            witness_by_symbol_id
+                                .insert(n.to_string(), (cur.clone(), (*edge).clone()));
+                            let root_id = root_by_symbol_id
+                                .get(cur.as_str())
+                                .cloned()
+                                .unwrap_or_else(|| cur.clone());
+                            root_by_symbol_id.insert(n.to_string(), root_id);
                             q.push_back((n.to_string(), next_depth));
                         }
                     }
                 }
             }
             ImpactDirection::Callees => {
-                if let Some(nbs) = fwd.get(cur.as_str()) {
-                    for &n in nbs {
+                if let Some(edges) = fwd.get(cur.as_str()) {
+                    for edge in edges {
+                        let n = edge.to.0.as_str();
                         let next_depth = d + 1;
                         record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
                         if changed_ids.contains(n) && n != cur {
                             reached_changed_via_callees.insert(n.to_string());
+                            if witness_depth_by_symbol_id
+                                .get(n)
+                                .is_none_or(|best| next_depth < *best)
+                            {
+                                witness_depth_by_symbol_id.insert(n.to_string(), next_depth);
+                                witness_by_symbol_id
+                                    .insert(n.to_string(), (cur.clone(), (*edge).clone()));
+                                let root_id = root_by_symbol_id
+                                    .get(cur.as_str())
+                                    .cloned()
+                                    .unwrap_or_else(|| cur.clone());
+                                root_by_symbol_id.insert(n.to_string(), root_id);
+                            }
                         }
                         if min_depth_by_symbol_id
                             .get(n)
                             .is_none_or(|best| next_depth < *best)
                         {
                             record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            witness_depth_by_symbol_id.insert(n.to_string(), next_depth);
+                            witness_by_symbol_id
+                                .insert(n.to_string(), (cur.clone(), (*edge).clone()));
+                            let root_id = root_by_symbol_id
+                                .get(cur.as_str())
+                                .cloned()
+                                .unwrap_or_else(|| cur.clone());
+                            root_by_symbol_id.insert(n.to_string(), root_id);
                             q.push_back((n.to_string(), next_depth));
                         }
                     }
                 }
             }
             ImpactDirection::Both => {
-                if let Some(nbs) = rev.get(cur.as_str()) {
-                    for &n in nbs {
+                if let Some(edges) = rev.get(cur.as_str()) {
+                    for edge in edges {
+                        let n = edge.from.0.as_str();
                         let next_depth = d + 1;
                         record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
                         if min_depth_by_symbol_id
@@ -854,12 +903,21 @@ pub fn compute_impact(
                             .is_none_or(|best| next_depth < *best)
                         {
                             record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            witness_depth_by_symbol_id.insert(n.to_string(), next_depth);
+                            witness_by_symbol_id
+                                .insert(n.to_string(), (cur.clone(), (*edge).clone()));
+                            let root_id = root_by_symbol_id
+                                .get(cur.as_str())
+                                .cloned()
+                                .unwrap_or_else(|| cur.clone());
+                            root_by_symbol_id.insert(n.to_string(), root_id);
                             q.push_back((n.to_string(), next_depth));
                         }
                     }
                 }
-                if let Some(nbs) = fwd.get(cur.as_str()) {
-                    for &n in nbs {
+                if let Some(edges) = fwd.get(cur.as_str()) {
+                    for edge in edges {
+                        let n = edge.to.0.as_str();
                         let next_depth = d + 1;
                         record_min_depth(&mut summary_depth_by_symbol_id, n, next_depth);
                         if min_depth_by_symbol_id
@@ -867,6 +925,14 @@ pub fn compute_impact(
                             .is_none_or(|best| next_depth < *best)
                         {
                             record_min_depth(&mut min_depth_by_symbol_id, n, next_depth);
+                            witness_depth_by_symbol_id.insert(n.to_string(), next_depth);
+                            witness_by_symbol_id
+                                .insert(n.to_string(), (cur.clone(), (*edge).clone()));
+                            let root_id = root_by_symbol_id
+                                .get(cur.as_str())
+                                .cloned()
+                                .unwrap_or_else(|| cur.clone());
+                            root_by_symbol_id.insert(n.to_string(), root_id);
                             q.push_back((n.to_string(), next_depth));
                         }
                     }
@@ -894,6 +960,28 @@ pub fn compute_impact(
     if !opts.ignore_dirs.is_empty() {
         impacted_symbols.retain(|s| !path_is_ignored(&s.file, &opts.ignore_dirs));
     }
+
+    let impacted_witnesses: std::collections::HashMap<String, ImpactWitness> = impacted_symbols
+        .iter()
+        .filter_map(|sym| {
+            let depth = summary_depth_by_symbol_id.get(&sym.id.0).copied()?;
+            let (via_symbol_id, edge) = witness_by_symbol_id.get(&sym.id.0)?.clone();
+            let root_symbol_id = root_by_symbol_id
+                .get(&sym.id.0)
+                .cloned()
+                .unwrap_or_else(|| via_symbol_id.clone());
+            Some((
+                sym.id.0.clone(),
+                ImpactWitness {
+                    symbol_id: sym.id.0.clone(),
+                    depth,
+                    root_symbol_id,
+                    via_symbol_id,
+                    edge,
+                },
+            ))
+        })
+        .collect();
 
     let edges = if opts.with_edges.unwrap_or(false) {
         // Keep the primary relationship graph for changed+impacted nodes.
@@ -927,6 +1015,7 @@ pub fn compute_impact(
         impacted_symbols,
         edges,
         &summary_depth_by_symbol_id,
+        impacted_witnesses,
     )
 }
 
@@ -957,6 +1046,167 @@ fn foo() { bar(); }
         let out = compute_impact(&[bar], &index, &refs, &ImpactOptions::default());
         std::env::set_current_dir(cwd).unwrap();
         assert!(out.impacted_symbols.iter().any(|s| s.name == "foo"));
+    }
+
+    #[test]
+    fn compute_impact_records_direct_witness_for_callers() {
+        let changed = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "bar",
+                1,
+            ),
+            name: "bar".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "rust".to_string(),
+        };
+        let impacted = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "foo",
+                2,
+            ),
+            name: "foo".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 2,
+                end_line: 2,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![changed.clone(), impacted.clone()]);
+        let refs = vec![Reference {
+            from: impacted.id.clone(),
+            to: changed.id.clone(),
+            kind: crate::ir::reference::RefKind::Call,
+            file: "main.rs".to_string(),
+            line: 2,
+            certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+            provenance: crate::ir::reference::EdgeProvenance::CallGraph,
+        }];
+
+        let out = compute_impact(&[changed.clone()], &index, &refs, &ImpactOptions::default());
+        let witness = out
+            .impacted_witnesses
+            .get(&impacted.id.0)
+            .expect("witness for foo");
+        assert_eq!(witness.symbol_id, impacted.id.0);
+        assert_eq!(witness.depth, 1);
+        assert_eq!(witness.root_symbol_id, changed.id.0);
+        assert_eq!(witness.via_symbol_id, changed.id.0);
+        assert_eq!(witness.edge.kind, crate::ir::reference::RefKind::Call);
+        assert_eq!(
+            witness.edge.provenance,
+            crate::ir::reference::EdgeProvenance::CallGraph
+        );
+    }
+
+    #[test]
+    fn compute_impact_keeps_symbolic_propagation_in_witness_edge() {
+        let changed = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "seed",
+                1,
+            ),
+            name: "seed".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "rust".to_string(),
+        };
+        let mid = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "mid",
+                2,
+            ),
+            name: "mid".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 2,
+                end_line: 2,
+            },
+            language: "rust".to_string(),
+        };
+        let target = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "target",
+                3,
+            ),
+            name: "target".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 3,
+                end_line: 3,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![changed.clone(), mid.clone(), target.clone()]);
+        let refs = vec![
+            Reference {
+                from: changed.id.clone(),
+                to: mid.id.clone(),
+                kind: crate::ir::reference::RefKind::Call,
+                file: "main.rs".to_string(),
+                line: 2,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
+            },
+            Reference {
+                from: mid.id.clone(),
+                to: target.id.clone(),
+                kind: crate::ir::reference::RefKind::Data,
+                file: "main.rs".to_string(),
+                line: 3,
+                certainty: crate::ir::reference::EdgeCertainty::Inferred,
+                provenance: crate::ir::reference::EdgeProvenance::SymbolicPropagation,
+            },
+        ];
+        let opts = ImpactOptions {
+            direction: ImpactDirection::Callees,
+            max_depth: Some(10),
+            with_edges: Some(true),
+            ignore_dirs: Vec::new(),
+        };
+
+        let out = compute_impact(&[changed.clone()], &index, &refs, &opts);
+        let witness = out
+            .impacted_witnesses
+            .get(&target.id.0)
+            .expect("witness for target");
+        assert_eq!(witness.depth, 2);
+        assert_eq!(witness.root_symbol_id, changed.id.0);
+        assert_eq!(witness.via_symbol_id, mid.id.0);
+        assert_eq!(witness.edge.kind, crate::ir::reference::RefKind::Data);
+        assert_eq!(
+            witness.edge.provenance,
+            crate::ir::reference::EdgeProvenance::SymbolicPropagation
+        );
+        assert_eq!(witness.edge.line, 3);
+        assert_eq!(witness.edge.file, "main.rs");
     }
 
     #[test]
