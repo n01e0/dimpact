@@ -976,6 +976,126 @@ fn edge_location_from_nodes(
     (String::new(), 0, derived_certainty)
 }
 
+struct PdgContext {
+    index: SymbolIndex,
+    pdg: DataFlowGraph,
+    refs: Vec<Reference>,
+}
+
+fn build_local_dfg_for_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> DataFlowGraph {
+    let mut combined = DataFlowGraph {
+        nodes: Vec::new(),
+        edges: Vec::new(),
+    };
+    for path in paths {
+        if path.ends_with(".rs") {
+            if let Ok(src) = fs::read_to_string(path) {
+                let dfg = RustDfgBuilder::build(path, &src);
+                combined.nodes.extend(dfg.nodes);
+                combined.edges.extend(dfg.edges);
+            }
+        } else if path.ends_with(".rb")
+            && let Ok(src) = fs::read_to_string(path)
+        {
+            let dfg = RubyDfgBuilder::build(path, &src);
+            combined.nodes.extend(dfg.nodes);
+            combined.edges.extend(dfg.edges);
+        }
+    }
+    combined
+}
+
+fn build_pdg_context(
+    cache_update_paths: &[String],
+    local_dfg_paths: &[String],
+    with_propagation: bool,
+) -> anyhow::Result<PdgContext> {
+    let (scope, dir_override) = cache::scope_from_env();
+    let mut db = cache::open(scope, dir_override.as_deref())?;
+    let st = cache::stats(&db.conn)?;
+    if st.symbols == 0 {
+        cache::build_all(&mut db.conn)?;
+    }
+    if !cache_update_paths.is_empty() {
+        cache::update_paths(&mut db.conn, cache_update_paths)?;
+    }
+    let (index, refs) = cache::load_graph(&db.conn)?;
+    let combined = build_local_dfg_for_paths(local_dfg_paths.iter().map(String::as_str));
+    let mut pdg = PdgBuilder::build(&combined, &refs);
+    if with_propagation {
+        PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
+    }
+    let pdg_refs = merge_pdg_references(&combined, &pdg, &refs);
+    Ok(PdgContext {
+        index,
+        pdg,
+        refs: pdg_refs,
+    })
+}
+
+fn build_grouped_impact_outputs(
+    seeds: &[dimpact::Symbol],
+    refs: &[Reference],
+    index: &SymbolIndex,
+    opts: &ImpactOptions,
+    min_confidence: Option<ConfidenceOpt>,
+    exclude_dynamic_fallback: bool,
+    with_edges: bool,
+) -> Vec<PerSeedOutput> {
+    let mut grouped: Vec<PerSeedOutput> = Vec::new();
+    for seed in seeds {
+        let mut impacts: Vec<PerSeedImpact> = Vec::new();
+        if opts.direction == ImpactDirection::Both {
+            let mut o = opts.clone();
+            o.direction = ImpactDirection::Callers;
+            let (output, confidence_filter) = apply_confidence_filter(
+                compute_impact(std::slice::from_ref(seed), index, refs, &o),
+                &o,
+                min_confidence,
+                exclude_dynamic_fallback,
+                with_edges,
+            );
+            impacts.push(PerSeedImpact {
+                direction: ImpactDirection::Callers,
+                output,
+                confidence_filter,
+            });
+            let mut o2 = opts.clone();
+            o2.direction = ImpactDirection::Callees;
+            let (output, confidence_filter) = apply_confidence_filter(
+                compute_impact(std::slice::from_ref(seed), index, refs, &o2),
+                &o2,
+                min_confidence,
+                exclude_dynamic_fallback,
+                with_edges,
+            );
+            impacts.push(PerSeedImpact {
+                direction: ImpactDirection::Callees,
+                output,
+                confidence_filter,
+            });
+        } else {
+            let (output, confidence_filter) = apply_confidence_filter(
+                compute_impact(std::slice::from_ref(seed), index, refs, opts),
+                opts,
+                min_confidence,
+                exclude_dynamic_fallback,
+                with_edges,
+            );
+            impacts.push(PerSeedImpact {
+                direction: opts.direction,
+                output,
+                confidence_filter,
+            });
+        }
+        grouped.push(PerSeedOutput {
+            changed_symbol: seed.clone(),
+            impacts,
+        });
+    }
+    grouped
+}
+
 fn merge_pdg_references(
     combined: &DataFlowGraph,
     pdg: &DataFlowGraph,
@@ -1163,11 +1283,8 @@ fn run_impact(
         );
     }
 
-    // Per-seed grouping for call-graph impact (diff or seed based)
+    // Per-seed grouping for call-graph or PDG-enhanced impact (diff or seed based)
     if per_seed {
-        if with_pdg || with_propagation {
-            anyhow::bail!("--per-seed does not support PDG or propagation");
-        }
         // Diff-based grouping: seeds := changed symbols
         if seeds.is_empty() {
             let diff_text = read_diff_from_stdin()?;
@@ -1176,6 +1293,26 @@ fn run_impact(
                 Err(DiffParseError::MissingHeader) => Vec::new(),
                 Err(e) => return Err(anyhow::anyhow!(e)),
             };
+            if with_pdg || with_propagation {
+                let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
+                let pdg = build_pdg_context(
+                    &changed.changed_files,
+                    &changed.changed_files,
+                    with_propagation,
+                )?;
+                let grouped = build_grouped_impact_outputs(
+                    &changed.changed_symbols,
+                    &pdg.refs,
+                    &pdg.index,
+                    &opts,
+                    min_confidence,
+                    exclude_dynamic_fallback,
+                    with_edges,
+                );
+                println!("{}", serde_json::to_string_pretty(&grouped)?);
+                return Ok(());
+            }
+
             let changed: ChangedOutput = engine.changed_symbols(&files, lang)?;
             let (scope, dir_override) = cache::scope_from_env();
             let mut db = cache::open(scope, dir_override.as_deref())?;
@@ -1187,123 +1324,55 @@ fn run_impact(
                 cache::update_paths(&mut db.conn, &changed.changed_files)?;
             }
             let (index, refs) = cache::load_graph(&db.conn)?;
-            let mut grouped: Vec<PerSeedOutput> = Vec::new();
-            for seed in &changed.changed_symbols {
-                let mut impacts: Vec<PerSeedImpact> = Vec::new();
-                if opts.direction == ImpactDirection::Both {
-                    let mut o = opts.clone();
-                    o.direction = ImpactDirection::Callers;
-                    let (output, confidence_filter) = apply_confidence_filter(
-                        compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
-                        &o,
-                        min_confidence,
-                        exclude_dynamic_fallback,
-                        with_edges,
-                    );
-                    impacts.push(PerSeedImpact {
-                        direction: ImpactDirection::Callers,
-                        output,
-                        confidence_filter,
-                    });
-                    let mut o2 = opts.clone();
-                    o2.direction = ImpactDirection::Callees;
-                    let (output, confidence_filter) = apply_confidence_filter(
-                        compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
-                        &o2,
-                        min_confidence,
-                        exclude_dynamic_fallback,
-                        with_edges,
-                    );
-                    impacts.push(PerSeedImpact {
-                        direction: ImpactDirection::Callees,
-                        output,
-                        confidence_filter,
-                    });
-                } else {
-                    let (output, confidence_filter) = apply_confidence_filter(
-                        compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
-                        &opts,
-                        min_confidence,
-                        exclude_dynamic_fallback,
-                        with_edges,
-                    );
-                    impacts.push(PerSeedImpact {
-                        direction: opts.direction,
-                        output,
-                        confidence_filter,
-                    });
-                }
-                grouped.push(PerSeedOutput {
-                    changed_symbol: seed.clone(),
-                    impacts,
-                });
-            }
+            let grouped = build_grouped_impact_outputs(
+                &changed.changed_symbols,
+                &refs,
+                &index,
+                &opts,
+                min_confidence,
+                exclude_dynamic_fallback,
+                with_edges,
+            );
             println!("{}", serde_json::to_string_pretty(&grouped)?);
             return Ok(());
         }
         // Seed-based grouping: group per provided seed
-        {
-            let (scope, dir_override) = cache::scope_from_env();
-            let mut db = cache::open(scope, dir_override.as_deref())?;
-            let st = cache::stats(&db.conn)?;
-            if st.symbols == 0 {
-                cache::build_all(&mut db.conn)?;
-            }
-            let (index, refs) = cache::load_graph(&db.conn)?;
-            let mut grouped: Vec<PerSeedOutput> = Vec::new();
-            for seed in &seeds {
-                let mut impacts: Vec<PerSeedImpact> = Vec::new();
-                if opts.direction == ImpactDirection::Both {
-                    let mut o = opts.clone();
-                    o.direction = ImpactDirection::Callers;
-                    let (output, confidence_filter) = apply_confidence_filter(
-                        compute_impact(std::slice::from_ref(seed), &index, &refs, &o),
-                        &o,
-                        min_confidence,
-                        exclude_dynamic_fallback,
-                        with_edges,
-                    );
-                    impacts.push(PerSeedImpact {
-                        direction: ImpactDirection::Callers,
-                        output,
-                        confidence_filter,
-                    });
-                    let mut o2 = opts.clone();
-                    o2.direction = ImpactDirection::Callees;
-                    let (output, confidence_filter) = apply_confidence_filter(
-                        compute_impact(std::slice::from_ref(seed), &index, &refs, &o2),
-                        &o2,
-                        min_confidence,
-                        exclude_dynamic_fallback,
-                        with_edges,
-                    );
-                    impacts.push(PerSeedImpact {
-                        direction: ImpactDirection::Callees,
-                        output,
-                        confidence_filter,
-                    });
-                } else {
-                    let (output, confidence_filter) = apply_confidence_filter(
-                        compute_impact(std::slice::from_ref(seed), &index, &refs, &opts),
-                        &opts,
-                        min_confidence,
-                        exclude_dynamic_fallback,
-                        with_edges,
-                    );
-                    impacts.push(PerSeedImpact {
-                        direction: opts.direction,
-                        output,
-                        confidence_filter,
-                    });
-                }
-                grouped.push(PerSeedOutput {
-                    changed_symbol: seed.clone(),
-                    impacts,
-                });
-            }
+        if with_pdg || with_propagation {
+            let fileset: std::collections::BTreeSet<String> =
+                seeds.iter().map(|s| s.file.clone()).collect();
+            let local_dfg_paths: Vec<String> = fileset.into_iter().collect();
+            let pdg = build_pdg_context(&[], &local_dfg_paths, with_propagation)?;
+            let grouped = build_grouped_impact_outputs(
+                &seeds,
+                &pdg.refs,
+                &pdg.index,
+                &opts,
+                min_confidence,
+                exclude_dynamic_fallback,
+                with_edges,
+            );
             println!("{}", serde_json::to_string_pretty(&grouped)?);
             return Ok(());
         }
+
+        let (scope, dir_override) = cache::scope_from_env();
+        let mut db = cache::open(scope, dir_override.as_deref())?;
+        let st = cache::stats(&db.conn)?;
+        if st.symbols == 0 {
+            cache::build_all(&mut db.conn)?;
+        }
+        let (index, refs) = cache::load_graph(&db.conn)?;
+        let grouped = build_grouped_impact_outputs(
+            &seeds,
+            &refs,
+            &index,
+            &opts,
+            min_confidence,
+            exclude_dynamic_fallback,
+            with_edges,
+        );
+        println!("{}", serde_json::to_string_pretty(&grouped)?);
+        return Ok(());
     }
 
     // diff-based impact (default when --per-seed not set and no seeds)
@@ -1329,48 +1398,18 @@ fn run_impact(
             opts.ignore_dirs
         );
         if with_pdg || with_propagation {
-            // Build changed symbols and project graph
             let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
-            let (scope, dir_override) = cache::scope_from_env();
-            let mut db = cache::open(scope, dir_override.as_deref())?;
-            let st = cache::stats(&db.conn)?;
-            if st.symbols == 0 {
-                cache::build_all(&mut db.conn)?;
-            }
-            if !changed.changed_files.is_empty() {
-                cache::update_paths(&mut db.conn, &changed.changed_files)?;
-            }
-            let (index, refs) = cache::load_graph(&db.conn)?;
-            let mut combined = DataFlowGraph {
-                nodes: Vec::new(),
-                edges: Vec::new(),
-            };
-            for path in &changed.changed_files {
-                if path.ends_with(".rs") {
-                    if let Ok(src) = fs::read_to_string(path) {
-                        let dfg = RustDfgBuilder::build(path, &src);
-                        combined.nodes.extend(dfg.nodes);
-                        combined.edges.extend(dfg.edges);
-                    }
-                } else if path.ends_with(".rb")
-                    && let Ok(src) = fs::read_to_string(path)
-                {
-                    let dfg = RubyDfgBuilder::build(path, &src);
-                    combined.nodes.extend(dfg.nodes);
-                    combined.edges.extend(dfg.edges);
-                }
-            }
-            let mut pdg = PdgBuilder::build(&combined, &refs);
-            if with_propagation {
-                PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
-            }
+            let pdg = build_pdg_context(
+                &changed.changed_files,
+                &changed.changed_files,
+                with_propagation,
+            )?;
             if matches!(fmt, OutputFormat::Dot) {
-                println!("{}", dfg_to_dot(&pdg));
+                println!("{}", dfg_to_dot(&pdg.pdg));
                 return Ok(());
             }
-            let pdg_refs = merge_pdg_references(&combined, &pdg, &refs);
             let (out, confidence_filter) = apply_confidence_filter(
-                compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts),
+                compute_impact(&changed.changed_symbols, &pdg.index, &pdg.refs, &opts),
                 &opts,
                 min_confidence,
                 exclude_dynamic_fallback,
@@ -1404,45 +1443,12 @@ fn run_impact(
         opts.ignore_dirs
     );
     if with_pdg || with_propagation {
-        // PDG path for seeds: build index/refs from cache and DFG for seed files
-        let (scope, dir_override) = cache::scope_from_env();
-        let mut db = cache::open(scope, dir_override.as_deref())?;
-        let st = cache::stats(&db.conn)?;
-        if st.symbols == 0 {
-            cache::build_all(&mut db.conn)?;
-        }
-        let (index, refs) = cache::load_graph(&db.conn)?;
-        let mut combined = DataFlowGraph {
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        };
-        // Build DFG for files containing seeds (Rust/Ruby only)
-        let mut fileset: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        for s in &seeds {
-            fileset.insert(s.file.clone());
-        }
-        for path in fileset {
-            if path.ends_with(".rs") {
-                if let Ok(src) = fs::read_to_string(&path) {
-                    let dfg = RustDfgBuilder::build(&path, &src);
-                    combined.nodes.extend(dfg.nodes);
-                    combined.edges.extend(dfg.edges);
-                }
-            } else if path.ends_with(".rb")
-                && let Ok(src) = fs::read_to_string(&path)
-            {
-                let dfg = RubyDfgBuilder::build(&path, &src);
-                combined.nodes.extend(dfg.nodes);
-                combined.edges.extend(dfg.edges);
-            }
-        }
-        let mut pdg = PdgBuilder::build(&combined, &refs);
-        if with_propagation {
-            PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
-        }
-        let pdg_refs = merge_pdg_references(&combined, &pdg, &refs);
+        let fileset: std::collections::BTreeSet<String> =
+            seeds.iter().map(|s| s.file.clone()).collect();
+        let local_dfg_paths: Vec<String> = fileset.into_iter().collect();
+        let pdg = build_pdg_context(&[], &local_dfg_paths, with_propagation)?;
         let (out, confidence_filter) = apply_confidence_filter(
-            compute_impact(&seeds, &index, &pdg_refs, &opts),
+            compute_impact(&seeds, &pdg.index, &pdg.refs, &opts),
             &opts,
             min_confidence,
             exclude_dynamic_fallback,
