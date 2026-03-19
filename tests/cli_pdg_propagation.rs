@@ -116,3 +116,28 @@ fn pdg_path_assigns_confirmed_or_inferred_confidence_only() {
         "PDG path should not emit dynamic_fallback certainty"
     );
 }
+
+#[test]
+fn pdg_propagation_adds_direct_summary_bridge_for_single_line_callee() {
+    let (_tmp, repo) = setup_repo();
+    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    let diff = String::from_utf8(diff_out.stdout).unwrap();
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(&repo)
+        .arg("impact")
+        .arg("--with-propagation")
+        .arg("--format")
+        .arg("dot")
+        .write_stdin(diff)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
+    assert!(
+        stdout.contains("\"f.rs:use:x:4\" -> \"f.rs:def:y:4\""),
+        "expected summary bridge from callsite arg use into assigned def, got:\n{}",
+        stdout
+    );
+}
