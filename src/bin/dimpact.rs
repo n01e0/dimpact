@@ -4,11 +4,11 @@ use dimpact::EngineConfig;
 use dimpact::cache;
 use dimpact::compute_changed_symbols;
 use dimpact::compute_impact;
-use dimpact::dfg::{DataFlowGraph, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
+use dimpact::dfg::{DataFlowGraph, DependencyKind, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
 use dimpact::dfg_to_dot;
 use dimpact::engine::{AutoPolicy, EngineKind, make_engine_with_auto_policy};
 use dimpact::ir::SymbolId;
-use dimpact::ir::reference::{EdgeCertainty, RefKind, Reference, SymbolIndex};
+use dimpact::ir::reference::{EdgeCertainty, EdgeProvenance, RefKind, Reference, SymbolIndex};
 use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{DiffParseError, parse_unified_diff};
 use dimpact::{ImpactDirection, ImpactOptions, ImpactOutput};
@@ -921,6 +921,148 @@ struct PerSeedOutput {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn strongest_certainty(a: EdgeCertainty, b: EdgeCertainty) -> EdgeCertainty {
+    if certainty_rank(a.clone()) >= certainty_rank(b.clone()) {
+        a
+    } else {
+        b
+    }
+}
+
+fn ref_kind_from_dependency(kind: &DependencyKind) -> RefKind {
+    match kind {
+        DependencyKind::Data => RefKind::Data,
+        DependencyKind::Control => RefKind::Control,
+    }
+}
+
+fn edge_location_from_nodes(
+    from: &str,
+    to: &str,
+    nodes_by_id: &std::collections::HashMap<String, (String, u32)>,
+    callsite_certainty_by_loc: &std::collections::HashMap<(String, u32), EdgeCertainty>,
+) -> (String, u32, Option<EdgeCertainty>) {
+    let from_loc = nodes_by_id.get(from).cloned();
+    let to_loc = nodes_by_id.get(to).cloned();
+
+    let mut derived_certainty = None;
+    let mut callsite_loc = None;
+    if let Some(loc) = from_loc.clone()
+        && let Some(certainty) = callsite_certainty_by_loc.get(&loc)
+    {
+        derived_certainty = Some(certainty.clone());
+        callsite_loc = Some(loc);
+    }
+    if let Some(loc) = to_loc.clone()
+        && let Some(certainty) = callsite_certainty_by_loc.get(&loc)
+    {
+        derived_certainty = Some(match derived_certainty {
+            Some(existing) => strongest_certainty(existing, certainty.clone()),
+            None => certainty.clone(),
+        });
+        if callsite_loc.is_none() {
+            callsite_loc = Some(loc);
+        }
+    }
+    if let Some((file, line)) = callsite_loc {
+        return (file, line, derived_certainty);
+    }
+    if let Some((file, line)) = to_loc {
+        return (file, line, derived_certainty);
+    }
+    if let Some((file, line)) = from_loc {
+        return (file, line, derived_certainty);
+    }
+    (String::new(), 0, derived_certainty)
+}
+
+fn merge_pdg_references(
+    combined: &DataFlowGraph,
+    pdg: &DataFlowGraph,
+    refs: &[Reference],
+) -> Vec<Reference> {
+    let mut merged = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push_ref = |r: Reference| {
+        let key = (
+            r.from.0.clone(),
+            r.to.0.clone(),
+            r.kind.clone(),
+            r.file.clone(),
+            r.line,
+            r.certainty.clone(),
+            r.provenance.clone(),
+        );
+        if seen.insert(key) {
+            merged.push(r);
+        }
+    };
+
+    let nodes_by_id: std::collections::HashMap<String, (String, u32)> = combined
+        .nodes
+        .iter()
+        .map(|n| (n.id.clone(), (n.file.clone(), n.line)))
+        .collect();
+    let mut callsite_certainty_by_loc: std::collections::HashMap<(String, u32), EdgeCertainty> =
+        std::collections::HashMap::new();
+    for r in refs {
+        let key = (r.file.clone(), r.line);
+        callsite_certainty_by_loc
+            .entry(key)
+            .and_modify(|existing| {
+                *existing = strongest_certainty(existing.clone(), r.certainty.clone())
+            })
+            .or_insert_with(|| r.certainty.clone());
+        let mut base_ref = r.clone();
+        base_ref.provenance = EdgeProvenance::CallGraph;
+        push_ref(base_ref);
+    }
+
+    for e in &combined.edges {
+        let (file, line, _) =
+            edge_location_from_nodes(&e.from, &e.to, &nodes_by_id, &callsite_certainty_by_loc);
+        push_ref(Reference {
+            from: SymbolId(e.from.clone()),
+            to: SymbolId(e.to.clone()),
+            kind: ref_kind_from_dependency(&e.kind),
+            file,
+            line,
+            certainty: EdgeCertainty::Inferred,
+            provenance: EdgeProvenance::LocalDfg,
+        });
+    }
+
+    let mut base_edge_keys: std::collections::HashSet<(String, String, DependencyKind)> = combined
+        .edges
+        .iter()
+        .map(|e| (e.from.clone(), e.to.clone(), e.kind.clone()))
+        .collect();
+    base_edge_keys.extend(
+        refs.iter()
+            .map(|r| (r.from.0.clone(), r.to.0.clone(), DependencyKind::Data)),
+    );
+
+    for e in &pdg.edges {
+        let key = (e.from.clone(), e.to.clone(), e.kind.clone());
+        if base_edge_keys.contains(&key) {
+            continue;
+        }
+        let (file, line, derived_certainty) =
+            edge_location_from_nodes(&e.from, &e.to, &nodes_by_id, &callsite_certainty_by_loc);
+        push_ref(Reference {
+            from: SymbolId(e.from.clone()),
+            to: SymbolId(e.to.clone()),
+            kind: ref_kind_from_dependency(&e.kind),
+            file,
+            line,
+            certainty: derived_certainty.unwrap_or(EdgeCertainty::Inferred),
+            provenance: EdgeProvenance::SymbolicPropagation,
+        });
+    }
+
+    merged
+}
+
 fn run_impact(
     fmt: OutputFormat,
     lang_opt: LangOpt,
@@ -1226,36 +1368,7 @@ fn run_impact(
                 println!("{}", dfg_to_dot(&pdg));
                 return Ok(());
             }
-            let confirmed_pairs: std::collections::HashSet<(String, String)> = refs
-                .iter()
-                .filter(|r| {
-                    matches!(
-                        r.certainty,
-                        dimpact::ir::reference::EdgeCertainty::Confirmed
-                    )
-                })
-                .map(|r| (r.from.0.clone(), r.to.0.clone()))
-                .collect();
-            let pdg_refs: Vec<Reference> = pdg
-                .edges
-                .into_iter()
-                .map(|e| {
-                    let pair = (e.from.clone(), e.to.clone());
-                    let certainty = if confirmed_pairs.contains(&pair) {
-                        dimpact::ir::reference::EdgeCertainty::Confirmed
-                    } else {
-                        dimpact::ir::reference::EdgeCertainty::Inferred
-                    };
-                    Reference {
-                        from: SymbolId(e.from),
-                        to: SymbolId(e.to),
-                        kind: RefKind::Call,
-                        file: String::new(),
-                        line: 0,
-                        certainty,
-                    }
-                })
-                .collect();
+            let pdg_refs = merge_pdg_references(&combined, &pdg, &refs);
             let (out, confidence_filter) = apply_confidence_filter(
                 compute_impact(&changed.changed_symbols, &index, &pdg_refs, &opts),
                 &opts,
@@ -1327,36 +1440,7 @@ fn run_impact(
         if with_propagation {
             PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
         }
-        let confirmed_pairs: std::collections::HashSet<(String, String)> = refs
-            .iter()
-            .filter(|r| {
-                matches!(
-                    r.certainty,
-                    dimpact::ir::reference::EdgeCertainty::Confirmed
-                )
-            })
-            .map(|r| (r.from.0.clone(), r.to.0.clone()))
-            .collect();
-        let pdg_refs: Vec<Reference> = pdg
-            .edges
-            .into_iter()
-            .map(|e| {
-                let pair = (e.from.clone(), e.to.clone());
-                let certainty = if confirmed_pairs.contains(&pair) {
-                    dimpact::ir::reference::EdgeCertainty::Confirmed
-                } else {
-                    dimpact::ir::reference::EdgeCertainty::Inferred
-                };
-                Reference {
-                    from: SymbolId(e.from),
-                    to: SymbolId(e.to),
-                    kind: RefKind::Call,
-                    file: String::new(),
-                    line: 0,
-                    certainty,
-                }
-            })
-            .collect();
+        let pdg_refs = merge_pdg_references(&combined, &pdg, &refs);
         let (out, confidence_filter) = apply_confidence_filter(
             compute_impact(&seeds, &index, &pdg_refs, &opts),
             &opts,
@@ -1741,6 +1825,103 @@ mod tests {
         unsafe {
             std::env::remove_var("DIMPACT_AUTO_POLICY");
         }
+    }
+
+    #[test]
+    fn merge_pdg_references_preserves_kind_certainty_and_provenance() {
+        let combined = DataFlowGraph {
+            nodes: vec![
+                dimpact::dfg::DfgNode {
+                    id: "f.rs:def:x:10".to_string(),
+                    name: "x".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                dimpact::dfg::DfgNode {
+                    id: "f.rs:use:x:10".to_string(),
+                    name: "x".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                dimpact::dfg::DfgNode {
+                    id: "f.rs:def:y:10".to_string(),
+                    name: "y".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 10,
+                },
+                dimpact::dfg::DfgNode {
+                    id: "f.rs:ctrl:9:10".to_string(),
+                    name: "control".to_string(),
+                    file: "f.rs".to_string(),
+                    line: 9,
+                },
+            ],
+            edges: vec![
+                dimpact::dfg::DfgEdge {
+                    from: "f.rs:def:x:10".to_string(),
+                    to: "f.rs:use:x:10".to_string(),
+                    kind: DependencyKind::Data,
+                },
+                dimpact::dfg::DfgEdge {
+                    from: "f.rs:ctrl:9:10".to_string(),
+                    to: "f.rs:def:y:10".to_string(),
+                    kind: DependencyKind::Control,
+                },
+            ],
+        };
+        let refs = vec![Reference {
+            from: SymbolId("rust:f.rs:fn:caller:9".to_string()),
+            to: SymbolId("rust:f.rs:fn:callee:1".to_string()),
+            kind: RefKind::Call,
+            file: "f.rs".to_string(),
+            line: 10,
+            certainty: EdgeCertainty::Confirmed,
+            provenance: EdgeProvenance::CallGraph,
+        }];
+        let mut pdg = combined.clone();
+        pdg.edges.push(dimpact::dfg::DfgEdge {
+            from: refs[0].from.0.clone(),
+            to: refs[0].to.0.clone(),
+            kind: DependencyKind::Data,
+        });
+        pdg.edges.push(dimpact::dfg::DfgEdge {
+            from: "f.rs:use:x:10".to_string(),
+            to: "f.rs:def:y:10".to_string(),
+            kind: DependencyKind::Data,
+        });
+
+        let merged = merge_pdg_references(&combined, &pdg, &refs);
+
+        assert!(merged.iter().any(|r| {
+            r.kind == RefKind::Call
+                && r.provenance == EdgeProvenance::CallGraph
+                && r.certainty == EdgeCertainty::Confirmed
+                && r.file == "f.rs"
+                && r.line == 10
+        }));
+        assert!(merged.iter().any(|r| {
+            r.kind == RefKind::Data
+                && r.provenance == EdgeProvenance::LocalDfg
+                && r.certainty == EdgeCertainty::Inferred
+                && r.from.0 == "f.rs:def:x:10"
+                && r.to.0 == "f.rs:use:x:10"
+        }));
+        assert!(merged.iter().any(|r| {
+            r.kind == RefKind::Control
+                && r.provenance == EdgeProvenance::LocalDfg
+                && r.certainty == EdgeCertainty::Inferred
+                && r.from.0 == "f.rs:ctrl:9:10"
+                && r.to.0 == "f.rs:def:y:10"
+        }));
+        assert!(merged.iter().any(|r| {
+            r.kind == RefKind::Data
+                && r.provenance == EdgeProvenance::SymbolicPropagation
+                && r.certainty == EdgeCertainty::Confirmed
+                && r.file == "f.rs"
+                && r.line == 10
+                && r.from.0 == "f.rs:use:x:10"
+                && r.to.0 == "f.rs:def:y:10"
+        }));
     }
 
     #[test]

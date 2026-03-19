@@ -135,6 +135,14 @@ fn pdg_path_assigns_confirmed_or_inferred_confidence_only() {
         .iter()
         .filter_map(|e| e["certainty"].as_str().map(|s| s.to_string()))
         .collect();
+    let kinds: std::collections::BTreeSet<String> = edges
+        .iter()
+        .filter_map(|e| e["kind"].as_str().map(|s| s.to_string()))
+        .collect();
+    let provenances: std::collections::BTreeSet<String> = edges
+        .iter()
+        .filter_map(|e| e["provenance"].as_str().map(|s| s.to_string()))
+        .collect();
 
     assert!(
         certainties
@@ -146,6 +154,26 @@ fn pdg_path_assigns_confirmed_or_inferred_confidence_only() {
     assert!(
         !certainties.contains("dynamic_fallback"),
         "PDG path should not emit dynamic_fallback certainty"
+    );
+    assert!(
+        kinds.contains("call"),
+        "expected merged call edges: {:?}",
+        kinds
+    );
+    assert!(
+        kinds.contains("data"),
+        "expected merged data edges: {:?}",
+        kinds
+    );
+    assert!(
+        provenances.contains("call_graph"),
+        "expected call_graph provenance: {:?}",
+        provenances
+    );
+    assert!(
+        provenances.contains("symbolic_propagation"),
+        "expected symbolic_propagation provenance: {:?}",
+        provenances
     );
 }
 
