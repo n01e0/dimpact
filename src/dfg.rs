@@ -60,6 +60,7 @@ impl DfgBuilder for RustDfgBuilder {
         let mut edges: Vec<DfgEdge> = Vec::new();
         // SSA-like ordered definition records: variable -> [(line, def_id)]
         let mut def_records_by_name: HashMap<String, Vec<(u32, String)>> = HashMap::new();
+        let mut param_def_records_by_name: HashMap<String, Vec<(u32, String)>> = HashMap::new();
         // Map variable name -> set of line numbers where it's defined
         let mut def_lines_by_name: HashMap<String, HashSet<u32>> = HashMap::new();
         let mut seen_node_ids: HashSet<String> = HashSet::new();
@@ -101,6 +102,10 @@ impl DfgBuilder for RustDfgBuilder {
                                             line: sl,
                                         });
                                         def_records_by_name
+                                            .entry(name.to_string())
+                                            .or_default()
+                                            .push((sl, node_id.clone()));
+                                        param_def_records_by_name
                                             .entry(name.to_string())
                                             .or_default()
                                             .push((sl, node_id.clone()));
@@ -244,10 +249,11 @@ impl DfgBuilder for RustDfgBuilder {
                 {
                     continue;
                 }
-                let reaching = reaching_def_ids_ssa_like(
+                let reaching = reaching_def_ids_ssa_like_with_same_line_params(
                     token,
                     line_no,
                     &def_records_by_name,
+                    &param_def_records_by_name,
                     &control_ranges,
                 );
                 if !reaching.is_empty() {
@@ -973,6 +979,32 @@ fn reaching_def_ids_ssa_like(
     selected.into_iter().collect()
 }
 
+fn reaching_def_ids_ssa_like_with_same_line_params(
+    name: &str,
+    use_line: u32,
+    def_records_by_name: &std::collections::HashMap<String, Vec<(u32, String)>>,
+    param_def_records_by_name: &std::collections::HashMap<String, Vec<(u32, String)>>,
+    control_ranges: &[(u32, u32)],
+) -> Vec<String> {
+    let reaching = reaching_def_ids_ssa_like(name, use_line, def_records_by_name, control_ranges);
+    if !reaching.is_empty() {
+        return reaching;
+    }
+
+    let Some(param_records) = param_def_records_by_name.get(name) else {
+        return Vec::new();
+    };
+
+    let mut same_line_params: Vec<String> = param_records
+        .iter()
+        .filter(|(line, _)| *line == use_line)
+        .map(|(_, id)| id.clone())
+        .collect();
+    same_line_params.sort();
+    same_line_params.dedup();
+    same_line_params
+}
+
 #[cfg(test)]
 mod pdg_tests {
     use super::*;
@@ -1171,6 +1203,51 @@ mod pdg_tests {
             flow.impacted_node_ids
                 .iter()
                 .any(|id| id.ends_with(":use:b:3"))
+        );
+    }
+
+    #[test]
+    fn function_summary_tracks_same_line_parameter_use_in_single_line_function() {
+        use crate::ir::{Symbol, SymbolKind, TextRange};
+
+        let dfg = RustDfgBuilder::build("f.rs", "fn foo(a: i32) -> i32 { a + 1 }\n");
+        assert!(
+            dfg.nodes.iter().any(|n| n.id == "f.rs:use:a:1"),
+            "single-line parameter use should be tracked"
+        );
+        assert!(
+            dfg.edges.iter().any(|e| {
+                e.kind == DependencyKind::Data && e.from == "f.rs:def:a:1" && e.to == "f.rs:use:a:1"
+            }),
+            "single-line parameter use should connect back to its parameter def"
+        );
+
+        let foo = Symbol {
+            id: SymbolId::new("rust", "f.rs", &SymbolKind::Function, "foo", 1),
+            name: "foo".to_string(),
+            kind: SymbolKind::Function,
+            file: "f.rs".to_string(),
+            range: TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "rust".to_string(),
+        };
+        let index = crate::ir::reference::SymbolIndex::build(vec![foo]);
+        let pdg = PdgBuilder::build(&dfg, &[]);
+        let summaries = PdgBuilder::build_function_summaries(&pdg, &index);
+        let s = summaries.first().expect("summary for foo");
+        assert!(s.inputs.iter().any(|id| id.ends_with(":def:a:1")));
+        let flow = s
+            .flows
+            .iter()
+            .find(|f| f.input_node_id.ends_with(":def:a:1"))
+            .expect("flow for param a");
+        assert!(
+            flow.impacted_node_ids
+                .iter()
+                .any(|id| id.ends_with(":use:a:1")),
+            "single-line return expression should remain visible in summary impact"
         );
     }
 
