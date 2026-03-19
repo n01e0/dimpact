@@ -83,6 +83,62 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_repo_with_file(
+    rel_path: &str,
+    src: &str,
+    before: &str,
+    after: &str,
+) -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    let file_path = path.join(rel_path);
+    if let Some(parent) = file_path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(&file_path, src).unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    let updated = src.replacen(before, after, 1);
+    assert_ne!(updated, src, "expected fixture mutation to change source");
+    fs::write(&file_path, updated).unwrap();
+
+    (dir, path)
+}
+
+fn diff_text(repo: &std::path::Path) -> String {
+    let diff_out = git(repo, &["diff", "--no-ext-diff", "--unified=0"]);
+    String::from_utf8(diff_out.stdout).unwrap()
+}
+
+fn run_impact_json(repo: &std::path::Path, diff: &str, args: &[&str]) -> serde_json::Value {
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(repo)
+        .arg("impact")
+        .args(args)
+        .write_stdin(diff.to_string())
+        .assert()
+        .success();
+    serde_json::from_slice(&assert.get_output().stdout).expect("json output")
+}
+
+fn run_impact_dot(repo: &std::path::Path, diff: &str, args: &[&str]) -> String {
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(repo)
+        .arg("impact")
+        .args(args)
+        .write_stdin(diff.to_string())
+        .assert()
+        .success();
+    String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 output")
+}
+
 #[test]
 fn pdg_propagation_adds_var_to_callee_edge() {
     let (_tmp, repo) = setup_repo();
@@ -205,21 +261,9 @@ fn pdg_propagation_adds_direct_summary_bridge_for_single_line_callee() {
 #[test]
 fn pdg_propagation_does_not_leak_irrelevant_two_arg_bridge() {
     let (_tmp, repo) = setup_two_arg_repo();
-    let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
-    let diff = String::from_utf8(diff_out.stdout).unwrap();
+    let diff = diff_text(&repo);
 
-    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert = cmd
-        .current_dir(&repo)
-        .arg("impact")
-        .arg("--with-propagation")
-        .arg("--format")
-        .arg("dot")
-        .write_stdin(diff)
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
+    let stdout = run_impact_dot(&repo, &diff, &["--with-propagation", "--format", "dot"]);
     assert!(
         stdout.contains("\"f.rs:use:y:5\" -> \"f.rs:def:out:5\""),
         "expected later arg to keep its summary bridge, got:\n{}",
@@ -229,5 +273,217 @@ fn pdg_propagation_does_not_leak_irrelevant_two_arg_bridge() {
         !stdout.contains("\"f.rs:use:x:5\" -> \"f.rs:def:out:5\""),
         "unexpected irrelevant arg bridge leaked into output, got:\n{}",
         stdout
+    );
+}
+
+#[test]
+fn pdg_keeps_latest_def_and_avoids_stale_reassignment_edge() {
+    let src = r#"fn demo() {
+    let mut a = 1;
+    let b = a;
+    a = 2;
+    let c = a;
+    let d = b;
+    println!("{} {}", c, d);
+}
+"#;
+    let (_tmp, repo) = setup_repo_with_file(
+        "f.rs",
+        src,
+        "println!(\"{} {}\", c, d);",
+        "println!(\"{} {}!\", c, d);",
+    );
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+
+    for out in [&pdg, &prop] {
+        assert!(
+            out.contains("\"f.rs:def:a:2\" -> \"f.rs:def:b:3\""),
+            "expected alias edge a:2 -> b:3, got:\n{}",
+            out
+        );
+        assert!(
+            out.contains("\"f.rs:def:a:4\" -> \"f.rs:def:c:5\""),
+            "expected latest-def edge a:4 -> c:5, got:\n{}",
+            out
+        );
+        assert!(
+            out.contains("\"f.rs:def:b:3\" -> \"f.rs:def:d:6\""),
+            "expected alias chain edge b:3 -> d:6, got:\n{}",
+            out
+        );
+        assert!(
+            !out.contains("\"f.rs:def:a:2\" -> \"f.rs:def:c:5\""),
+            "stale a:2 -> c:5 edge should not reappear, got:\n{}",
+            out
+        );
+    }
+}
+
+#[test]
+fn ruby_chain_fixture_only_gains_symbolic_edges_with_propagation() {
+    let src = include_str!("fixtures/ruby/analyzer_hard_cases_callees_chain_alias_return.rb");
+    let (_tmp, repo) = setup_repo_with_file("demo/test.rb", src, "v + inc", "(v + inc) + 1");
+    let diff = diff_text(&repo);
+
+    let baseline = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let pdg = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+
+    assert_eq!(baseline["edges"].as_array().unwrap().len(), 0);
+    assert_eq!(pdg["edges"].as_array().unwrap().len(), 0);
+
+    let prop_edges = prop["edges"].as_array().expect("edges array");
+    assert_eq!(
+        prop_edges.len(),
+        2,
+        "expected fixed pair of symbolic edges: {prop:#}"
+    );
+    assert!(prop_edges.iter().all(|e| e["kind"] == "data"));
+    assert!(
+        prop_edges
+            .iter()
+            .all(|e| e["provenance"] == "symbolic_propagation")
+    );
+    assert!(
+        prop_edges
+            .iter()
+            .any(|e| e["to"] == "demo/test.rb:def:v:14")
+    );
+    assert!(
+        prop_edges
+            .iter()
+            .any(|e| e["to"] == "demo/test.rb:use:v:16")
+    );
+}
+
+#[test]
+fn ruby_alias_define_fixture_keeps_defined_sym_without_leaking_defined_only() {
+    let src = include_str!("fixtures/ruby/analyzer_hard_cases_dynamic_alias_define_method.rb");
+    let (_tmp, repo) = setup_repo_with_file("demo/test.rb", src, ":ok", ":ko");
+    let diff = diff_text(&repo);
+
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let edges = prop["edges"].as_array().expect("edges array");
+
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["to"] == "ruby:demo/test.rb:method:defined_sym:9")
+    );
+    assert!(
+        !edges
+            .iter()
+            .any(|e| e["to"] == "ruby:demo/test.rb:method:defined_only:17"),
+        "unexpected leak into defined_only: {prop:#}"
+    );
+}
+
+#[test]
+fn ruby_send_fixture_keeps_target_separation_under_propagation() {
+    let src = include_str!("fixtures/ruby/analyzer_hard_cases_dynamic_send_public_send.rb");
+    let (_tmp, repo) = setup_repo_with_file(
+        "demo/test.rb",
+        src,
+        "send(:target_sym)",
+        "send(:target_sym).to_s",
+    );
+    let diff = diff_text(&repo);
+
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let targets: std::collections::BTreeSet<String> = prop["edges"]
+        .as_array()
+        .expect("edges array")
+        .iter()
+        .filter_map(|e| e["to"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    assert_eq!(
+        targets,
+        std::collections::BTreeSet::from([
+            "ruby:demo/test.rb:method:target_sym:2".to_string(),
+            "ruby:demo/test.rb:method:target_str:6".to_string(),
+        ]),
+        "propagation should keep dynamic target separation: {prop:#}"
     );
 }
