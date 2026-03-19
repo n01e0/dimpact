@@ -180,7 +180,7 @@ fn cli_impact_json_includes_affected_modules_summary() {
         affected_modules_json(&output),
         vec![
             ("alpha".to_string(), 2, 2),
-            ("main.rs".to_string(), 2, 1),
+            ("(root)".to_string(), 2, 1),
             ("beta".to_string(), 1, 1),
         ]
     );
@@ -200,7 +200,7 @@ fn cli_impact_per_seed_nests_affected_modules_under_output_summary() {
         affected_modules_json(&grouped[0]["impacts"][0]["output"]),
         vec![
             ("alpha".to_string(), 2, 2),
-            ("main.rs".to_string(), 2, 1),
+            ("(root)".to_string(), 2, 1),
             ("beta".to_string(), 1, 1),
         ]
     );
@@ -217,7 +217,7 @@ fn cli_impact_yaml_includes_affected_modules_summary() {
         affected_modules_yaml(&output),
         vec![
             ("alpha".to_string(), 2, 2),
-            ("main.rs".to_string(), 2, 1),
+            ("(root)".to_string(), 2, 1),
             ("beta".to_string(), 1, 1),
         ]
     );
