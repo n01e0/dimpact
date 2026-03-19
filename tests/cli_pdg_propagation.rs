@@ -487,3 +487,90 @@ fn ruby_send_fixture_keeps_target_separation_under_propagation() {
         "propagation should keep dynamic target separation: {prop:#}"
     );
 }
+
+#[test]
+fn per_seed_diff_mode_supports_propagation() {
+    let (_tmp, repo) = setup_repo();
+    let diff = diff_text(&repo);
+
+    let grouped = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    assert_eq!(
+        grouped[0]["changed_symbol"]["name"].as_str(),
+        Some("caller")
+    );
+    let output = &grouped[0]["impacts"][0]["output"];
+    assert!(
+        output["impacted_symbols"]
+            .as_array()
+            .is_some_and(|syms| !syms.is_empty()),
+        "expected impacted symbols in per-seed propagation output: {grouped:#?}"
+    );
+    assert!(
+        output["edges"].as_array().is_some_and(|edges| edges
+            .iter()
+            .any(|e| { e["provenance"] == "call_graph" && e["kind"] == "call" })),
+        "expected merged call edge in per-seed output: {grouped:#?}"
+    );
+    assert!(
+        output["impacted_witnesses"]
+            .as_object()
+            .is_some_and(|w| w.contains_key("rust:f.rs:fn:callee:1")),
+        "expected per-seed witness nesting for impacted callee: {grouped:#?}"
+    );
+}
+
+#[test]
+fn per_seed_seed_mode_supports_pdg() {
+    let (_tmp, repo) = setup_repo();
+
+    let grouped = run_impact_json(
+        &repo,
+        "",
+        &[
+            "--direction",
+            "callees",
+            "--seed-symbol",
+            "rust:f.rs:fn:caller:2",
+            "--with-pdg",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    assert_eq!(
+        grouped[0]["changed_symbol"]["id"].as_str(),
+        Some("rust:f.rs:fn:caller:2")
+    );
+    let output = &grouped[0]["impacts"][0]["output"];
+    assert!(
+        output["impacted_symbols"]
+            .as_array()
+            .is_some_and(|syms| !syms.is_empty()),
+        "expected impacted symbols in seed-based per-seed PDG output: {grouped:#?}"
+    );
+    assert!(
+        output["edges"].as_array().is_some_and(|edges| edges
+            .iter()
+            .any(|e| { e["provenance"] == "call_graph" && e["kind"] == "call" })),
+        "expected call graph edges in seed-based per-seed PDG output: {grouped:#?}"
+    );
+}
