@@ -1,0 +1,122 @@
+{
+  "generated_by": "manual G6-2 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "minimal schema contract for exposing bounded-slice planner reasons as file-level metadata",
+  "applies_to": [
+    "impact --with-pdg",
+    "impact --with-propagation"
+  ],
+  "placement": {
+    "path": "summary.slice_selection",
+    "present_when": "bounded slice planner ran",
+    "omitted_when": "plain impact path without bounded-slice planning"
+  },
+  "top_level_shape": {
+    "planner": "bounded_slice",
+    "files": "ImpactSliceFileMetadata[]",
+    "pruned_candidates": "ImpactSlicePrunedCandidate[]"
+  },
+  "file_metadata": {
+    "required_fields": [
+      "path",
+      "scopes",
+      "reasons"
+    ],
+    "scopes": {
+      "cache_update": "bool",
+      "local_dfg": "bool",
+      "explanation": "bool"
+    },
+    "reason_fields": [
+      "seed_symbol_id",
+      "tier",
+      "kind",
+      "via_symbol_id",
+      "via_path",
+      "bridge_kind"
+    ]
+  },
+  "reason_kinds": [
+    "seed_file",
+    "changed_file",
+    "direct_caller_file",
+    "direct_callee_file",
+    "bridge_completion_file",
+    "module_companion_file"
+  ],
+  "tiers": {
+    "0": [
+      "seed_file",
+      "changed_file"
+    ],
+    "1": [
+      "direct_caller_file",
+      "direct_callee_file"
+    ],
+    "2": [
+      "bridge_completion_file"
+    ],
+    "3": [
+      "module_companion_file"
+    ]
+  },
+  "bridge_kinds": [
+    "wrapper_return",
+    "boundary_alias_continuation",
+    "require_relative_chain"
+  ],
+  "pruned_candidate": {
+    "required_fields": [
+      "seed_symbol_id",
+      "path",
+      "tier",
+      "kind",
+      "prune_reason"
+    ],
+    "optional_fields": [
+      "via_symbol_id",
+      "via_path",
+      "bridge_kind"
+    ],
+    "prune_reasons": [
+      "already_selected",
+      "bridge_budget_exhausted",
+      "cache_update_budget_exhausted",
+      "local_dfg_budget_exhausted",
+      "ranked_out"
+    ]
+  },
+  "ordering": {
+    "files": "path ascending",
+    "reasons": [
+      "seed_symbol_id ascending",
+      "tier ascending",
+      "kind ascending",
+      "via_symbol_id ascending (null last)",
+      "via_path ascending (null last)",
+      "bridge_kind ascending (null last)"
+    ],
+    "pruned_candidates": [
+      "seed_symbol_id ascending",
+      "tier ascending",
+      "path ascending",
+      "kind ascending",
+      "prune_reason ascending"
+    ],
+    "dedup": true
+  },
+  "stability": {
+    "files": "emit [] when slice_selection is present and no selected files remain",
+    "pruned_candidates": "emit [] when slice_selection is present and no candidates were pruned",
+    "same_inner_schema_for_per_seed": true
+  },
+  "semantics": {
+    "slice_selection_files_universe": "planner-selected build/explanation files",
+    "impacted_files_universe": "files containing impacted symbols",
+    "note": "these universes intentionally do not have to match"
+  },
+  "future_hooks": [
+    "witness-to-slice linkage in G6-8",
+    "controlled 2-hop bridge-kind scoring in G6-4/G6-5"
+  ]
+}
