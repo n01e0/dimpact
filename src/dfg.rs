@@ -52,6 +52,66 @@ pub trait DfgBuilder {
 /// Default Rust DFG builder (stub implementation).
 pub struct RustDfgBuilder;
 
+fn parse_ruby_param_name(raw: &str) -> Option<String> {
+    let candidate = raw
+        .trim()
+        .split('=')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches(['*', '&'])
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .trim();
+
+    let mut chars = candidate.chars();
+    let first = chars.next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+    if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        return None;
+    }
+    Some(candidate.to_string())
+}
+
+fn strip_ruby_inline_comment(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for ch in raw.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+            continue;
+        }
+        if (in_single || in_double) && ch == '\\' {
+            out.push(ch);
+            escaped = true;
+            continue;
+        }
+        if !in_double && ch == '\'' {
+            in_single = !in_single;
+            out.push(ch);
+            continue;
+        }
+        if !in_single && ch == '"' {
+            in_double = !in_double;
+            out.push(ch);
+            continue;
+        }
+        if !in_single && !in_double && ch == '#' {
+            break;
+        }
+        out.push(ch);
+    }
+
+    out.trim().to_string()
+}
+
 impl DfgBuilder for RustDfgBuilder {
     fn build(path: &str, source: &str) -> DataFlowGraph {
         use std::collections::{HashMap, HashSet};
@@ -333,37 +393,35 @@ impl DfgBuilder for RubyDfgBuilder {
         ];
 
         // Parse parameters via regex
-        let fn_re = Regex::new(r"def\s+\w+\s*\(([^)]*)\)").unwrap();
+        let fn_re =
+            Regex::new(r"^\s*def\s+[^\s(]+\s*(?:\(([^)]*)\)|\s+([*&A-Za-z_][^#\n;]*))?$").unwrap();
         for (idx, line) in source.lines().enumerate() {
             let line_no = (idx + 1) as u32;
             if let Some(cap) = fn_re.captures(line) {
-                let params = cap.get(1).unwrap().as_str();
+                let params = cap
+                    .get(1)
+                    .or_else(|| cap.get(2))
+                    .map(|m| strip_ruby_inline_comment(m.as_str()))
+                    .unwrap_or_default();
                 for p in params.split(',') {
-                    let name = p
-                        .trim()
-                        .strip_prefix("mut ")
-                        .unwrap_or(p)
-                        .split(':')
-                        .next()
-                        .unwrap_or("");
+                    let Some(name) = parse_ruby_param_name(p) else {
+                        continue;
+                    };
                     if !name.is_empty() {
                         let node_id = format!("{}:def:{}:{}", path, name, line_no);
                         if seen_node_ids.insert(node_id.clone()) {
                             nodes.push(DfgNode {
                                 id: node_id.clone(),
-                                name: name.to_string(),
+                                name: name.clone(),
                                 file: path.to_string(),
                                 line: line_no,
                             });
                             def_records_by_name
-                                .entry(name.to_string())
+                                .entry(name.clone())
                                 .or_default()
                                 .push((line_no, node_id));
                         }
-                        def_lines_by_name
-                            .entry(name.to_string())
-                            .or_default()
-                            .insert(line_no);
+                        def_lines_by_name.entry(name).or_default().insert(line_no);
                     }
                 }
             }
@@ -1819,6 +1877,28 @@ mod tests {
             incoming.iter().any(|id| id.ends_with(":def:a:1")),
             "pre-branch def should remain for non-taken path"
         );
+    }
+
+    #[test]
+    fn ruby_no_paren_method_params_feed_alias_and_return_flow() {
+        let src = r#"def bounce value, fallback: nil
+  alias_value = value
+  return alias_value
+end
+"#;
+        let dfg = RubyDfgBuilder::build("test.rb", src);
+
+        assert!(dfg.nodes.iter().any(|n| n.id == "test.rb:def:value:1"));
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from == "test.rb:def:value:1"
+                && e.to == "test.rb:def:alias_value:2"
+        }));
+        assert!(dfg.edges.iter().any(|e| {
+            e.kind == DependencyKind::Data
+                && e.from == "test.rb:def:alias_value:2"
+                && e.to == "test.rb:use:alias_value:3"
+        }));
     }
 
     #[test]

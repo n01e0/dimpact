@@ -542,6 +542,68 @@ end
     (dir, path)
 }
 
+fn setup_ruby_require_relative_no_paren_wrapper_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::create_dir_all(path.join("app")).unwrap();
+    fs::write(
+        path.join("lib/leaf.rb"),
+        r#"def finish(value)
+  alias_value = value
+  return alias_value
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"require_relative 'leaf'
+
+def helper_noise
+  1
+end
+
+def bounce value
+  noise = helper_noise
+  alias_value = value
+  wrapped = finish(alias_value)
+  return wrapped
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry seed
+  reply = bounce(seed)
+  return reply
+end
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("lib/leaf.rb"),
+        r#"def finish(value)
+  alias_value = value
+  return alias_value.to_s
+end
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn diff_text(repo: &std::path::Path) -> String {
     let diff_out = git(repo, &["diff", "--no-ext-diff", "--unified=0"]);
     String::from_utf8(diff_out.stdout).unwrap()
@@ -1402,6 +1464,107 @@ fn ruby_require_relative_alias_return_only_gains_symbolic_edges_with_propagation
             .filter(|e| e["kind"] == "data")
             .all(|e| e["provenance"] == "symbolic_propagation")),
         "expected propagation-only data edges to stay tagged as symbolic_propagation: {prop:#}"
+    );
+}
+
+#[test]
+fn ruby_require_relative_no_paren_wrapper_recovers_caller_arg_and_callee_param_scope() {
+    let (_tmp, repo) = setup_ruby_require_relative_no_paren_wrapper_repo();
+    let diff = diff_text(&repo);
+
+    let baseline = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let pdg = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+
+    let data_pairs = |value: &serde_json::Value| -> std::collections::BTreeSet<(String, String)> {
+        value["edges"]
+            .as_array()
+            .expect("edges array")
+            .iter()
+            .filter(|e| e["kind"] == "data")
+            .map(|e| {
+                (
+                    e["from"].as_str().unwrap().to_string(),
+                    e["to"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+
+    let baseline_data = data_pairs(&baseline);
+    let pdg_data = data_pairs(&pdg);
+    let prop_data = data_pairs(&prop);
+
+    let caller_arg_bridge = (
+        "app/runner.rb:use:seed:4".to_string(),
+        "ruby:lib/service.rb:method:bounce:7".to_string(),
+    );
+    let callee_param_scope = (
+        "ruby:lib/service.rb:method:bounce:7".to_string(),
+        "lib/service.rb:def:value:7".to_string(),
+    );
+
+    assert!(
+        !baseline_data.contains(&caller_arg_bridge),
+        "baseline should not synthesize the no-paren wrapper caller-arg bridge: {baseline:#}"
+    );
+    assert!(
+        !pdg_data.contains(&caller_arg_bridge),
+        "plain PDG should not synthesize the no-paren wrapper caller-arg bridge: {pdg:#}"
+    );
+    assert!(
+        !baseline_data.contains(&callee_param_scope),
+        "baseline should not surface the no-paren callee param def: {baseline:#}"
+    );
+    assert!(
+        !pdg_data.contains(&callee_param_scope),
+        "plain PDG should not surface the no-paren callee param def: {pdg:#}"
+    );
+    assert!(
+        prop_data.contains(&caller_arg_bridge),
+        "expected propagation to recover the caller arg bridge through the no-paren wrapper: {prop:#}"
+    );
+    assert!(
+        prop_data.contains(&callee_param_scope),
+        "expected propagation to keep the no-paren callee param in symbolic scope: {prop:#}"
     );
 }
 
