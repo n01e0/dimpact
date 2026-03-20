@@ -1154,6 +1154,23 @@ fn per_seed_diff_mode_supports_propagation() {
     );
     assert_eq!(witness["provenance_chain"][0].as_str(), Some("call_graph"));
     assert_eq!(witness["kind_chain"][0].as_str(), Some("call"));
+    assert_eq!(
+        witness["path_compact"][0]["from_symbol_id"].as_str(),
+        Some("rust:f.rs:fn:caller:2")
+    );
+    assert_eq!(
+        witness["path_compact"][0]["to_symbol_id"].as_str(),
+        Some("rust:f.rs:fn:callee:1")
+    );
+    assert_eq!(
+        witness["path_compact"][0]["collapsed_hops"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        witness["provenance_chain_compact"][0].as_str(),
+        Some("call_graph")
+    );
+    assert_eq!(witness["kind_chain_compact"][0].as_str(), Some("call"));
 }
 
 #[test]
