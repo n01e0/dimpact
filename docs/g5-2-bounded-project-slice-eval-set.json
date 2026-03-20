@@ -1,0 +1,345 @@
+{
+  "generated_by": "manual G5-2 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "fixed 2-hop+ multi-file evaluation set for bounded project-slice PDG work",
+  "defaults": {
+    "lanes": [
+      "baseline",
+      "pdg",
+      "propagation"
+    ],
+    "engine": "ts",
+    "note": "keep engine differences out of this set; G5-8 handles engine-consistency baselines"
+  },
+  "relationship_to_g4_2": {
+    "g4_2_role": "one-hop direct-boundary control set",
+    "g5_2_role": "two-hop-plus bounded-slice and bridge-completion set",
+    "replacement": false
+  },
+  "cases": [
+    {
+      "case_id": "rust-three-file-wrapper-return-completion",
+      "lang": "rust",
+      "min_hops": 2,
+      "source_kind": "extended_mirror_fixture",
+      "source": [
+        "docs/g4-2-pdg-multi-file-eval-set.md::rust-cross-file-wrapper-return-flow",
+        "docs/g5-1-bounded-project-slice-design-memo.md",
+        "tests/cli_pdg_propagation.rs::setup_cross_file_wrapper_two_arg_repo"
+      ],
+      "failure_kind": "fn",
+      "primary_view": "dot+json",
+      "focus": "three-file wrapper return-flow that needs one bridge-completion file beyond the direct boundary",
+      "direction": "callees",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "pdg": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "src/core.rs",
+          "src/adapter.rs",
+          "src/main.rs"
+        ],
+        "initial_source": {
+          "src/core.rs": "pub fn core(a: i32) -> i32 { a + 1 }\n",
+          "src/adapter.rs": "pub fn wrap(a: i32) -> i32 {\n    let mid = crate::core::core(a);\n    mid\n}\n",
+          "src/main.rs": "mod core;\nmod adapter;\nfn caller() {\n    let x = 1;\n    let out = adapter::wrap(x);\n    println!(\"{}\", out);\n}\n"
+        },
+        "mutation": {
+          "file": "src/main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        }
+      },
+      "slice_expectation": {
+        "tier0": [
+          "main.rs"
+        ],
+        "tier1": [
+          "adapter.rs"
+        ],
+        "tier2": [
+          "core.rs"
+        ]
+      },
+      "current_gap": "direct-boundary scope can include adapter.rs, but without selecting core.rs as bridge-completion the return-ish flow often falls back to plain call-only explanation",
+      "observables": {
+        "want_after_g5": [
+          "three-file slice includes core.rs as an explicit completion file",
+          "propagation lane bridges main.rs use(x) through adapter.rs and back to main.rs def(out)",
+          "witness or edge provenance is not limited to plain call_graph"
+        ],
+        "avoid": [
+          "skipping the core file entirely",
+          "fan-out into unrelated adapter/core nodes"
+        ]
+      }
+    },
+    {
+      "case_id": "rust-three-file-imported-result-alias-continuation",
+      "lang": "rust",
+      "min_hops": 2,
+      "source_kind": "extended_alias_fixture",
+      "source": [
+        "docs/g4-2-pdg-multi-file-eval-set.md::rust-cross-file-imported-result-alias-chain",
+        "src/dfg.rs::rust_alias_chain_and_reassignment_prefers_latest_def",
+        "tests/cli_impact_imports.rs"
+      ],
+      "failure_kind": "fn_fp",
+      "primary_view": "dot+json",
+      "focus": "adapter-mediated imported result continuation into a caller-side alias chain",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "src/value.rs",
+          "src/adapter.rs",
+          "src/main.rs"
+        ],
+        "initial_source": {
+          "src/value.rs": "pub fn make(a: i32) -> i32 { a + 1 }\n",
+          "src/adapter.rs": "use crate::value;\n\npub fn wrap(a: i32) -> i32 {\n    value::make(a)\n}\n",
+          "src/main.rs": "mod value;\nmod adapter;\nfn caller() {\n    let x = 1;\n    let y = adapter::wrap(x);\n    let alias = y;\n    let out = alias;\n    println!(\"{}\", out);\n}\n"
+        },
+        "mutation": {
+          "file": "src/main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        },
+        "optional_extension": "add `let alias2 = alias;` if a longer caller-side alias chain is needed"
+      },
+      "slice_expectation": {
+        "tier0": [
+          "main.rs"
+        ],
+        "tier1": [
+          "adapter.rs"
+        ],
+        "tier2": [
+          "value.rs"
+        ]
+      },
+      "current_gap": "direct-boundary scope can stop at adapter.rs, leaving the imported result from value.rs weakly stitched into the caller-side alias chain",
+      "observables": {
+        "want_after_g5": [
+          "result of value::make(x) survives the adapter boundary and continues into y -> alias -> out",
+          "witness path shows the adapter-mediated continuation",
+          "alias continuation does not add stale or broad def-to-def edges"
+        ],
+        "avoid": [
+          "call edge only explanation that stops at adapter::wrap",
+          "alias edges unrelated to the intended local chain"
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-three-file-require-relative-alias-return-chain",
+      "lang": "ruby",
+      "min_hops": 2,
+      "source_kind": "split_fixture",
+      "source": [
+        "docs/g4-2-pdg-multi-file-eval-set.md::ruby-cross-file-callees-chain-alias-return",
+        "tests/fixtures/ruby/analyzer_hard_cases_callees_chain_alias_return.rb",
+        "tests/cli_impact_ruby_require.rs",
+        "tests/cli_impact_ruby_require_nested.rs"
+      ],
+      "failure_kind": "fn",
+      "primary_view": "dot+json",
+      "focus": "three-file require_relative chain with a mid-file temp alias and a leaf-file return-ish flow",
+      "direction": "callers",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "pdg": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "lib/leaf.rb",
+          "lib/mid.rb",
+          "app/main.rb"
+        ],
+        "builder": "split analyzer_hard_cases_callees_chain_alias_return.rb so the return-ish expression lives in leaf.rb and the temp alias lives in mid.rb",
+        "mutation": {
+          "file": "lib/leaf.rb",
+          "replace": "v + inc",
+          "with": "(v + inc) + 1"
+        }
+      },
+      "slice_expectation": {
+        "tier0": [
+          "changed file"
+        ],
+        "tier1": [
+          "mid.rb"
+        ],
+        "tier2": [
+          "leaf.rb"
+        ]
+      },
+      "current_gap": "direct-boundary scope can stop at the mid file, leaving the leaf return-ish flow outside the enriched slice even though the callers chain depends on it",
+      "observables": {
+        "want_after_g5": [
+          "mid-file temp alias and leaf-file return-ish flow appear in one bounded slice",
+          "witness or provenance data shows where the data bridge entered the callers chain",
+          "require_relative fallback does not replace graph-first selection"
+        ],
+        "avoid": [
+          "chain collapse around the mid-file temp alias",
+          "broad fan-out beyond the intended linear chain"
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-three-file-dynamic-send-target-separation",
+      "lang": "ruby",
+      "min_hops": 2,
+      "source_kind": "split_fixture",
+      "source": [
+        "docs/g4-2-pdg-multi-file-eval-set.md::ruby-cross-file-dynamic-send-target-separation",
+        "tests/fixtures/ruby/analyzer_hard_cases_dynamic_send_public_send.rb"
+      ],
+      "failure_kind": "fp",
+      "primary_view": "json",
+      "focus": "three-file dynamic send/public_send separation guard under a bounded 2-hop slice",
+      "direction": "callers",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "lib/targets.rb",
+          "lib/router.rb",
+          "app/main.rb"
+        ],
+        "builder": "split analyzer_hard_cases_dynamic_send_public_send.rb so target definitions live in targets.rb and dispatch calls live in router.rb",
+        "mutation": {
+          "file": "lib/router.rb",
+          "replace": "send(:target_sym)",
+          "with": "send(:target_sym).to_s"
+        }
+      },
+      "slice_expectation": {
+        "tier0": [
+          "router or changed dispatch file"
+        ],
+        "tier1": [
+          "main.rb or adjacent boundary file"
+        ],
+        "tier2": [
+          "targets.rb"
+        ]
+      },
+      "current_gap": "once a bounded slice reaches targets.rb, the system must preserve target-specific separation instead of smearing all dynamic targets together",
+      "observables": {
+        "want_after_g5": [
+          "target_sym and target_str remain distinguishable under a three-file slice",
+          "local-var mediated target edges stay specific"
+        ],
+        "avoid": [
+          "all dynamic targets collapsing into one broad impacted set",
+          "loss of existing target-specific resolution"
+        ]
+      }
+    }
+  ]
+}
