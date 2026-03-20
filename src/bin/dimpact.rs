@@ -2,7 +2,6 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dimpact::DfgBuilder;
 use dimpact::EngineConfig;
 use dimpact::cache;
-use dimpact::compute_changed_symbols;
 use dimpact::compute_impact;
 use dimpact::dfg::{DataFlowGraph, DependencyKind, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
 use dimpact::dfg_to_dot;
@@ -1352,7 +1351,7 @@ fn run_impact(
                 Err(e) => return Err(anyhow::anyhow!(e)),
             };
             if with_pdg || with_propagation {
-                let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
+                let changed: ChangedOutput = engine.changed_symbols(&files, lang)?;
                 let pdg = build_pdg_context(
                     &changed.changed_files,
                     &changed.changed_files,
@@ -1464,7 +1463,7 @@ fn run_impact(
             opts.ignore_dirs
         );
         if with_pdg || with_propagation {
-            let changed: ChangedOutput = compute_changed_symbols(&files, lang)?;
+            let changed: ChangedOutput = engine.changed_symbols(&files, lang)?;
             let pdg = build_pdg_context(
                 &changed.changed_files,
                 &changed.changed_files,

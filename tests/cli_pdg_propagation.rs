@@ -322,6 +322,75 @@ fn run_impact_dot(repo: &std::path::Path, diff: &str, args: &[&str]) -> String {
 }
 
 #[test]
+fn pdg_diff_mode_respects_strict_lsp_engine_selection() {
+    let (_tmp, repo) = setup_repo();
+    let diff = diff_text(&repo);
+
+    let mut ts_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    ts_cmd
+        .current_dir(&repo)
+        .env("DIMPACT_DISABLE_REAL_LSP", "1")
+        .arg("impact")
+        .args([
+            "--engine",
+            "ts",
+            "--with-pdg",
+            "--format",
+            "json",
+            "--direction",
+            "callers",
+        ])
+        .write_stdin(diff.clone())
+        .assert()
+        .success();
+
+    for pdg_flag in ["--with-pdg", "--with-propagation"] {
+        let mut base_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+        base_cmd
+            .current_dir(&repo)
+            .env("DIMPACT_DISABLE_REAL_LSP", "1")
+            .arg("impact")
+            .args([
+                "--engine",
+                "lsp",
+                "--engine-lsp-strict",
+                "--format",
+                "json",
+                "--direction",
+                "callers",
+            ])
+            .write_stdin(diff.clone())
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "real LSP disabled by DIMPACT_DISABLE_REAL_LSP=1",
+            ));
+
+        let mut pdg_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+        pdg_cmd
+            .current_dir(&repo)
+            .env("DIMPACT_DISABLE_REAL_LSP", "1")
+            .arg("impact")
+            .args([
+                "--engine",
+                "lsp",
+                "--engine-lsp-strict",
+                pdg_flag,
+                "--format",
+                "json",
+                "--direction",
+                "callers",
+            ])
+            .write_stdin(diff.clone())
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "real LSP disabled by DIMPACT_DISABLE_REAL_LSP=1",
+            ));
+    }
+}
+
+#[test]
 fn pdg_propagation_adds_var_to_callee_edge() {
     let (_tmp, repo) = setup_repo();
     let diff_out = git(&repo, &["diff", "--no-ext-diff", "--unified=0"]);
