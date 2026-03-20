@@ -251,6 +251,33 @@ pub struct ImpactWitnessSliceContext {
     pub selected_files_on_path: Vec<ImpactWitnessSliceFileContext>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactWitnessSliceRankingBasis {
+    SourceKind,
+    Lane,
+    PrimaryEvidenceCount,
+    SecondaryEvidenceCount,
+    CallsitePosition,
+    LexicalTiebreak,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactWitnessSliceSelectedVsPrunedReason {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_symbol_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_bridge_kind: Option<ImpactSliceBridgeKind>,
+    pub pruned_path: String,
+    pub prune_reason: ImpactSlicePruneReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pruned_bridge_kind: Option<ImpactSliceBridgeKind>,
+    pub selected_better_by: ImpactWitnessSliceRankingBasis,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactWitnessSliceFileContext {
     pub path: String,
@@ -260,6 +287,8 @@ pub struct ImpactWitnessSliceFileContext {
     pub selection_reasons: Vec<ImpactSliceReasonMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub seed_reasons: Vec<ImpactSliceReasonMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_vs_pruned_reasons: Vec<ImpactWitnessSliceSelectedVsPrunedReason>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -621,6 +650,186 @@ fn record_witness_file_hop(
     }
 }
 
+fn witness_source_kind_label(kind: ImpactSliceCandidateSourceKind) -> &'static str {
+    match kind {
+        ImpactSliceCandidateSourceKind::GraphSecondHop => "graph_second_hop",
+        ImpactSliceCandidateSourceKind::NarrowFallback => "narrow_fallback",
+    }
+}
+
+fn witness_lane_label(lane: ImpactSliceCandidateLane) -> &'static str {
+    match lane {
+        ImpactSliceCandidateLane::ReturnContinuation => "return_continuation",
+        ImpactSliceCandidateLane::AliasContinuation => "alias_continuation",
+        ImpactSliceCandidateLane::RequireRelativeContinuation => "require_relative_continuation",
+        ImpactSliceCandidateLane::ModuleCompanionFallback => "module_companion_fallback",
+    }
+}
+
+fn selected_vs_pruned_summary(
+    selected_path: &str,
+    pruned_path: &str,
+    basis: ImpactWitnessSliceRankingBasis,
+    selected: &ImpactSliceCandidateScoringSummary,
+    pruned: &ImpactSliceCandidateScoringSummary,
+) -> String {
+    let reason = match basis {
+        ImpactWitnessSliceRankingBasis::SourceKind => format!(
+            "{} outranked {}",
+            witness_source_kind_label(selected.source_kind),
+            witness_source_kind_label(pruned.source_kind)
+        ),
+        ImpactWitnessSliceRankingBasis::Lane => format!(
+            "{} outranked {}",
+            witness_lane_label(selected.lane),
+            witness_lane_label(pruned.lane)
+        ),
+        ImpactWitnessSliceRankingBasis::PrimaryEvidenceCount => format!(
+            "it had more primary evidence ({} > {})",
+            selected.score_tuple.primary_evidence_count, pruned.score_tuple.primary_evidence_count
+        ),
+        ImpactWitnessSliceRankingBasis::SecondaryEvidenceCount => format!(
+            "it had more secondary evidence ({} > {})",
+            selected.score_tuple.secondary_evidence_count,
+            pruned.score_tuple.secondary_evidence_count
+        ),
+        ImpactWitnessSliceRankingBasis::CallsitePosition => format!(
+            "it had a stronger callsite position hint ({} > {})",
+            selected.score_tuple.call_position_rank, pruned.score_tuple.call_position_rank
+        ),
+        ImpactWitnessSliceRankingBasis::LexicalTiebreak => format!(
+            "lexical tiebreak favored {} over {}",
+            selected_path, pruned_path
+        ),
+    };
+    format!("selected over {} because {}", pruned_path, reason)
+}
+
+fn selected_reason_ranking_basis(
+    selected: &ImpactSliceCandidateScoringSummary,
+    pruned: &ImpactSliceCandidateScoringSummary,
+) -> Option<ImpactWitnessSliceRankingBasis> {
+    match selected
+        .score_tuple
+        .source_rank
+        .cmp(&pruned.score_tuple.source_rank)
+    {
+        std::cmp::Ordering::Less => return Some(ImpactWitnessSliceRankingBasis::SourceKind),
+        std::cmp::Ordering::Greater => return None,
+        std::cmp::Ordering::Equal => {}
+    }
+    match selected
+        .score_tuple
+        .lane_rank
+        .cmp(&pruned.score_tuple.lane_rank)
+    {
+        std::cmp::Ordering::Less => return Some(ImpactWitnessSliceRankingBasis::Lane),
+        std::cmp::Ordering::Greater => return None,
+        std::cmp::Ordering::Equal => {}
+    }
+    match selected
+        .score_tuple
+        .primary_evidence_count
+        .cmp(&pruned.score_tuple.primary_evidence_count)
+    {
+        std::cmp::Ordering::Greater => {
+            return Some(ImpactWitnessSliceRankingBasis::PrimaryEvidenceCount);
+        }
+        std::cmp::Ordering::Less => return None,
+        std::cmp::Ordering::Equal => {}
+    }
+    match selected
+        .score_tuple
+        .secondary_evidence_count
+        .cmp(&pruned.score_tuple.secondary_evidence_count)
+    {
+        std::cmp::Ordering::Greater => {
+            return Some(ImpactWitnessSliceRankingBasis::SecondaryEvidenceCount);
+        }
+        std::cmp::Ordering::Less => return None,
+        std::cmp::Ordering::Equal => {}
+    }
+    match selected
+        .score_tuple
+        .call_position_rank
+        .cmp(&pruned.score_tuple.call_position_rank)
+    {
+        std::cmp::Ordering::Greater => {
+            return Some(ImpactWitnessSliceRankingBasis::CallsitePosition);
+        }
+        std::cmp::Ordering::Less => return None,
+        std::cmp::Ordering::Equal => {}
+    }
+    match selected
+        .score_tuple
+        .lexical_tiebreak
+        .cmp(&pruned.score_tuple.lexical_tiebreak)
+    {
+        std::cmp::Ordering::Less => Some(ImpactWitnessSliceRankingBasis::LexicalTiebreak),
+        std::cmp::Ordering::Greater => None,
+        std::cmp::Ordering::Equal => None,
+    }
+}
+
+fn selected_reason_matches_pruned_candidate(
+    reason: &ImpactSliceReasonMetadata,
+    candidate: &ImpactSlicePrunedCandidate,
+) -> bool {
+    reason.kind == ImpactSliceReasonKind::BridgeCompletionFile
+        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+        && reason.seed_symbol_id == candidate.seed_symbol_id
+        && reason.tier == candidate.tier
+        && reason.kind == candidate.kind
+        && reason.via_symbol_id == candidate.via_symbol_id
+        && reason.via_path == candidate.via_path
+}
+
+fn build_selected_vs_pruned_reasons(
+    selected_path: &str,
+    seed_reasons: &[ImpactSliceReasonMetadata],
+    pruned_candidates: &[ImpactSlicePrunedCandidate],
+) -> Vec<ImpactWitnessSliceSelectedVsPrunedReason> {
+    let mut reasons = Vec::new();
+
+    for reason in seed_reasons {
+        let Some(selected_scoring) = reason.scoring.as_ref() else {
+            continue;
+        };
+
+        for candidate in pruned_candidates
+            .iter()
+            .filter(|candidate| selected_reason_matches_pruned_candidate(reason, candidate))
+        {
+            let Some(pruned_scoring) = candidate.scoring.as_ref() else {
+                continue;
+            };
+            let Some(selected_better_by) =
+                selected_reason_ranking_basis(selected_scoring, pruned_scoring)
+            else {
+                continue;
+            };
+            reasons.push(ImpactWitnessSliceSelectedVsPrunedReason {
+                via_symbol_id: reason.via_symbol_id.clone(),
+                via_path: reason.via_path.clone(),
+                selected_bridge_kind: reason.bridge_kind,
+                pruned_path: candidate.path.clone(),
+                prune_reason: candidate.prune_reason,
+                pruned_bridge_kind: candidate.bridge_kind,
+                selected_better_by,
+                summary: selected_vs_pruned_summary(
+                    selected_path,
+                    &candidate.path,
+                    selected_better_by,
+                    selected_scoring,
+                    pruned_scoring,
+                ),
+            });
+        }
+    }
+
+    reasons
+}
+
 fn build_witness_slice_context(
     witness: &ImpactWitness,
     symbol_file_by_id: &HashMap<String, String>,
@@ -670,12 +879,18 @@ fn build_witness_slice_context(
                 .filter(|reason| reason.seed_symbol_id == witness.root_symbol_id)
                 .cloned()
                 .collect();
+            let selected_vs_pruned_reasons = build_selected_vs_pruned_reasons(
+                path.as_str(),
+                &seed_reasons,
+                &slice_selection.pruned_candidates,
+            );
             Some(ImpactWitnessSliceFileContext {
                 witness_hops: witness_hops_by_path
                     .remove(path.as_str())
                     .unwrap_or_default(),
                 selection_reasons: metadata.reasons.clone(),
                 seed_reasons,
+                selected_vs_pruned_reasons,
                 path,
             })
         })
@@ -2155,6 +2370,7 @@ fn foo() { bar(); }
                             bridge_kind: None,
                             scoring: None,
                         }],
+                        selected_vs_pruned_reasons: vec![],
                     },
                     ImpactWitnessSliceFileContext {
                         path: "wrapper.rs".to_string(),
@@ -2169,6 +2385,7 @@ fn foo() { bar(); }
                             bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
                             scoring: None,
                         }],
+                        selected_vs_pruned_reasons: vec![],
                     },
                     ImpactWitnessSliceFileContext {
                         path: "callee.rs".to_string(),
@@ -2191,9 +2408,222 @@ fn foo() { bar(); }
                             bridge_kind: None,
                             scoring: None,
                         }],
+                        selected_vs_pruned_reasons: vec![],
                     },
                 ],
             })
+        );
+    }
+
+    #[test]
+    fn attach_slice_selection_summary_adds_selected_vs_pruned_witness_reasoning() {
+        let seed = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "caller",
+                1,
+            ),
+            name: "caller".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "rust".to_string(),
+        };
+        let mid = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "wrapper.rs",
+                &crate::ir::SymbolKind::Function,
+                "wrap",
+                2,
+            ),
+            name: "wrap".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "wrapper.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 2,
+                end_line: 2,
+            },
+            language: "rust".to_string(),
+        };
+        let target = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "leaf.rs",
+                &crate::ir::SymbolKind::Function,
+                "source",
+                3,
+            ),
+            name: "source".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "leaf.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 3,
+                end_line: 3,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![seed.clone(), mid.clone(), target.clone()]);
+        let refs = vec![
+            Reference {
+                from: seed.id.clone(),
+                to: mid.id.clone(),
+                kind: crate::ir::reference::RefKind::Call,
+                file: "main.rs".to_string(),
+                line: 10,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
+            },
+            Reference {
+                from: mid.id.clone(),
+                to: target.id.clone(),
+                kind: crate::ir::reference::RefKind::Call,
+                file: "wrapper.rs".to_string(),
+                line: 20,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
+            },
+        ];
+        let opts = ImpactOptions {
+            direction: ImpactDirection::Callees,
+            max_depth: Some(10),
+            with_edges: Some(true),
+            ignore_dirs: Vec::new(),
+        };
+        let mut out = compute_impact(&[seed.clone()], &index, &refs, &opts);
+
+        let selected_reason = ImpactSliceReasonMetadata {
+            seed_symbol_id: seed.id.0.clone(),
+            tier: 2,
+            kind: ImpactSliceReasonKind::BridgeCompletionFile,
+            via_symbol_id: Some(mid.id.0.clone()),
+            via_path: Some("wrapper.rs".to_string()),
+            bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+            scoring: Some(ImpactSliceCandidateScoringSummary {
+                source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                lane: ImpactSliceCandidateLane::ReturnContinuation,
+                primary_evidence_kinds: vec![
+                    ImpactSliceEvidenceKind::AssignedResult,
+                    ImpactSliceEvidenceKind::ReturnFlow,
+                ],
+                secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::CallsitePositionHint],
+                score_tuple: ImpactSliceScoreTuple {
+                    source_rank: 0,
+                    lane_rank: 0,
+                    primary_evidence_count: 2,
+                    secondary_evidence_count: 1,
+                    call_position_rank: 8,
+                    lexical_tiebreak: "leaf.rs".to_string(),
+                },
+            }),
+        };
+        let slice_selection = ImpactSliceSelectionSummary {
+            planner: ImpactSlicePlannerKind::BoundedSlice,
+            files: vec![
+                ImpactSliceFileMetadata {
+                    path: "main.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 0,
+                        kind: ImpactSliceReasonKind::ChangedFile,
+                        via_symbol_id: None,
+                        via_path: None,
+                        bridge_kind: None,
+                        scoring: None,
+                    }],
+                },
+                ImpactSliceFileMetadata {
+                    path: "wrapper.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 1,
+                        kind: ImpactSliceReasonKind::DirectCalleeFile,
+                        via_symbol_id: Some(mid.id.0.clone()),
+                        via_path: None,
+                        bridge_kind: None,
+                        scoring: None,
+                    }],
+                },
+                ImpactSliceFileMetadata {
+                    path: "leaf.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![selected_reason.clone()],
+                },
+            ],
+            pruned_candidates: vec![ImpactSlicePrunedCandidate {
+                seed_symbol_id: seed.id.0.clone(),
+                path: "aaa_helper.rs".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(mid.id.0.clone()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::AliasContinuation,
+                    primary_evidence_kinds: vec![ImpactSliceEvidenceKind::AssignedResult],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 1,
+                        primary_evidence_count: 1,
+                        secondary_evidence_count: 1,
+                        call_position_rank: 7,
+                        lexical_tiebreak: "aaa_helper.rs".to_string(),
+                    },
+                }),
+            }],
+        };
+
+        attach_slice_selection_summary(&mut out, &slice_selection);
+
+        let witness = out
+            .impacted_witnesses
+            .get(&target.id.0)
+            .expect("witness for leaf");
+        let leaf_context = witness
+            .slice_context
+            .as_ref()
+            .and_then(|context| {
+                context
+                    .selected_files_on_path
+                    .iter()
+                    .find(|file| file.path == "leaf.rs")
+            })
+            .expect("leaf witness context");
+        assert_eq!(leaf_context.seed_reasons, vec![selected_reason]);
+        assert_eq!(
+            leaf_context.selected_vs_pruned_reasons,
+            vec![ImpactWitnessSliceSelectedVsPrunedReason {
+                via_symbol_id: Some(mid.id.0.clone()),
+                via_path: Some("wrapper.rs".to_string()),
+                selected_bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                pruned_path: "aaa_helper.rs".to_string(),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                pruned_bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                selected_better_by: ImpactWitnessSliceRankingBasis::Lane,
+                summary: "selected over aaa_helper.rs because return_continuation outranked alias_continuation".to_string(),
+            }]
         );
     }
 
@@ -2400,6 +2830,7 @@ fn foo() { bar(); }
                             bridge_kind: None,
                             scoring: None,
                         }],
+                        selected_vs_pruned_reasons: vec![],
                     },
                     ImpactWitnessSliceFileContext {
                         path: "callee.rs".to_string(),
@@ -2422,6 +2853,7 @@ fn foo() { bar(); }
                             bridge_kind: None,
                             scoring: None,
                         }],
+                        selected_vs_pruned_reasons: vec![],
                     },
                 ],
             })

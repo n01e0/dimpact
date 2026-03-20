@@ -796,6 +796,15 @@ fn slice_selection_file<'a>(
         })
 }
 
+fn witness_slice_file<'a>(witness: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
+    witness["slice_context"]["selected_files_on_path"]
+        .as_array()
+        .expect("witness slice_context.selected_files_on_path array")
+        .iter()
+        .find(|file| file["path"] == path)
+        .unwrap_or_else(|| panic!("missing witness slice_context file for {path}: {witness:#}"))
+}
+
 fn run_impact_dot(repo: &std::path::Path, diff: &str, args: &[&str]) -> String {
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let assert = cmd
@@ -1217,6 +1226,21 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
                         })
             })),
         "expected helper candidate to be kept only as ranked-out metadata: {prop:#}"
+    );
+    let witness = &prop["impacted_witnesses"]["rust:leaf.rs:fn:source:1"];
+    let leaf_context = witness_slice_file(witness, "leaf.rs");
+    assert_eq!(
+        leaf_context["selected_vs_pruned_reasons"],
+        serde_json::json!([{
+            "via_symbol_id": "rust:wrapper.rs:fn:wrap:4",
+            "via_path": "wrapper.rs",
+            "selected_bridge_kind": "wrapper_return",
+            "pruned_path": "aaa_helper.rs",
+            "prune_reason": "ranked_out",
+            "pruned_bridge_kind": "boundary_alias_continuation",
+            "selected_better_by": "lane",
+            "summary": "selected over aaa_helper.rs because return_continuation outranked alias_continuation",
+        }])
     );
 
     let prop_dot = run_impact_dot(
