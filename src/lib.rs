@@ -15,7 +15,10 @@ pub use engine::EngineConfig;
 pub use engine::{AnalysisEngine, EngineKind};
 pub use impact::{
     ImpactAffectedModule, ImpactDepthBucket, ImpactDirection, ImpactOptions, ImpactOutput,
-    ImpactRiskLevel, ImpactRiskSummary, ImpactSummary, ImpactWitness, ImpactWitnessHop,
+    ImpactRiskLevel, ImpactRiskSummary, ImpactSliceBridgeKind, ImpactSliceFileMetadata,
+    ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSlicePrunedCandidate,
+    ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes,
+    ImpactSliceSelectionSummary, ImpactSummary, ImpactWitness, ImpactWitnessHop,
     build_project_graph, compute_impact, path_is_ignored,
 };
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};

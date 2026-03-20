@@ -10,7 +10,11 @@ use dimpact::ir::SymbolId;
 use dimpact::ir::reference::{EdgeCertainty, EdgeProvenance, RefKind, Reference, SymbolIndex};
 use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{DiffParseError, parse_unified_diff};
-use dimpact::{ImpactDirection, ImpactOptions, ImpactOutput};
+use dimpact::{
+    ImpactDirection, ImpactOptions, ImpactOutput, ImpactSliceFileMetadata, ImpactSlicePlannerKind,
+    ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes,
+    ImpactSliceSelectionSummary,
+};
 use env_logger::Env;
 use is_terminal::IsTerminal;
 use serde::Serialize;
@@ -979,6 +983,8 @@ struct PdgContext {
     index: SymbolIndex,
     pdg: DataFlowGraph,
     refs: Vec<Reference>,
+    slice_selection: ImpactSliceSelectionSummary,
+    per_seed_slice_selection: std::collections::BTreeMap<String, ImpactSliceSelectionSummary>,
 }
 
 fn build_local_dfg_for_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> DataFlowGraph {
@@ -1011,10 +1017,94 @@ enum SliceSelectionTier {
     BridgeCompletion,
 }
 
+fn slice_selection_tier_value(tier: SliceSelectionTier) -> u8 {
+    match tier {
+        SliceSelectionTier::Root => 0,
+        SliceSelectionTier::DirectBoundary => 1,
+        SliceSelectionTier::BridgeCompletion => 2,
+    }
+}
+
 #[derive(Debug, Default)]
 struct BoundedSlicePlan {
     cache_update_paths: Vec<String>,
     local_dfg_paths: Vec<String>,
+    slice_selection: ImpactSliceSelectionSummary,
+    per_seed_slice_selection: std::collections::BTreeMap<String, ImpactSliceSelectionSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RelatedCallSymbol {
+    symbol_id: String,
+    kind: ImpactSliceReasonKind,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SliceSelectionFileState {
+    scopes: ImpactSliceScopes,
+    reasons: std::collections::BTreeSet<ImpactSliceReasonMetadata>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SliceSelectionAccumulator {
+    cache_update_paths: std::collections::BTreeSet<String>,
+    local_dfg_paths: std::collections::BTreeSet<String>,
+    files: std::collections::BTreeMap<String, SliceSelectionFileState>,
+    pruned_candidates: std::collections::BTreeSet<dimpact::ImpactSlicePrunedCandidate>,
+}
+
+impl SliceSelectionAccumulator {
+    fn select_path(&mut self, path: &str) {
+        self.cache_update_paths.insert(path.to_string());
+        let file_state = self.files.entry(path.to_string()).or_default();
+        file_state.scopes.cache_update = true;
+        file_state.scopes.explanation = true;
+        if supports_local_dfg(path) {
+            self.local_dfg_paths.insert(path.to_string());
+            file_state.scopes.local_dfg = true;
+        }
+    }
+
+    fn add_reason(&mut self, path: &str, reason: ImpactSliceReasonMetadata) {
+        self.select_path(path);
+        if let Some(file_state) = self.files.get_mut(path) {
+            file_state.reasons.insert(reason);
+        }
+    }
+
+    fn merge(&mut self, other: &SliceSelectionAccumulator) {
+        for path in &other.cache_update_paths {
+            self.cache_update_paths.insert(path.clone());
+        }
+        for path in &other.local_dfg_paths {
+            self.local_dfg_paths.insert(path.clone());
+        }
+        for (path, other_state) in &other.files {
+            let state = self.files.entry(path.clone()).or_default();
+            state.scopes.cache_update |= other_state.scopes.cache_update;
+            state.scopes.local_dfg |= other_state.scopes.local_dfg;
+            state.scopes.explanation |= other_state.scopes.explanation;
+            state.reasons.extend(other_state.reasons.iter().cloned());
+        }
+        self.pruned_candidates
+            .extend(other.pruned_candidates.iter().cloned());
+    }
+
+    fn into_summary(self) -> ImpactSliceSelectionSummary {
+        ImpactSliceSelectionSummary {
+            planner: ImpactSlicePlannerKind::BoundedSlice,
+            files: self
+                .files
+                .into_iter()
+                .map(|(path, state)| ImpactSliceFileMetadata {
+                    path,
+                    scopes: state.scopes,
+                    reasons: state.reasons.into_iter().collect(),
+                })
+                .collect(),
+            pruned_candidates: self.pruned_candidates.into_iter().collect(),
+        }
+    }
 }
 
 fn supports_local_dfg(path: &str) -> bool {
@@ -1029,40 +1119,40 @@ fn collect_related_call_symbols(
     symbol_id: &str,
     refs: &[Reference],
     direction: ImpactDirection,
-) -> Vec<String> {
+) -> Vec<RelatedCallSymbol> {
     let mut related = std::collections::BTreeSet::new();
     for r in refs.iter().filter(|r| is_call_graph_ref(r)) {
         match direction {
             ImpactDirection::Callers if r.to.0 == symbol_id => {
-                related.insert(r.from.0.clone());
+                related.insert(RelatedCallSymbol {
+                    symbol_id: r.from.0.clone(),
+                    kind: ImpactSliceReasonKind::DirectCallerFile,
+                });
             }
             ImpactDirection::Callees if r.from.0 == symbol_id => {
-                related.insert(r.to.0.clone());
+                related.insert(RelatedCallSymbol {
+                    symbol_id: r.to.0.clone(),
+                    kind: ImpactSliceReasonKind::DirectCalleeFile,
+                });
             }
             ImpactDirection::Both => {
                 if r.to.0 == symbol_id {
-                    related.insert(r.from.0.clone());
+                    related.insert(RelatedCallSymbol {
+                        symbol_id: r.from.0.clone(),
+                        kind: ImpactSliceReasonKind::DirectCallerFile,
+                    });
                 }
                 if r.from.0 == symbol_id {
-                    related.insert(r.to.0.clone());
+                    related.insert(RelatedCallSymbol {
+                        symbol_id: r.to.0.clone(),
+                        kind: ImpactSliceReasonKind::DirectCalleeFile,
+                    });
                 }
             }
             _ => {}
         }
     }
     related.into_iter().collect()
-}
-
-fn add_slice_path(
-    cache_update_paths: &mut std::collections::BTreeSet<String>,
-    local_dfg_paths: &mut std::collections::BTreeSet<String>,
-    path: &str,
-    _tier: SliceSelectionTier,
-) {
-    cache_update_paths.insert(path.to_string());
-    if supports_local_dfg(path) {
-        local_dfg_paths.insert(path.to_string());
-    }
 }
 
 fn plan_bounded_slice(
@@ -1072,64 +1162,55 @@ fn plan_bounded_slice(
     index: &SymbolIndex,
     refs: &[Reference],
     direction: ImpactDirection,
+    root_reason_kind: ImpactSliceReasonKind,
 ) -> BoundedSlicePlan {
-    let mut cache_update_paths = std::collections::BTreeSet::new();
-    let mut local_dfg_paths = std::collections::BTreeSet::new();
+    let mut overall = SliceSelectionAccumulator::default();
 
     for path in cache_update_roots {
-        add_slice_path(
-            &mut cache_update_paths,
-            &mut local_dfg_paths,
-            path,
-            SliceSelectionTier::Root,
-        );
+        overall.select_path(path);
     }
     for path in local_dfg_roots {
-        add_slice_path(
-            &mut cache_update_paths,
-            &mut local_dfg_paths,
-            path,
-            SliceSelectionTier::Root,
-        );
+        overall.select_path(path);
     }
-    for seed in seeds {
-        add_slice_path(
-            &mut cache_update_paths,
-            &mut local_dfg_paths,
-            seed.file.as_str(),
-            SliceSelectionTier::Root,
-        );
-    }
-
-    if seeds.is_empty() {
-        return BoundedSlicePlan {
-            cache_update_paths: cache_update_paths.into_iter().collect(),
-            local_dfg_paths: local_dfg_paths.into_iter().collect(),
-        };
-    }
-
     let symbol_file_by_id: std::collections::HashMap<_, _> = index
         .symbols
         .iter()
         .map(|symbol| (symbol.id.0.clone(), symbol.file.as_str()))
         .collect();
+    let mut per_seed_slice_selection = std::collections::BTreeMap::new();
 
     for seed in seeds {
+        let mut seed_selection = SliceSelectionAccumulator::default();
+        let root_reason = ImpactSliceReasonMetadata {
+            seed_symbol_id: seed.id.0.clone(),
+            tier: slice_selection_tier_value(SliceSelectionTier::Root),
+            kind: root_reason_kind,
+            via_symbol_id: None,
+            via_path: None,
+            bridge_kind: None,
+        };
+        seed_selection.add_reason(seed.file.as_str(), root_reason.clone());
+
         let root_file = seed.file.as_str();
         let direct_boundary_symbols =
             collect_related_call_symbols(seed.id.0.as_str(), refs, direction);
         let mut bridge_completion_added = false;
 
-        for boundary_symbol_id in &direct_boundary_symbols {
-            let Some(boundary_file) = symbol_file_by_id.get(boundary_symbol_id).copied() else {
+        for boundary in &direct_boundary_symbols {
+            let Some(boundary_file) = symbol_file_by_id.get(&boundary.symbol_id).copied() else {
                 continue;
             };
             if boundary_file != root_file {
-                add_slice_path(
-                    &mut cache_update_paths,
-                    &mut local_dfg_paths,
+                seed_selection.add_reason(
                     boundary_file,
-                    SliceSelectionTier::DirectBoundary,
+                    ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: slice_selection_tier_value(SliceSelectionTier::DirectBoundary),
+                        kind: boundary.kind,
+                        via_symbol_id: Some(boundary.symbol_id.clone()),
+                        via_path: None,
+                        bridge_kind: None,
+                    },
                 );
             }
 
@@ -1137,34 +1218,48 @@ fn plan_bounded_slice(
                 continue;
             }
 
-            for completion_symbol_id in
-                collect_related_call_symbols(boundary_symbol_id, refs, direction)
+            for completion in
+                collect_related_call_symbols(boundary.symbol_id.as_str(), refs, direction)
             {
-                let Some(completion_file) = symbol_file_by_id.get(&completion_symbol_id).copied()
+                let Some(completion_file) = symbol_file_by_id.get(&completion.symbol_id).copied()
                 else {
                     continue;
                 };
                 if completion_file == root_file || completion_file == boundary_file {
                     continue;
                 }
-                if cache_update_paths.contains(completion_file) {
+                if seed_selection.cache_update_paths.contains(completion_file) {
                     continue;
                 }
-                add_slice_path(
-                    &mut cache_update_paths,
-                    &mut local_dfg_paths,
+                seed_selection.add_reason(
                     completion_file,
-                    SliceSelectionTier::BridgeCompletion,
+                    ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: slice_selection_tier_value(SliceSelectionTier::BridgeCompletion),
+                        kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                        via_symbol_id: Some(boundary.symbol_id.clone()),
+                        via_path: None,
+                        bridge_kind: None,
+                    },
                 );
                 bridge_completion_added = true;
                 break;
             }
         }
+
+        overall.merge(&seed_selection);
+        per_seed_slice_selection.insert(seed.id.0.clone(), seed_selection.into_summary());
     }
 
+    let cache_update_paths: Vec<String> = overall.cache_update_paths.iter().cloned().collect();
+    let local_dfg_paths: Vec<String> = overall.local_dfg_paths.iter().cloned().collect();
+    let slice_selection = overall.into_summary();
+
     BoundedSlicePlan {
-        cache_update_paths: cache_update_paths.into_iter().collect(),
-        local_dfg_paths: local_dfg_paths.into_iter().collect(),
+        cache_update_paths,
+        local_dfg_paths,
+        slice_selection,
+        per_seed_slice_selection,
     }
 }
 
@@ -1184,6 +1279,7 @@ fn build_pdg_context(
     seeds: &[dimpact::Symbol],
     direction: ImpactDirection,
     with_propagation: bool,
+    root_reason_kind: ImpactSliceReasonKind,
 ) -> anyhow::Result<PdgContext> {
     let (scope, dir_override) = cache::scope_from_env();
     let mut db = cache::open(scope, dir_override.as_deref())?;
@@ -1210,6 +1306,7 @@ fn build_pdg_context(
         &index,
         &refs,
         direction,
+        root_reason_kind,
     );
 
     let additional_cache_update_paths: Vec<String> = plan
@@ -1235,7 +1332,16 @@ fn build_pdg_context(
         index,
         pdg,
         refs: pdg_refs,
+        slice_selection: plan.slice_selection,
+        per_seed_slice_selection: plan.per_seed_slice_selection,
     })
+}
+
+fn attach_slice_selection_summary(
+    output: &mut ImpactOutput,
+    slice_selection: &ImpactSliceSelectionSummary,
+) {
+    output.summary.slice_selection = Some(slice_selection.clone());
 }
 
 fn build_grouped_impact_outputs(
@@ -1246,20 +1352,28 @@ fn build_grouped_impact_outputs(
     min_confidence: Option<ConfidenceOpt>,
     exclude_dynamic_fallback: bool,
     with_edges: bool,
+    slice_selection_by_seed: Option<
+        &std::collections::BTreeMap<String, ImpactSliceSelectionSummary>,
+    >,
 ) -> Vec<PerSeedOutput> {
     let mut grouped: Vec<PerSeedOutput> = Vec::new();
     for seed in seeds {
         let mut impacts: Vec<PerSeedImpact> = Vec::new();
+        let slice_selection =
+            slice_selection_by_seed.and_then(|summaries| summaries.get(&seed.id.0));
         if opts.direction == ImpactDirection::Both {
             let mut o = opts.clone();
             o.direction = ImpactDirection::Callers;
-            let (output, confidence_filter) = apply_confidence_filter(
+            let (mut output, confidence_filter) = apply_confidence_filter(
                 compute_impact(std::slice::from_ref(seed), index, refs, &o),
                 &o,
                 min_confidence,
                 exclude_dynamic_fallback,
                 with_edges,
             );
+            if let Some(slice_selection) = slice_selection {
+                attach_slice_selection_summary(&mut output, slice_selection);
+            }
             impacts.push(PerSeedImpact {
                 direction: ImpactDirection::Callers,
                 output,
@@ -1267,26 +1381,32 @@ fn build_grouped_impact_outputs(
             });
             let mut o2 = opts.clone();
             o2.direction = ImpactDirection::Callees;
-            let (output, confidence_filter) = apply_confidence_filter(
+            let (mut output, confidence_filter) = apply_confidence_filter(
                 compute_impact(std::slice::from_ref(seed), index, refs, &o2),
                 &o2,
                 min_confidence,
                 exclude_dynamic_fallback,
                 with_edges,
             );
+            if let Some(slice_selection) = slice_selection {
+                attach_slice_selection_summary(&mut output, slice_selection);
+            }
             impacts.push(PerSeedImpact {
                 direction: ImpactDirection::Callees,
                 output,
                 confidence_filter,
             });
         } else {
-            let (output, confidence_filter) = apply_confidence_filter(
+            let (mut output, confidence_filter) = apply_confidence_filter(
                 compute_impact(std::slice::from_ref(seed), index, refs, opts),
                 opts,
                 min_confidence,
                 exclude_dynamic_fallback,
                 with_edges,
             );
+            if let Some(slice_selection) = slice_selection {
+                attach_slice_selection_summary(&mut output, slice_selection);
+            }
             impacts.push(PerSeedImpact {
                 direction: opts.direction,
                 output,
@@ -1507,6 +1627,7 @@ fn run_impact(
                     &changed.changed_symbols,
                     opts.direction,
                     with_propagation,
+                    ImpactSliceReasonKind::ChangedFile,
                 )?;
                 let grouped = build_grouped_impact_outputs(
                     &changed.changed_symbols,
@@ -1516,6 +1637,7 @@ fn run_impact(
                     min_confidence,
                     exclude_dynamic_fallback,
                     with_edges,
+                    Some(&pdg.per_seed_slice_selection),
                 );
                 println!("{}", serde_json::to_string_pretty(&grouped)?);
                 return Ok(());
@@ -1540,6 +1662,7 @@ fn run_impact(
                 min_confidence,
                 exclude_dynamic_fallback,
                 with_edges,
+                None,
             );
             println!("{}", serde_json::to_string_pretty(&grouped)?);
             return Ok(());
@@ -1555,6 +1678,7 @@ fn run_impact(
                 &seeds,
                 opts.direction,
                 with_propagation,
+                ImpactSliceReasonKind::SeedFile,
             )?;
             let grouped = build_grouped_impact_outputs(
                 &seeds,
@@ -1564,6 +1688,7 @@ fn run_impact(
                 min_confidence,
                 exclude_dynamic_fallback,
                 with_edges,
+                Some(&pdg.per_seed_slice_selection),
             );
             println!("{}", serde_json::to_string_pretty(&grouped)?);
             return Ok(());
@@ -1584,6 +1709,7 @@ fn run_impact(
             min_confidence,
             exclude_dynamic_fallback,
             with_edges,
+            None,
         );
         println!("{}", serde_json::to_string_pretty(&grouped)?);
         return Ok(());
@@ -1620,18 +1746,20 @@ fn run_impact(
                 &changed.changed_symbols,
                 opts.direction,
                 with_propagation,
+                ImpactSliceReasonKind::ChangedFile,
             )?;
             if matches!(fmt, OutputFormat::Dot) {
                 println!("{}", dfg_to_dot(&pdg.pdg));
                 return Ok(());
             }
-            let (out, confidence_filter) = apply_confidence_filter(
+            let (mut out, confidence_filter) = apply_confidence_filter(
                 compute_impact(&changed.changed_symbols, &pdg.index, &pdg.refs, &opts),
                 &opts,
                 min_confidence,
                 exclude_dynamic_fallback,
                 with_edges,
             );
+            attach_slice_selection_summary(&mut out, &pdg.slice_selection);
             print_impact_output(fmt, &out, confidence_filter.as_ref())?;
             return Ok(());
         }
@@ -1669,14 +1797,16 @@ fn run_impact(
             &seeds,
             opts.direction,
             with_propagation,
+            ImpactSliceReasonKind::SeedFile,
         )?;
-        let (out, confidence_filter) = apply_confidence_filter(
+        let (mut out, confidence_filter) = apply_confidence_filter(
             compute_impact(&seeds, &pdg.index, &pdg.refs, &opts),
             &opts,
             min_confidence,
             exclude_dynamic_fallback,
             with_edges,
         );
+        attach_slice_selection_summary(&mut out, &pdg.slice_selection);
         print_impact_output(fmt, &out, confidence_filter.as_ref())?;
         return Ok(());
     }
@@ -2363,6 +2493,7 @@ fn caller() -> i32 {
             &index,
             &refs,
             ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
         );
 
         assert_eq!(
@@ -2390,6 +2521,7 @@ fn caller() -> i32 {
             &index,
             &refs,
             ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
         );
 
         assert!(plan.cache_update_paths.contains(&"helper.js".to_string()));

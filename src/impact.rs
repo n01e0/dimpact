@@ -45,6 +45,105 @@ pub struct ImpactSummary {
     pub affected_modules: Vec<ImpactAffectedModule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk: Option<ImpactRiskSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_selection: Option<ImpactSliceSelectionSummary>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSlicePlannerKind {
+    BoundedSlice,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactSliceSelectionSummary {
+    pub planner: ImpactSlicePlannerKind,
+    #[serde(default)]
+    pub files: Vec<ImpactSliceFileMetadata>,
+    #[serde(default)]
+    pub pruned_candidates: Vec<ImpactSlicePrunedCandidate>,
+}
+
+impl Default for ImpactSliceSelectionSummary {
+    fn default() -> Self {
+        Self {
+            planner: ImpactSlicePlannerKind::BoundedSlice,
+            files: Vec::new(),
+            pruned_candidates: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactSliceFileMetadata {
+    pub path: String,
+    pub scopes: ImpactSliceScopes,
+    #[serde(default)]
+    pub reasons: Vec<ImpactSliceReasonMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ImpactSliceScopes {
+    pub cache_update: bool,
+    pub local_dfg: bool,
+    pub explanation: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ImpactSliceReasonMetadata {
+    pub seed_symbol_id: String,
+    pub tier: u8,
+    pub kind: ImpactSliceReasonKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_symbol_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge_kind: Option<ImpactSliceBridgeKind>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSliceReasonKind {
+    SeedFile,
+    ChangedFile,
+    DirectCallerFile,
+    DirectCalleeFile,
+    BridgeCompletionFile,
+    ModuleCompanionFile,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSliceBridgeKind {
+    WrapperReturn,
+    BoundaryAliasContinuation,
+    RequireRelativeChain,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ImpactSlicePrunedCandidate {
+    pub seed_symbol_id: String,
+    pub path: String,
+    pub tier: u8,
+    pub kind: ImpactSliceReasonKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_symbol_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge_kind: Option<ImpactSliceBridgeKind>,
+    pub prune_reason: ImpactSlicePruneReason,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSlicePruneReason {
+    AlreadySelected,
+    BridgeBudgetExhausted,
+    CacheUpdateBudgetExhausted,
+    LocalDfgBudgetExhausted,
+    RankedOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -431,6 +530,7 @@ pub(crate) fn finalize_impact_output(
             by_depth,
             affected_modules,
             risk: Some(risk),
+            slice_selection: None,
         },
     }
 }
