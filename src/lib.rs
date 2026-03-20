@@ -15,8 +15,8 @@ pub use engine::EngineConfig;
 pub use engine::{AnalysisEngine, EngineKind};
 pub use impact::{
     ImpactAffectedModule, ImpactDepthBucket, ImpactDirection, ImpactOptions, ImpactOutput,
-    ImpactRiskLevel, ImpactRiskSummary, ImpactSummary, ImpactWitness, build_project_graph,
-    compute_impact, path_is_ignored,
+    ImpactRiskLevel, ImpactRiskSummary, ImpactSummary, ImpactWitness, ImpactWitnessHop,
+    build_project_graph, compute_impact, path_is_ignored,
 };
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
 pub use languages::LanguageKind;

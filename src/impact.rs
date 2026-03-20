@@ -1,5 +1,5 @@
 use crate::ir::Symbol;
-use crate::ir::reference::{Reference, SymbolIndex, UnresolvedRef};
+use crate::ir::reference::{EdgeProvenance, RefKind, Reference, SymbolIndex, UnresolvedRef};
 use crate::languages::{LanguageKind, analyzer_for_path};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -79,12 +79,25 @@ pub struct ImpactRiskSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactWitnessHop {
+    pub from_symbol_id: String,
+    pub to_symbol_id: String,
+    pub edge: Reference,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactWitness {
     pub symbol_id: String,
     pub depth: usize,
     pub root_symbol_id: String,
     pub via_symbol_id: String,
     pub edge: Reference,
+    #[serde(default)]
+    pub path: Vec<ImpactWitnessHop>,
+    #[serde(default)]
+    pub provenance_chain: Vec<EdgeProvenance>,
+    #[serde(default)]
+    pub kind_chain: Vec<RefKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -238,6 +251,38 @@ fn record_min_depth(
         .entry(symbol_id.to_string())
         .and_modify(|current| *current = (*current).min(depth))
         .or_insert(depth);
+}
+
+fn build_witness_path(
+    symbol_id: &str,
+    root_symbol_id: &str,
+    witness_by_symbol_id: &HashMap<String, (String, Reference)>,
+) -> Vec<ImpactWitnessHop> {
+    let mut reversed = Vec::new();
+    let mut cursor = symbol_id.to_string();
+    let mut guard = 0usize;
+
+    while cursor != root_symbol_id {
+        let Some((via_symbol_id, edge)) = witness_by_symbol_id.get(&cursor).cloned() else {
+            break;
+        };
+        reversed.push(ImpactWitnessHop {
+            from_symbol_id: via_symbol_id.clone(),
+            to_symbol_id: cursor.clone(),
+            edge,
+        });
+        if via_symbol_id == cursor {
+            break;
+        }
+        cursor = via_symbol_id;
+        guard += 1;
+        if guard > witness_by_symbol_id.len() {
+            break;
+        }
+    }
+
+    reversed.reverse();
+    reversed
 }
 
 pub(crate) fn finalize_impact_output(
@@ -970,6 +1015,9 @@ pub fn compute_impact(
                 .get(&sym.id.0)
                 .cloned()
                 .unwrap_or_else(|| via_symbol_id.clone());
+            let path = build_witness_path(&sym.id.0, &root_symbol_id, &witness_by_symbol_id);
+            let provenance_chain = path.iter().map(|hop| hop.edge.provenance.clone()).collect();
+            let kind_chain = path.iter().map(|hop| hop.edge.kind.clone()).collect();
             Some((
                 sym.id.0.clone(),
                 ImpactWitness {
@@ -978,6 +1026,9 @@ pub fn compute_impact(
                     root_symbol_id,
                     via_symbol_id,
                     edge,
+                    path,
+                    provenance_chain,
+                    kind_chain,
                 },
             ))
         })
@@ -1141,6 +1192,17 @@ fn foo() { bar(); }
             witness.edge.provenance,
             crate::ir::reference::EdgeProvenance::CallGraph
         );
+        assert_eq!(witness.path.len(), 1);
+        assert_eq!(witness.path[0].from_symbol_id, changed.id.0);
+        assert_eq!(witness.path[0].to_symbol_id, impacted.id.0);
+        assert_eq!(
+            witness.provenance_chain,
+            vec![crate::ir::reference::EdgeProvenance::CallGraph]
+        );
+        assert_eq!(
+            witness.kind_chain,
+            vec![crate::ir::reference::RefKind::Call]
+        );
     }
 
     #[test]
@@ -1239,6 +1301,25 @@ fn foo() { bar(); }
         );
         assert_eq!(witness.edge.line, 3);
         assert_eq!(witness.edge.file, "main.rs");
+        assert_eq!(witness.path.len(), 2);
+        assert_eq!(witness.path[0].from_symbol_id, changed.id.0);
+        assert_eq!(witness.path[0].to_symbol_id, mid.id.0);
+        assert_eq!(witness.path[1].from_symbol_id, mid.id.0);
+        assert_eq!(witness.path[1].to_symbol_id, target.id.0);
+        assert_eq!(
+            witness.provenance_chain,
+            vec![
+                crate::ir::reference::EdgeProvenance::CallGraph,
+                crate::ir::reference::EdgeProvenance::SymbolicPropagation,
+            ]
+        );
+        assert_eq!(
+            witness.kind_chain,
+            vec![
+                crate::ir::reference::RefKind::Call,
+                crate::ir::reference::RefKind::Data,
+            ]
+        );
     }
 
     #[test]
