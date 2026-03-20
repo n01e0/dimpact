@@ -1005,9 +1005,59 @@ fn build_local_dfg_for_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> Da
     combined
 }
 
+fn expand_related_local_dfg_paths(
+    initial_paths: &[String],
+    seeds: &[dimpact::Symbol],
+    index: &SymbolIndex,
+    refs: &[Reference],
+    direction: ImpactDirection,
+    with_propagation: bool,
+) -> Vec<String> {
+    let mut paths: std::collections::BTreeSet<String> = initial_paths.iter().cloned().collect();
+    if !with_propagation || seeds.is_empty() {
+        return paths.into_iter().collect();
+    }
+
+    let by_id: std::collections::HashMap<&str, &dimpact::Symbol> =
+        index.symbols.iter().map(|s| (s.id.0.as_str(), s)).collect();
+
+    let mut add_path_for_symbol_id = |symbol_id: &str| {
+        if let Some(sym) = by_id.get(symbol_id) {
+            paths.insert(sym.file.clone());
+        }
+    };
+
+    for seed in seeds {
+        match direction {
+            ImpactDirection::Callers => {
+                for r in refs.iter().filter(|r| r.to == seed.id) {
+                    add_path_for_symbol_id(r.from.0.as_str());
+                }
+            }
+            ImpactDirection::Callees => {
+                for r in refs.iter().filter(|r| r.from == seed.id) {
+                    add_path_for_symbol_id(r.to.0.as_str());
+                }
+            }
+            ImpactDirection::Both => {
+                for r in refs.iter().filter(|r| r.to == seed.id) {
+                    add_path_for_symbol_id(r.from.0.as_str());
+                }
+                for r in refs.iter().filter(|r| r.from == seed.id) {
+                    add_path_for_symbol_id(r.to.0.as_str());
+                }
+            }
+        }
+    }
+
+    paths.into_iter().collect()
+}
+
 fn build_pdg_context(
     cache_update_paths: &[String],
     local_dfg_paths: &[String],
+    seeds: &[dimpact::Symbol],
+    direction: ImpactDirection,
     with_propagation: bool,
 ) -> anyhow::Result<PdgContext> {
     let (scope, dir_override) = cache::scope_from_env();
@@ -1020,7 +1070,15 @@ fn build_pdg_context(
         cache::update_paths(&mut db.conn, cache_update_paths)?;
     }
     let (index, refs) = cache::load_graph(&db.conn)?;
-    let combined = build_local_dfg_for_paths(local_dfg_paths.iter().map(String::as_str));
+    let related_paths = expand_related_local_dfg_paths(
+        local_dfg_paths,
+        seeds,
+        &index,
+        &refs,
+        direction,
+        with_propagation,
+    );
+    let combined = build_local_dfg_for_paths(related_paths.iter().map(String::as_str));
     let mut pdg = PdgBuilder::build(&combined, &refs);
     if with_propagation {
         PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
@@ -1298,6 +1356,8 @@ fn run_impact(
                 let pdg = build_pdg_context(
                     &changed.changed_files,
                     &changed.changed_files,
+                    &changed.changed_symbols,
+                    opts.direction,
                     with_propagation,
                 )?;
                 let grouped = build_grouped_impact_outputs(
@@ -1341,7 +1401,13 @@ fn run_impact(
             let fileset: std::collections::BTreeSet<String> =
                 seeds.iter().map(|s| s.file.clone()).collect();
             let local_dfg_paths: Vec<String> = fileset.into_iter().collect();
-            let pdg = build_pdg_context(&[], &local_dfg_paths, with_propagation)?;
+            let pdg = build_pdg_context(
+                &[],
+                &local_dfg_paths,
+                &seeds,
+                opts.direction,
+                with_propagation,
+            )?;
             let grouped = build_grouped_impact_outputs(
                 &seeds,
                 &pdg.refs,
@@ -1402,6 +1468,8 @@ fn run_impact(
             let pdg = build_pdg_context(
                 &changed.changed_files,
                 &changed.changed_files,
+                &changed.changed_symbols,
+                opts.direction,
                 with_propagation,
             )?;
             if matches!(fmt, OutputFormat::Dot) {
@@ -1446,7 +1514,13 @@ fn run_impact(
         let fileset: std::collections::BTreeSet<String> =
             seeds.iter().map(|s| s.file.clone()).collect();
         let local_dfg_paths: Vec<String> = fileset.into_iter().collect();
-        let pdg = build_pdg_context(&[], &local_dfg_paths, with_propagation)?;
+        let pdg = build_pdg_context(
+            &[],
+            &local_dfg_paths,
+            &seeds,
+            opts.direction,
+            with_propagation,
+        )?;
         let (out, confidence_filter) = apply_confidence_filter(
             compute_impact(&seeds, &pdg.index, &pdg.refs, &opts),
             &opts,
