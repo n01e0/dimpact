@@ -12,9 +12,11 @@ use dimpact::ir::reference::{EdgeCertainty, EdgeProvenance, RefKind, Reference, 
 use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{DiffParseError, parse_unified_diff};
 use dimpact::{
-    ImpactDirection, ImpactOptions, ImpactOutput, ImpactSliceBridgeKind, ImpactSliceFileMetadata,
-    ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSliceReasonKind,
-    ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceSelectionSummary,
+    ImpactDirection, ImpactOptions, ImpactOutput, ImpactSliceBridgeKind, ImpactSliceCandidateLane,
+    ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind, ImpactSliceEvidenceKind,
+    ImpactSliceFileMetadata, ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSliceReasonKind,
+    ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceScoreTuple,
+    ImpactSliceSelectionSummary,
 };
 use env_logger::Env;
 use is_terminal::IsTerminal;
@@ -1049,7 +1051,7 @@ struct Tier2Candidate {
     via_symbol_id: String,
     via_path: String,
     bridge_kind: Option<ImpactSliceBridgeKind>,
-    call_line: u32,
+    scoring: ImpactSliceCandidateScoringSummary,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1176,41 +1178,219 @@ fn boundary_follow_direction(kind: ImpactSliceReasonKind) -> ImpactDirection {
     }
 }
 
-fn infer_tier2_bridge_kind(
+fn bridge_keyword_hint(text: &str) -> bool {
+    ["wrap", "wrapper", "adapter", "service"]
+        .iter()
+        .any(|needle| text.contains(needle))
+}
+
+fn return_keyword_hint(text: &str) -> bool {
+    [
+        "leaf", "source", "core", "callee", "target", "final", "inner",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
+fn alias_keyword_hint(text: &str) -> bool {
+    ["alias", "value", "result", "make", "out"]
+        .iter()
+        .any(|needle| text.contains(needle))
+}
+
+fn noise_keyword_hint(text: &str) -> bool {
+    ["helper", "noise", "alt", "debug", "tmp"]
+        .iter()
+        .any(|needle| text.contains(needle))
+}
+
+fn evidence_kind_key(kind: ImpactSliceEvidenceKind) -> &'static str {
+    match kind {
+        ImpactSliceEvidenceKind::AliasChain => "alias_chain",
+        ImpactSliceEvidenceKind::AssignedResult => "assigned_result",
+        ImpactSliceEvidenceKind::CallsitePositionHint => "callsite_position_hint",
+        ImpactSliceEvidenceKind::ModuleCompanion => "module_companion",
+        ImpactSliceEvidenceKind::NamePathHint => "name_path_hint",
+        ImpactSliceEvidenceKind::RequireRelativeEdge => "require_relative_edge",
+        ImpactSliceEvidenceKind::ReturnFlow => "return_flow",
+    }
+}
+
+fn tier2_lane_rank(lane: ImpactSliceCandidateLane) -> u8 {
+    match lane {
+        ImpactSliceCandidateLane::ReturnContinuation => 0,
+        ImpactSliceCandidateLane::AliasContinuation => 1,
+        ImpactSliceCandidateLane::RequireRelativeContinuation => 2,
+        ImpactSliceCandidateLane::ModuleCompanionFallback => 3,
+    }
+}
+
+fn tier2_bridge_kind_for_lane(lane: ImpactSliceCandidateLane) -> Option<ImpactSliceBridgeKind> {
+    match lane {
+        ImpactSliceCandidateLane::ReturnContinuation => Some(ImpactSliceBridgeKind::WrapperReturn),
+        ImpactSliceCandidateLane::AliasContinuation => {
+            Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
+        }
+        ImpactSliceCandidateLane::RequireRelativeContinuation => {
+            Some(ImpactSliceBridgeKind::RequireRelativeChain)
+        }
+        ImpactSliceCandidateLane::ModuleCompanionFallback => None,
+    }
+}
+
+fn tier2_scoring_summary(
     boundary_symbol: &dimpact::Symbol,
     boundary_file: &str,
+    completion_symbol: &dimpact::Symbol,
     completion_file: &str,
-) -> Option<ImpactSliceBridgeKind> {
+    call_line: u32,
+    side_max_call_line: u32,
+) -> ImpactSliceCandidateScoringSummary {
     if boundary_file.ends_with(".rb") || completion_file.ends_with(".rb") {
-        return Some(ImpactSliceBridgeKind::RequireRelativeChain);
+        let mut primary_evidence_kinds = vec![ImpactSliceEvidenceKind::RequireRelativeEdge];
+        let mut secondary_evidence_kinds = Vec::new();
+        if call_line == side_max_call_line {
+            secondary_evidence_kinds.push(ImpactSliceEvidenceKind::CallsitePositionHint);
+        }
+        primary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
+        secondary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
+        let secondary_evidence_count =
+            u8::try_from(secondary_evidence_kinds.len()).unwrap_or(u8::MAX);
+        return ImpactSliceCandidateScoringSummary {
+            source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+            lane: ImpactSliceCandidateLane::RequireRelativeContinuation,
+            primary_evidence_kinds,
+            secondary_evidence_kinds,
+            score_tuple: ImpactSliceScoreTuple {
+                source_rank: 0,
+                lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::RequireRelativeContinuation),
+                primary_evidence_count: 1,
+                secondary_evidence_count,
+                call_position_rank: call_line,
+                lexical_tiebreak: completion_file.to_string(),
+            },
+        };
     }
 
     let boundary_name = boundary_symbol.name.to_ascii_lowercase();
     let boundary_path = boundary_file.to_ascii_lowercase();
-    if ["wrap", "wrapper", "adapter", "service"]
-        .iter()
-        .any(|needle| boundary_name.contains(needle) || boundary_path.contains(needle))
-    {
-        Some(ImpactSliceBridgeKind::WrapperReturn)
-    } else {
-        Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
-    }
-}
+    let completion_name = completion_symbol.name.to_ascii_lowercase();
+    let completion_path = completion_file.to_ascii_lowercase();
 
-fn tier2_bridge_priority(kind: Option<ImpactSliceBridgeKind>) -> u8 {
-    match kind {
-        Some(ImpactSliceBridgeKind::WrapperReturn) => 0,
-        Some(ImpactSliceBridgeKind::BoundaryAliasContinuation) => 1,
-        Some(ImpactSliceBridgeKind::RequireRelativeChain) => 2,
-        None => 3,
+    let boundary_wrapper_hint =
+        bridge_keyword_hint(boundary_name.as_str()) || bridge_keyword_hint(boundary_path.as_str());
+    let completion_return_hint = return_keyword_hint(completion_name.as_str())
+        || return_keyword_hint(completion_path.as_str());
+    let completion_alias_hint = alias_keyword_hint(completion_name.as_str())
+        || alias_keyword_hint(completion_path.as_str());
+    let completion_noise_hint = noise_keyword_hint(completion_name.as_str())
+        || noise_keyword_hint(completion_path.as_str());
+    let has_name_path_hint = boundary_wrapper_hint
+        || completion_return_hint
+        || completion_alias_hint
+        || completion_noise_hint;
+
+    let lane = if completion_return_hint
+        || (boundary_wrapper_hint
+            && !completion_alias_hint
+            && !completion_noise_hint
+            && call_line == side_max_call_line)
+    {
+        ImpactSliceCandidateLane::ReturnContinuation
+    } else {
+        ImpactSliceCandidateLane::AliasContinuation
+    };
+
+    let mut primary_evidence_kinds = Vec::new();
+    match lane {
+        ImpactSliceCandidateLane::ReturnContinuation => {
+            if completion_return_hint || (!completion_alias_hint && !completion_noise_hint) {
+                primary_evidence_kinds.push(ImpactSliceEvidenceKind::ReturnFlow);
+            }
+            if boundary_wrapper_hint || call_line == side_max_call_line {
+                primary_evidence_kinds.push(ImpactSliceEvidenceKind::AssignedResult);
+            }
+        }
+        ImpactSliceCandidateLane::AliasContinuation => {
+            if completion_alias_hint {
+                primary_evidence_kinds.push(ImpactSliceEvidenceKind::AliasChain);
+            }
+            if boundary_wrapper_hint || !completion_noise_hint {
+                primary_evidence_kinds.push(ImpactSliceEvidenceKind::AssignedResult);
+            }
+        }
+        ImpactSliceCandidateLane::RequireRelativeContinuation => {
+            primary_evidence_kinds.push(ImpactSliceEvidenceKind::RequireRelativeEdge);
+        }
+        ImpactSliceCandidateLane::ModuleCompanionFallback => {
+            primary_evidence_kinds.push(ImpactSliceEvidenceKind::ModuleCompanion);
+        }
+    }
+
+    let mut secondary_evidence_kinds = Vec::new();
+    if call_line == side_max_call_line {
+        secondary_evidence_kinds.push(ImpactSliceEvidenceKind::CallsitePositionHint);
+    }
+    if has_name_path_hint {
+        secondary_evidence_kinds.push(ImpactSliceEvidenceKind::NamePathHint);
+    }
+    primary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
+    primary_evidence_kinds.dedup();
+    secondary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
+    secondary_evidence_kinds.dedup();
+
+    ImpactSliceCandidateScoringSummary {
+        source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+        lane,
+        score_tuple: ImpactSliceScoreTuple {
+            source_rank: 0,
+            lane_rank: tier2_lane_rank(lane),
+            primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap_or(u8::MAX),
+            secondary_evidence_count: u8::try_from(secondary_evidence_kinds.len())
+                .unwrap_or(u8::MAX),
+            call_position_rank: call_line,
+            lexical_tiebreak: completion_file.to_string(),
+        },
+        primary_evidence_kinds,
+        secondary_evidence_kinds,
     }
 }
 
 fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp::Ordering {
-    tier2_bridge_priority(a.bridge_kind)
-        .cmp(&tier2_bridge_priority(b.bridge_kind))
-        .then_with(|| b.call_line.cmp(&a.call_line))
-        .then_with(|| a.path.cmp(&b.path))
+    a.scoring
+        .score_tuple
+        .source_rank
+        .cmp(&b.scoring.score_tuple.source_rank)
+        .then_with(|| {
+            a.scoring
+                .score_tuple
+                .lane_rank
+                .cmp(&b.scoring.score_tuple.lane_rank)
+        })
+        .then_with(|| {
+            b.scoring
+                .score_tuple
+                .primary_evidence_count
+                .cmp(&a.scoring.score_tuple.primary_evidence_count)
+        })
+        .then_with(|| {
+            b.scoring
+                .score_tuple
+                .secondary_evidence_count
+                .cmp(&a.scoring.score_tuple.secondary_evidence_count)
+        })
+        .then_with(|| {
+            b.scoring
+                .score_tuple
+                .call_position_rank
+                .cmp(&a.scoring.score_tuple.call_position_rank)
+        })
+        .then_with(|| {
+            a.scoring
+                .score_tuple
+                .lexical_tiebreak
+                .cmp(&b.scoring.score_tuple.lexical_tiebreak)
+        })
         .then_with(|| a.via_path.cmp(&b.via_path))
         .then_with(|| a.via_symbol_id.cmp(&b.via_symbol_id))
 }
@@ -1226,6 +1406,7 @@ fn make_tier2_reason(
         via_symbol_id: Some(candidate.via_symbol_id.clone()),
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
+        scoring: Some(candidate.scoring.clone()),
     }
 }
 
@@ -1243,6 +1424,7 @@ fn make_tier2_pruned_candidate(
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
         prune_reason,
+        scoring: Some(candidate.scoring.clone()),
     }
 }
 
@@ -1284,6 +1466,7 @@ fn plan_bounded_slice(
             via_symbol_id: None,
             via_path: None,
             bridge_kind: None,
+            scoring: None,
         };
         seed_selection.add_reason(seed.file.as_str(), root_reason.clone());
 
@@ -1312,6 +1495,7 @@ fn plan_bounded_slice(
                         via_symbol_id: Some(boundary.symbol_id.clone()),
                         via_path: None,
                         bridge_kind: None,
+                        scoring: None,
                     },
                 );
             }
@@ -1320,50 +1504,68 @@ fn plan_bounded_slice(
                 continue;
             };
 
-            let mut side_candidates = std::collections::BTreeMap::new();
-            for reference in refs.iter().filter(|r| is_call_graph_ref(r)) {
-                let completion_symbol_id = match boundary_follow_direction(boundary.kind) {
-                    ImpactDirection::Callers if reference.to.0 == boundary.symbol_id => {
-                        Some(reference.from.0.as_str())
-                    }
-                    ImpactDirection::Callees if reference.from.0 == boundary.symbol_id => {
-                        Some(reference.to.0.as_str())
-                    }
-                    ImpactDirection::Both => {
-                        if reference.to.0 == boundary.symbol_id {
+            let side_refs: Vec<_> = refs
+                .iter()
+                .filter(|r| is_call_graph_ref(r))
+                .filter_map(|reference| {
+                    let completion_symbol_id = match boundary_follow_direction(boundary.kind) {
+                        ImpactDirection::Callers if reference.to.0 == boundary.symbol_id => {
                             Some(reference.from.0.as_str())
-                        } else if reference.from.0 == boundary.symbol_id {
-                            Some(reference.to.0.as_str())
-                        } else {
-                            None
                         }
+                        ImpactDirection::Callees if reference.from.0 == boundary.symbol_id => {
+                            Some(reference.to.0.as_str())
+                        }
+                        ImpactDirection::Both => {
+                            if reference.to.0 == boundary.symbol_id {
+                                Some(reference.from.0.as_str())
+                            } else if reference.from.0 == boundary.symbol_id {
+                                Some(reference.to.0.as_str())
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    }?;
+                    let completion_file = symbol_file_by_id.get(completion_symbol_id).copied()?;
+                    if completion_file == root_file || completion_file == boundary_file {
+                        return None;
                     }
-                    _ => None,
-                };
-                let Some(completion_symbol_id) = completion_symbol_id else {
-                    continue;
-                };
-                let Some(completion_file) = symbol_file_by_id.get(completion_symbol_id).copied()
+                    if direct_boundary_paths.contains(completion_file) {
+                        return None;
+                    }
+                    Some((
+                        completion_symbol_id.to_string(),
+                        completion_file,
+                        reference.line,
+                    ))
+                })
+                .collect();
+            let side_max_call_line = side_refs
+                .iter()
+                .map(|(_, _, line)| *line)
+                .max()
+                .unwrap_or_default();
+
+            let mut side_candidates = std::collections::BTreeMap::new();
+            for (completion_symbol_id, completion_file, call_line) in side_refs {
+                let Some(completion_symbol) = symbol_by_id.get(&completion_symbol_id).copied()
                 else {
                     continue;
                 };
-                if completion_file == root_file || completion_file == boundary_file {
-                    continue;
-                }
-                if direct_boundary_paths.contains(completion_file) {
-                    continue;
-                }
-
+                let scoring = tier2_scoring_summary(
+                    boundary_symbol,
+                    boundary_file,
+                    completion_symbol,
+                    completion_file,
+                    call_line,
+                    side_max_call_line,
+                );
                 let candidate = Tier2Candidate {
                     path: completion_file.to_string(),
                     via_symbol_id: boundary.symbol_id.clone(),
                     via_path: boundary_file.to_string(),
-                    bridge_kind: infer_tier2_bridge_kind(
-                        boundary_symbol,
-                        boundary_file,
-                        completion_file,
-                    ),
-                    call_line: reference.line,
+                    bridge_kind: tier2_bridge_kind_for_lane(scoring.lane),
+                    scoring,
                 };
                 side_candidates
                     .entry(completion_file.to_string())
@@ -2643,6 +2845,29 @@ fn caller() -> i32 {
             .unwrap_or_else(|| panic!("missing slice selection metadata for {path}: {summary:#?}"))
     }
 
+    fn test_tier2_scoring(
+        lane: ImpactSliceCandidateLane,
+        primary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
+        secondary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
+        call_position_rank: u32,
+        lexical_tiebreak: &str,
+    ) -> ImpactSliceCandidateScoringSummary {
+        ImpactSliceCandidateScoringSummary {
+            source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+            lane,
+            score_tuple: ImpactSliceScoreTuple {
+                source_rank: 0,
+                lane_rank: tier2_lane_rank(lane),
+                primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap(),
+                secondary_evidence_count: u8::try_from(secondary_evidence_kinds.len()).unwrap(),
+                call_position_rank,
+                lexical_tiebreak: lexical_tiebreak.to_string(),
+            },
+            primary_evidence_kinds,
+            secondary_evidence_kinds,
+        }
+    }
+
     #[test]
     fn bounded_slice_plan_selects_direct_boundary_and_single_bridge_completion() {
         let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
@@ -2780,6 +3005,19 @@ fn caller() -> i32 {
                 via_symbol_id: Some("rust:left_wrapper.rs:fn:wrap_left:3".to_string()),
                 via_path: Some("left_wrapper.rs".to_string()),
                 bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    4,
+                    "left_leaf.rs",
+                )),
             }]
         );
 
@@ -2793,6 +3031,19 @@ fn caller() -> i32 {
                 via_symbol_id: Some("rust:right_wrapper.rs:fn:wrap_right:3".to_string()),
                 via_path: Some("right_wrapper.rs".to_string()),
                 bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    4,
+                    "right_leaf.rs",
+                )),
             }]
         );
     }
@@ -2840,9 +3091,103 @@ fn caller() -> i32 {
                 .any(|candidate| {
                     candidate.path == "aaa_helper.rs"
                         && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
-                        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+                        && candidate.bridge_kind
+                            == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
                         && candidate.via_symbol_id.as_deref() == Some("rust:wrapper.rs:fn:wrap:3")
+                        && candidate.scoring.as_ref().is_some_and(|scoring| {
+                            scoring.lane == ImpactSliceCandidateLane::AliasContinuation
+                                && scoring.primary_evidence_kinds
+                                    == vec![ImpactSliceEvidenceKind::AssignedResult]
+                                && scoring.secondary_evidence_kinds
+                                    == vec![ImpactSliceEvidenceKind::NamePathHint]
+                        })
                 })
+        );
+    }
+
+    #[test]
+    fn bounded_slice_plan_prefers_alias_continuation_over_later_adapter_helper_noise() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let adapter = test_symbol("rust:adapter.rs:fn:wrap:3", "wrap", "adapter.rs", 3);
+        let value = test_symbol("rust:value.rs:fn:make:1", "make", "value.rs", 1);
+        let helper = test_symbol("rust:zzz_helper.rs:fn:noise:1", "noise", "zzz_helper.rs", 1);
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            adapter.clone(),
+            value.clone(),
+            helper.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), adapter.id.0.as_str(), "main.rs", 5),
+            call_ref(adapter.id.0.as_str(), value.id.0.as_str(), "adapter.rs", 4),
+            call_ref(adapter.id.0.as_str(), helper.id.0.as_str(), "adapter.rs", 5),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "adapter.rs".to_string(),
+                "main.rs".to_string(),
+                "value.rs".to_string(),
+            ]
+        );
+
+        let value_file = slice_selection_file(&plan.slice_selection, "value.rs");
+        assert_eq!(
+            value_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:adapter.rs:fn:wrap:3".to_string()),
+                via_path: Some("adapter.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AliasChain,
+                        ImpactSliceEvidenceKind::AssignedResult,
+                    ],
+                    vec![ImpactSliceEvidenceKind::NamePathHint],
+                    4,
+                    "value.rs",
+                )),
+            }]
+        );
+        assert!(
+            plan.slice_selection
+                .pruned_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.path == "zzz_helper.rs"
+                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.bridge_kind
+                            == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
+                        && candidate.via_symbol_id.as_deref() == Some("rust:adapter.rs:fn:wrap:3")
+                        && candidate.scoring.as_ref().is_some_and(|scoring| {
+                            scoring.lane == ImpactSliceCandidateLane::AliasContinuation
+                                && scoring.primary_evidence_kinds
+                                    == vec![ImpactSliceEvidenceKind::AssignedResult]
+                                && scoring.secondary_evidence_kinds
+                                    == vec![
+                                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                                        ImpactSliceEvidenceKind::NamePathHint,
+                                    ]
+                                && scoring.score_tuple.call_position_rank == 5
+                        })
+                }),
+            "expected later helper noise to lose to the stronger alias continuation candidate: {:#?}",
+            plan.slice_selection.pruned_candidates
         );
     }
 
@@ -2919,7 +3264,8 @@ fn caller() -> i32 {
                 .any(|candidate| {
                     candidate.path == "z_alt.rs"
                         && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
-                        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+                        && candidate.bridge_kind
+                            == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
                         && candidate.via_symbol_id.as_deref()
                             == Some("rust:a_wrapper.rs:fn:wrap_a:3")
                 })
