@@ -193,6 +193,24 @@ pub struct ImpactWitnessCompactHop {
     pub collapsed_hops: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ImpactWitnessSliceContext {
+    pub seed_symbol_id: String,
+    #[serde(default)]
+    pub selected_files_on_path: Vec<ImpactWitnessSliceFileContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactWitnessSliceFileContext {
+    pub path: String,
+    #[serde(default)]
+    pub witness_hops: Vec<usize>,
+    #[serde(default)]
+    pub selection_reasons: Vec<ImpactSliceReasonMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seed_reasons: Vec<ImpactSliceReasonMetadata>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactWitness {
     pub symbol_id: String,
@@ -212,6 +230,8 @@ pub struct ImpactWitness {
     pub provenance_chain_compact: Vec<EdgeProvenance>,
     #[serde(default)]
     pub kind_chain_compact: Vec<RefKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_context: Option<ImpactWitnessSliceContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -532,6 +552,112 @@ pub(crate) fn finalize_impact_output(
             risk: Some(risk),
             slice_selection: None,
         },
+    }
+}
+
+fn record_witness_file_hop(
+    ordered_paths: &mut Vec<String>,
+    witness_hops_by_path: &mut HashMap<String, Vec<usize>>,
+    path: &str,
+    hop_index: usize,
+) {
+    let hops = witness_hops_by_path.entry(path.to_string()).or_default();
+    if hops.last().copied() != Some(hop_index) {
+        hops.push(hop_index);
+    }
+    if !ordered_paths.iter().any(|existing| existing == path) {
+        ordered_paths.push(path.to_string());
+    }
+}
+
+fn build_witness_slice_context(
+    witness: &ImpactWitness,
+    symbol_file_by_id: &HashMap<String, String>,
+    slice_selection: &ImpactSliceSelectionSummary,
+) -> ImpactWitnessSliceContext {
+    let selected_files_by_path: HashMap<&str, &ImpactSliceFileMetadata> = slice_selection
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file))
+        .collect();
+
+    let mut ordered_paths: Vec<String> = Vec::new();
+    let mut witness_hops_by_path: HashMap<String, Vec<usize>> = HashMap::new();
+    for (hop_index, hop) in witness.path.iter().enumerate() {
+        if let Some(from_file) = symbol_file_by_id.get(&hop.from_symbol_id) {
+            record_witness_file_hop(
+                &mut ordered_paths,
+                &mut witness_hops_by_path,
+                from_file,
+                hop_index,
+            );
+        }
+        record_witness_file_hop(
+            &mut ordered_paths,
+            &mut witness_hops_by_path,
+            &hop.edge.file,
+            hop_index,
+        );
+        if let Some(to_file) = symbol_file_by_id.get(&hop.to_symbol_id) {
+            record_witness_file_hop(
+                &mut ordered_paths,
+                &mut witness_hops_by_path,
+                to_file,
+                hop_index,
+            );
+        }
+    }
+
+    let selected_files_on_path = ordered_paths
+        .into_iter()
+        .filter_map(|path| {
+            let metadata = selected_files_by_path.get(path.as_str())?;
+            let seed_reasons: Vec<ImpactSliceReasonMetadata> = metadata
+                .reasons
+                .iter()
+                .filter(|reason| reason.seed_symbol_id == witness.root_symbol_id)
+                .cloned()
+                .collect();
+            Some(ImpactWitnessSliceFileContext {
+                witness_hops: witness_hops_by_path
+                    .remove(path.as_str())
+                    .unwrap_or_default(),
+                selection_reasons: metadata.reasons.clone(),
+                seed_reasons,
+                path,
+            })
+        })
+        .collect();
+
+    ImpactWitnessSliceContext {
+        seed_symbol_id: witness.root_symbol_id.clone(),
+        selected_files_on_path,
+    }
+}
+
+pub fn attach_slice_selection_summary(
+    output: &mut ImpactOutput,
+    slice_selection: &ImpactSliceSelectionSummary,
+) {
+    output.summary.slice_selection = Some(slice_selection.clone());
+
+    if output.impacted_witnesses.is_empty() {
+        return;
+    }
+
+    let symbol_file_by_id: HashMap<String, String> = output
+        .changed_symbols
+        .iter()
+        .chain(output.impacted_symbols.iter())
+        .map(|symbol| (symbol.id.0.clone(), symbol.file.clone()))
+        .collect();
+
+    for witness in output.impacted_witnesses.values_mut() {
+        witness.slice_context = Some(build_witness_slice_context(
+            witness,
+            &symbol_file_by_id,
+            slice_selection,
+        ));
     }
 }
 
@@ -1223,6 +1349,7 @@ pub fn compute_impact(
                     path_compact,
                     provenance_chain_compact,
                     kind_chain_compact,
+                    slice_context: None,
                 },
             ))
         })
@@ -1773,6 +1900,238 @@ fn foo() { bar(); }
         assert_eq!(
             witness.kind_chain_compact,
             vec![crate::ir::reference::RefKind::Data]
+        );
+    }
+
+    #[test]
+    fn attach_slice_selection_summary_links_witness_files_to_selected_slice_files() {
+        let seed = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "caller",
+                1,
+            ),
+            name: "caller".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "rust".to_string(),
+        };
+        let mid = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "wrapper.rs",
+                &crate::ir::SymbolKind::Function,
+                "wrap",
+                2,
+            ),
+            name: "wrap".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "wrapper.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 2,
+                end_line: 2,
+            },
+            language: "rust".to_string(),
+        };
+        let target = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "callee.rs",
+                &crate::ir::SymbolKind::Function,
+                "callee",
+                3,
+            ),
+            name: "callee".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "callee.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 3,
+                end_line: 3,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![seed.clone(), mid.clone(), target.clone()]);
+        let refs = vec![
+            Reference {
+                from: seed.id.clone(),
+                to: mid.id.clone(),
+                kind: crate::ir::reference::RefKind::Call,
+                file: "main.rs".to_string(),
+                line: 10,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
+            },
+            Reference {
+                from: mid.id.clone(),
+                to: target.id.clone(),
+                kind: crate::ir::reference::RefKind::Call,
+                file: "wrapper.rs".to_string(),
+                line: 20,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
+            },
+        ];
+        let opts = ImpactOptions {
+            direction: ImpactDirection::Callees,
+            max_depth: Some(10),
+            with_edges: Some(true),
+            ignore_dirs: Vec::new(),
+        };
+        let mut out = compute_impact(&[seed.clone()], &index, &refs, &opts);
+
+        let wrapper_seed_reason = ImpactSliceReasonMetadata {
+            seed_symbol_id: seed.id.0.clone(),
+            tier: 2,
+            kind: ImpactSliceReasonKind::BridgeCompletionFile,
+            via_symbol_id: Some(mid.id.0.clone()),
+            via_path: None,
+            bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+        };
+        let wrapper_other_reason = ImpactSliceReasonMetadata {
+            seed_symbol_id: "rust:other.rs:fn:other:1".to_string(),
+            tier: 1,
+            kind: ImpactSliceReasonKind::DirectCalleeFile,
+            via_symbol_id: Some(mid.id.0.clone()),
+            via_path: None,
+            bridge_kind: None,
+        };
+        let slice_selection = ImpactSliceSelectionSummary {
+            planner: ImpactSlicePlannerKind::BoundedSlice,
+            files: vec![
+                ImpactSliceFileMetadata {
+                    path: "main.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 0,
+                        kind: ImpactSliceReasonKind::ChangedFile,
+                        via_symbol_id: None,
+                        via_path: None,
+                        bridge_kind: None,
+                    }],
+                },
+                ImpactSliceFileMetadata {
+                    path: "wrapper.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![wrapper_seed_reason.clone(), wrapper_other_reason.clone()],
+                },
+                ImpactSliceFileMetadata {
+                    path: "callee.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 1,
+                        kind: ImpactSliceReasonKind::DirectCalleeFile,
+                        via_symbol_id: Some(target.id.0.clone()),
+                        via_path: None,
+                        bridge_kind: None,
+                    }],
+                },
+                ImpactSliceFileMetadata {
+                    path: "unused.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: false,
+                        local_dfg: false,
+                        explanation: true,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 3,
+                        kind: ImpactSliceReasonKind::ModuleCompanionFile,
+                        via_symbol_id: None,
+                        via_path: Some("main.rs".to_string()),
+                        bridge_kind: None,
+                    }],
+                },
+            ],
+            pruned_candidates: Vec::new(),
+        };
+
+        attach_slice_selection_summary(&mut out, &slice_selection);
+
+        assert_eq!(out.summary.slice_selection, Some(slice_selection.clone()));
+        let witness = out
+            .impacted_witnesses
+            .get(&target.id.0)
+            .expect("witness for callee");
+        assert_eq!(
+            witness.slice_context,
+            Some(ImpactWitnessSliceContext {
+                seed_symbol_id: seed.id.0.clone(),
+                selected_files_on_path: vec![
+                    ImpactWitnessSliceFileContext {
+                        path: "main.rs".to_string(),
+                        witness_hops: vec![0],
+                        selection_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 0,
+                            kind: ImpactSliceReasonKind::ChangedFile,
+                            via_symbol_id: None,
+                            via_path: None,
+                            bridge_kind: None,
+                        }],
+                        seed_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 0,
+                            kind: ImpactSliceReasonKind::ChangedFile,
+                            via_symbol_id: None,
+                            via_path: None,
+                            bridge_kind: None,
+                        }],
+                    },
+                    ImpactWitnessSliceFileContext {
+                        path: "wrapper.rs".to_string(),
+                        witness_hops: vec![0, 1],
+                        selection_reasons: vec![wrapper_seed_reason, wrapper_other_reason,],
+                        seed_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 2,
+                            kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                            via_symbol_id: Some(mid.id.0.clone()),
+                            via_path: None,
+                            bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                        }],
+                    },
+                    ImpactWitnessSliceFileContext {
+                        path: "callee.rs".to_string(),
+                        witness_hops: vec![1],
+                        selection_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 1,
+                            kind: ImpactSliceReasonKind::DirectCalleeFile,
+                            via_symbol_id: Some(target.id.0.clone()),
+                            via_path: None,
+                            bridge_kind: None,
+                        }],
+                        seed_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 1,
+                            kind: ImpactSliceReasonKind::DirectCalleeFile,
+                            via_symbol_id: Some(target.id.0.clone()),
+                            via_path: None,
+                            bridge_kind: None,
+                        }],
+                    },
+                ],
+            })
         );
     }
 

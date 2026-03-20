@@ -1704,6 +1704,46 @@ fn pdg_json_reports_slice_selection_summary() {
             "via_symbol_id": "rust:callee.rs:fn:callee:1",
         }])
     );
+
+    let witness = &output["impacted_witnesses"]["rust:callee.rs:fn:callee:1"];
+    assert_eq!(
+        witness["slice_context"],
+        serde_json::json!({
+            "seed_symbol_id": "rust:main.rs:fn:caller:2",
+            "selected_files_on_path": [
+                {
+                    "path": "main.rs",
+                    "witness_hops": [0],
+                    "selection_reasons": [{
+                        "seed_symbol_id": "rust:main.rs:fn:caller:2",
+                        "tier": 0,
+                        "kind": "changed_file",
+                    }],
+                    "seed_reasons": [{
+                        "seed_symbol_id": "rust:main.rs:fn:caller:2",
+                        "tier": 0,
+                        "kind": "changed_file",
+                    }],
+                },
+                {
+                    "path": "callee.rs",
+                    "witness_hops": [0],
+                    "selection_reasons": [{
+                        "seed_symbol_id": "rust:main.rs:fn:caller:2",
+                        "tier": 1,
+                        "kind": "direct_callee_file",
+                        "via_symbol_id": "rust:callee.rs:fn:callee:1",
+                    }],
+                    "seed_reasons": [{
+                        "seed_symbol_id": "rust:main.rs:fn:caller:2",
+                        "tier": 1,
+                        "kind": "direct_callee_file",
+                        "via_symbol_id": "rust:callee.rs:fn:callee:1",
+                    }],
+                },
+            ],
+        })
+    );
 }
 
 #[test]
@@ -2092,6 +2132,46 @@ fn per_seed_pdg_keeps_slice_selection_attribution_per_seed() {
             "via_symbol_id": "rust:shared.rs:fn:sink:1",
         }])
     );
+    let left_witness =
+        &left["impacts"][0]["output"]["impacted_witnesses"]["rust:shared.rs:fn:sink:1"];
+    assert_eq!(
+        left_witness["slice_context"],
+        serde_json::json!({
+            "seed_symbol_id": "rust:left.rs:fn:left:1",
+            "selected_files_on_path": [
+                {
+                    "path": "left.rs",
+                    "witness_hops": [0],
+                    "selection_reasons": [{
+                        "seed_symbol_id": "rust:left.rs:fn:left:1",
+                        "tier": 0,
+                        "kind": "seed_file",
+                    }],
+                    "seed_reasons": [{
+                        "seed_symbol_id": "rust:left.rs:fn:left:1",
+                        "tier": 0,
+                        "kind": "seed_file",
+                    }],
+                },
+                {
+                    "path": "shared.rs",
+                    "witness_hops": [0],
+                    "selection_reasons": [{
+                        "seed_symbol_id": "rust:left.rs:fn:left:1",
+                        "tier": 1,
+                        "kind": "direct_callee_file",
+                        "via_symbol_id": "rust:shared.rs:fn:sink:1",
+                    }],
+                    "seed_reasons": [{
+                        "seed_symbol_id": "rust:left.rs:fn:left:1",
+                        "tier": 1,
+                        "kind": "direct_callee_file",
+                        "via_symbol_id": "rust:shared.rs:fn:sink:1",
+                    }],
+                },
+            ],
+        })
+    );
 
     let right = grouped
         .iter()
@@ -2123,5 +2203,45 @@ fn per_seed_pdg_keeps_slice_selection_attribution_per_seed() {
             "kind": "direct_callee_file",
             "via_symbol_id": "rust:shared.rs:fn:sink:1",
         }])
+    );
+    let right_witness =
+        &right["impacts"][0]["output"]["impacted_witnesses"]["rust:shared.rs:fn:sink:1"];
+    assert_eq!(
+        right_witness["slice_context"],
+        serde_json::json!({
+            "seed_symbol_id": "rust:right.rs:fn:right:1",
+            "selected_files_on_path": [
+                {
+                    "path": "right.rs",
+                    "witness_hops": [0],
+                    "selection_reasons": [{
+                        "seed_symbol_id": "rust:right.rs:fn:right:1",
+                        "tier": 0,
+                        "kind": "seed_file",
+                    }],
+                    "seed_reasons": [{
+                        "seed_symbol_id": "rust:right.rs:fn:right:1",
+                        "tier": 0,
+                        "kind": "seed_file",
+                    }],
+                },
+                {
+                    "path": "shared.rs",
+                    "witness_hops": [0],
+                    "selection_reasons": [{
+                        "seed_symbol_id": "rust:right.rs:fn:right:1",
+                        "tier": 1,
+                        "kind": "direct_callee_file",
+                        "via_symbol_id": "rust:shared.rs:fn:sink:1",
+                    }],
+                    "seed_reasons": [{
+                        "seed_symbol_id": "rust:right.rs:fn:right:1",
+                        "tier": 1,
+                        "kind": "direct_callee_file",
+                        "via_symbol_id": "rust:shared.rs:fn:sink:1",
+                    }],
+                },
+            ],
+        })
     );
 }
