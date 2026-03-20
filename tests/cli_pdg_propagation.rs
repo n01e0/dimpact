@@ -247,6 +247,79 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_wrapper_noise_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("aaa_helper.rs"),
+        r#"pub fn noise(v: i32) -> i32 {
+    v - 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("leaf.rs"),
+        r#"pub fn source(v: i32) -> i32 {
+    v + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("wrapper.rs"),
+        r#"use crate::aaa_helper;
+use crate::leaf;
+
+pub fn wrap(left: i32, right: i32) -> i32 {
+    let _noise = aaa_helper::noise(left);
+    let mid = leaf::source(right);
+    mid
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod aaa_helper;
+mod leaf;
+mod wrapper;
+
+fn caller() {
+    let x = 1;
+    let y = 2;
+    let out = wrapper::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod aaa_helper;
+mod leaf;
+mod wrapper;
+
+fn caller() {
+    let x = 3;
+    let y = 2;
+    let out = wrapper::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_cross_file_dual_wrapper_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -827,6 +900,91 @@ fn pdg_propagation_maps_multi_file_wrapper_return_without_leaking_irrelevant_arg
         !prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:7\""),
         "unexpected irrelevant arg bridge leaked through wrapper summary, got:\n{}",
         prop
+    );
+}
+
+#[test]
+fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate() {
+    let (_tmp, repo) = setup_cross_file_wrapper_noise_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"leaf.rs:def:v:1\""),
+        "expected bounded slice scope to keep the later wrapper-return leaf DFG nodes, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"aaa_helper.rs:def:v:1\""),
+        "unexpected noise-side helper DFG nodes entered the bounded slice scope, got:\n{}",
+        pdg
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(paths, vec!["leaf.rs", "main.rs", "wrapper.rs"]);
+
+    let leaf = slice_selection_file(slice_selection, "leaf.rs");
+    assert!(
+        leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
+                    && reason["via_path"] == "wrapper.rs"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected leaf to carry wrapper_return bridge metadata: {prop:#}"
+    );
+    assert!(
+        slice_selection["pruned_candidates"]
+            .as_array()
+            .is_some_and(|candidates| candidates.iter().any(|candidate| {
+                candidate["path"] == "aaa_helper.rs"
+                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
+                    && candidate["bridge_kind"] == "wrapper_return"
+            })),
+        "expected helper candidate to be kept only as ranked-out metadata: {prop:#}"
+    );
+
+    let prop_dot = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+    assert!(
+        prop_dot.contains("\"main.rs:use:y:8\" -> \"main.rs:def:out:8\""),
+        "expected propagation to recover the leaf-backed wrapper-return bridge, got:\n{}",
+        prop_dot
     );
 }
 
