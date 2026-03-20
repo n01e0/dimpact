@@ -629,6 +629,7 @@ fn build_witness_slice_context(
     let selected_files_by_path: HashMap<&str, &ImpactSliceFileMetadata> = slice_selection
         .files
         .iter()
+        .filter(|file| file.scopes.explanation)
         .map(|file| (file.path.as_str(), file))
         .collect();
 
@@ -2166,6 +2167,237 @@ fn foo() { bar(); }
                             via_symbol_id: Some(mid.id.0.clone()),
                             via_path: None,
                             bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                            scoring: None,
+                        }],
+                    },
+                    ImpactWitnessSliceFileContext {
+                        path: "callee.rs".to_string(),
+                        witness_hops: vec![1],
+                        selection_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 1,
+                            kind: ImpactSliceReasonKind::DirectCalleeFile,
+                            via_symbol_id: Some(target.id.0.clone()),
+                            via_path: None,
+                            bridge_kind: None,
+                            scoring: None,
+                        }],
+                        seed_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 1,
+                            kind: ImpactSliceReasonKind::DirectCalleeFile,
+                            via_symbol_id: Some(target.id.0.clone()),
+                            via_path: None,
+                            bridge_kind: None,
+                            scoring: None,
+                        }],
+                    },
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn attach_slice_selection_summary_omits_non_explanation_files_from_witness_context() {
+        let seed = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "main.rs",
+                &crate::ir::SymbolKind::Function,
+                "caller",
+                1,
+            ),
+            name: "caller".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 1,
+                end_line: 1,
+            },
+            language: "rust".to_string(),
+        };
+        let mid = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "wrapper.rs",
+                &crate::ir::SymbolKind::Function,
+                "wrap",
+                2,
+            ),
+            name: "wrap".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "wrapper.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 2,
+                end_line: 2,
+            },
+            language: "rust".to_string(),
+        };
+        let target = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "callee.rs",
+                &crate::ir::SymbolKind::Function,
+                "callee",
+                3,
+            ),
+            name: "callee".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "callee.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 3,
+                end_line: 3,
+            },
+            language: "rust".to_string(),
+        };
+        let mut out = ImpactOutput {
+            changed_symbols: vec![seed.clone()],
+            impacted_symbols: vec![mid.clone(), target.clone()],
+            impacted_witnesses: HashMap::from([(
+                target.id.0.clone(),
+                ImpactWitness {
+                    symbol_id: target.id.0.clone(),
+                    depth: 1,
+                    root_symbol_id: seed.id.0.clone(),
+                    via_symbol_id: mid.id.0.clone(),
+                    edge: Reference {
+                        from: mid.id.clone(),
+                        to: target.id.clone(),
+                        kind: RefKind::Call,
+                        line: 11,
+                        file: "wrapper.rs".to_string(),
+                        certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                        provenance: EdgeProvenance::CallGraph,
+                    },
+                    path: vec![
+                        ImpactWitnessHop {
+                            from_symbol_id: seed.id.0.clone(),
+                            to_symbol_id: mid.id.0.clone(),
+                            edge: Reference {
+                                from: seed.id.clone(),
+                                to: mid.id.clone(),
+                                kind: RefKind::Call,
+                                line: 10,
+                                file: "main.rs".to_string(),
+                                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                                provenance: EdgeProvenance::CallGraph,
+                            },
+                        },
+                        ImpactWitnessHop {
+                            from_symbol_id: mid.id.0.clone(),
+                            to_symbol_id: target.id.0.clone(),
+                            edge: Reference {
+                                from: mid.id.clone(),
+                                to: target.id.clone(),
+                                kind: RefKind::Call,
+                                line: 11,
+                                file: "wrapper.rs".to_string(),
+                                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                                provenance: EdgeProvenance::CallGraph,
+                            },
+                        },
+                    ],
+                    provenance_chain: vec![],
+                    kind_chain: vec![],
+                    path_compact: vec![],
+                    provenance_chain_compact: vec![],
+                    kind_chain_compact: vec![],
+                    slice_context: None,
+                },
+            )]),
+            impacted_files: vec![],
+            edges: vec![],
+            impacted_by_file: HashMap::new(),
+            summary: ImpactSummary::default(),
+        };
+        let slice_selection = ImpactSliceSelectionSummary {
+            planner: ImpactSlicePlannerKind::BoundedSlice,
+            files: vec![
+                ImpactSliceFileMetadata {
+                    path: "main.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 0,
+                        kind: ImpactSliceReasonKind::SeedFile,
+                        via_symbol_id: None,
+                        via_path: None,
+                        bridge_kind: None,
+                        scoring: None,
+                    }],
+                },
+                ImpactSliceFileMetadata {
+                    path: "wrapper.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: false,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 2,
+                        kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                        via_symbol_id: Some(mid.id.0.clone()),
+                        via_path: None,
+                        bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                        scoring: None,
+                    }],
+                },
+                ImpactSliceFileMetadata {
+                    path: "callee.rs".to_string(),
+                    scopes: ImpactSliceScopes {
+                        cache_update: true,
+                        local_dfg: true,
+                        explanation: true,
+                    },
+                    reasons: vec![ImpactSliceReasonMetadata {
+                        seed_symbol_id: seed.id.0.clone(),
+                        tier: 1,
+                        kind: ImpactSliceReasonKind::DirectCalleeFile,
+                        via_symbol_id: Some(target.id.0.clone()),
+                        via_path: None,
+                        bridge_kind: None,
+                        scoring: None,
+                    }],
+                },
+            ],
+            pruned_candidates: Vec::new(),
+        };
+
+        attach_slice_selection_summary(&mut out, &slice_selection);
+
+        let witness = out
+            .impacted_witnesses
+            .get(&target.id.0)
+            .expect("witness for callee");
+        assert_eq!(
+            witness.slice_context,
+            Some(ImpactWitnessSliceContext {
+                seed_symbol_id: seed.id.0.clone(),
+                selected_files_on_path: vec![
+                    ImpactWitnessSliceFileContext {
+                        path: "main.rs".to_string(),
+                        witness_hops: vec![0],
+                        selection_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 0,
+                            kind: ImpactSliceReasonKind::SeedFile,
+                            via_symbol_id: None,
+                            via_path: None,
+                            bridge_kind: None,
+                            scoring: None,
+                        }],
+                        seed_reasons: vec![ImpactSliceReasonMetadata {
+                            seed_symbol_id: seed.id.0.clone(),
+                            tier: 0,
+                            kind: ImpactSliceReasonKind::SeedFile,
+                            via_symbol_id: None,
+                            via_path: None,
+                            bridge_kind: None,
                             scoring: None,
                         }],
                     },
