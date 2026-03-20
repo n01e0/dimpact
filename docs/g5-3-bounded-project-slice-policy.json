@@ -1,0 +1,313 @@
+{
+  "generated_by": "manual G5-3 policy note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "selection policy for bounded project slices derived from changed symbols, refs, projected call graph, and cache index",
+  "goals": [
+    "select deterministic per-seed bounded slices from changed symbols / refs / call graph / SymbolIndex",
+    "separate cache update, local DFG, and explanation scopes",
+    "support shared scope planning for --with-pdg and --with-propagation",
+    "retain path-selection reasons and pruned candidates per seed"
+  ],
+  "non_goals": [
+    "project-wide recursive closure",
+    "full local DFG parity for non-Rust/Ruby languages",
+    "final witness schema design",
+    "engine-consistency resolution"
+  ],
+  "planner_contract": {
+    "inputs": [
+      "changed_symbols_or_explicit_seeds",
+      "refs",
+      "projected_call_graph",
+      "symbol_index",
+      "direction",
+      "mode",
+      "budgets"
+    ],
+    "outputs": [
+      "per_seed_plans",
+      "union_cache_update_paths",
+      "union_local_dfg_paths",
+      "union_explanation_paths"
+    ]
+  },
+  "derived_views": {
+    "projected_call_graph": {
+      "from_refs_filter": {
+        "kind": "call",
+        "provenance": "call_graph"
+      },
+      "views": [
+        "outgoing_calls_by_symbol",
+        "incoming_calls_by_symbol",
+        "cross_file_calls_by_file",
+        "boundary_symbols_by_seed"
+      ]
+    },
+    "symbol_index_usage": [
+      "symbol_id_to_file_resolution",
+      "file_to_symbols_lookup",
+      "boundary_symbol_containment",
+      "per_seed_reason_attribution"
+    ]
+  },
+  "plan_shapes": {
+    "project_plan": {
+      "per_seed": "Vec<SeedProjectSlicePlan>",
+      "union_cache_update_paths": "Vec<String>",
+      "union_local_dfg_paths": "Vec<String>",
+      "union_explanation_paths": "Vec<String>"
+    },
+    "seed_plan": {
+      "seed_symbol_id": "String",
+      "cache_update_paths": "Vec<String>",
+      "local_dfg_paths": "Vec<String>",
+      "explanation_paths": "Vec<String>",
+      "reasons_by_path": "BTreeMap<String, Vec<PdgSliceReason>>",
+      "pruned_candidates": "Vec<PrunedSliceCandidate>"
+    }
+  },
+  "reason_kinds": [
+    "seed_file",
+    "changed_file",
+    "direct_caller_file",
+    "direct_callee_file",
+    "bridge_completion_file",
+    "module_companion_file"
+  ],
+  "bridge_kinds": [
+    "wrapper_return",
+    "boundary_alias_continuation",
+    "require_relative_chain"
+  ],
+  "tiers": [
+    {
+      "tier": 0,
+      "name": "root_files",
+      "rule": "always include changed files in diff mode and explicit seed files in seed mode",
+      "data_sources": [
+        "changed_symbols_or_explicit_seeds",
+        "symbol_index"
+      ],
+      "cache_update": true,
+      "local_dfg": "include only for .rs and .rb",
+      "explanation": true,
+      "reasons": [
+        "seed_file",
+        "changed_file"
+      ]
+    },
+    {
+      "tier": 1,
+      "name": "direction_aware_direct_boundary",
+      "rule": "use projected call-graph adjacency to select one-hop caller/callee files for each seed according to direction",
+      "data_sources": [
+        "projected_call_graph",
+        "symbol_index"
+      ],
+      "cache_update": true,
+      "local_dfg": "include only for .rs and .rb",
+      "explanation": true,
+      "reasons": [
+        "direct_caller_file",
+        "direct_callee_file"
+      ]
+    },
+    {
+      "tier": 2,
+      "name": "bridge_completion",
+      "rule": "allow one extra file per seed when needed to close a wrapper-return, boundary-alias-continuation, or require-relative chain beyond the direct boundary",
+      "data_sources": [
+        "tier1_boundary_symbols_files",
+        "projected_call_graph",
+        "symbol_index.by_file"
+      ],
+      "cache_update": true,
+      "local_dfg": "include only for .rs and .rb",
+      "explanation": true,
+      "reasons": [
+        "bridge_completion_file"
+      ],
+      "budget": "at most one bridge-completion file per seed"
+    },
+    {
+      "tier": 3,
+      "name": "companion_fallback",
+      "rule": "use Rust module or Ruby require_relative companion resolution only for already-selected tier1/tier2 paths and only when graph-first selection is insufficient",
+      "data_sources": [
+        "selected_paths",
+        "path_companion_heuristics"
+      ],
+      "cache_update": true,
+      "local_dfg": "include only for .rs/.rb when budget allows",
+      "explanation": true,
+      "reasons": [
+        "module_companion_file"
+      ]
+    }
+  ],
+  "candidate_ordering": {
+    "phase_order": [
+      "tier0",
+      "tier1",
+      "tier2_collect",
+      "tier2_select",
+      "tier3_fallback",
+      "budget_prune"
+    ],
+    "tier_priority": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "within_tier": [
+      "seed_hop_depth",
+      "reason_priority",
+      "call_graph_certainty_priority",
+      "lexical_path_order"
+    ],
+    "bridge_priority": [
+      "wrapper_return",
+      "boundary_alias_continuation",
+      "require_relative_chain"
+    ]
+  },
+  "budgets": {
+    "per_seed_tier1_files_max": 4,
+    "per_seed_tier2_files_max": 1,
+    "per_seed_tier3_files_max": 1,
+    "union_cache_update_paths_max": 12,
+    "union_local_dfg_paths_max": 8,
+    "union_explanation_paths_max": 12
+  },
+  "prune_order": [
+    "tier3",
+    "tier2",
+    "tier1_low_priority",
+    "tier0_last"
+  ],
+  "stop_rules": {
+    "recursive_closure": false,
+    "max_completion_depth": 1,
+    "note": "bounded slice stops after direct boundary plus one bridge-completion step"
+  },
+  "scope_split": {
+    "cache_update_scope": {
+      "includes": [
+        "tier0",
+        "tier1",
+        "selected_tier2",
+        "selected_tier3"
+      ],
+      "intent": "keep the base graph fresh"
+    },
+    "local_dfg_scope": {
+      "includes": [
+        "selected .rs/.rb files from tier0..tier3"
+      ],
+      "intent": "build Rust/Ruby local DFG only where enrichment is likely to matter"
+    },
+    "explanation_scope": {
+      "includes": [
+        "all selected paths",
+        "optionally pruned candidates as debug metadata"
+      ],
+      "intent": "preserve reasons and later witness/debug attribution"
+    },
+    "invariant": "cache_update_scope is a superset of local_dfg_scope"
+  },
+  "mode_policy": {
+    "diff_mode": {
+      "root_seed": "changed.changed_symbols",
+      "tier0": "changed.changed_files",
+      "tier1": "one-hop direct callers/callees of changed symbols",
+      "tier2": "one completion candidate only"
+    },
+    "seed_mode": {
+      "root_seed": "explicit CLI seeds",
+      "tier0": "seed files",
+      "tier1": "one-hop direct callers/callees of seed symbols",
+      "tier2": "one completion candidate only"
+    },
+    "per_seed_mode": {
+      "rule": "always plan per seed first, union only for execution",
+      "preserve": [
+        "reasons_by_path",
+        "pruned_candidates"
+      ]
+    }
+  },
+  "g5_2_mapping": {
+    "rust-three-file-wrapper-return-completion": {
+      "tier0": [
+        "main.rs"
+      ],
+      "tier1": [
+        "adapter.rs"
+      ],
+      "tier2": [
+        "core.rs"
+      ],
+      "bridge_kind": "wrapper_return"
+    },
+    "rust-three-file-imported-result-alias-continuation": {
+      "tier0": [
+        "main.rs"
+      ],
+      "tier1": [
+        "adapter.rs"
+      ],
+      "tier2": [
+        "value.rs"
+      ],
+      "bridge_kind": "boundary_alias_continuation"
+    },
+    "ruby-three-file-require-relative-alias-return-chain": {
+      "tier0": [
+        "root caller or changed file"
+      ],
+      "tier1": [
+        "mid.rb"
+      ],
+      "tier2": [
+        "leaf.rb"
+      ],
+      "bridge_kind": "require_relative_chain"
+    },
+    "ruby-three-file-dynamic-send-target-separation": {
+      "tier0": [
+        "router or dispatch file"
+      ],
+      "tier1": [
+        "adjacent boundary file"
+      ],
+      "tier2": [
+        "targets.rb if needed"
+      ],
+      "bridge_kind": "boundary_alias_continuation"
+    }
+  },
+  "implementation_notes": {
+    "replace_current_ad_hoc_inputs_at": [
+      "src/bin/dimpact.rs::expand_related_local_dfg_paths",
+      "src/bin/dimpact.rs::build_pdg_context"
+    ],
+    "recommended_entrypoint": "plan_bounded_project_slice(...) -> PdgProjectSlicePlan",
+    "execution_order": [
+      "resolve changed symbols or explicit seeds",
+      "load SymbolIndex and refs from cache",
+      "project call graph from refs",
+      "plan bounded project slice",
+      "update cache using union_cache_update_paths",
+      "build local DFG using union_local_dfg_paths",
+      "run PDG / propagation on the selected slice"
+    ],
+    "initial_test_surface": [
+      "planner unit tests",
+      "deterministic budget tests",
+      "G5-2 fixture regressions",
+      "per-seed attribution tests"
+    ]
+  }
+}
