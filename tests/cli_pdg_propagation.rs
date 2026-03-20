@@ -698,6 +698,17 @@ fn per_seed_diff_mode_supports_propagation() {
             .is_some_and(|w| w.contains_key("rust:f.rs:fn:callee:1")),
         "expected per-seed witness nesting for impacted callee: {grouped:#?}"
     );
+    let witness = &output["impacted_witnesses"]["rust:f.rs:fn:callee:1"];
+    assert_eq!(
+        witness["path"][0]["from_symbol_id"].as_str(),
+        Some("rust:f.rs:fn:caller:2")
+    );
+    assert_eq!(
+        witness["path"][0]["to_symbol_id"].as_str(),
+        Some("rust:f.rs:fn:callee:1")
+    );
+    assert_eq!(witness["provenance_chain"][0].as_str(), Some("call_graph"));
+    assert_eq!(witness["kind_chain"][0].as_str(), Some("call"));
 }
 
 #[test]
