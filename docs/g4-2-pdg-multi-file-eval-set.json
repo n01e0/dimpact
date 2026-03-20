@@ -1,0 +1,347 @@
+{
+  "generated_by": "manual G4-2 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "fixed multi-file evaluation set for PDG build-scope and propagation work",
+  "defaults": {
+    "lanes": [
+      "baseline",
+      "pdg",
+      "propagation"
+    ],
+    "engine": "ts",
+    "note": "keep engine differences out of this set; G4-8 handles engine baselines"
+  },
+  "cases": [
+    {
+      "case_id": "rust-cross-file-callsite-summary-bridge",
+      "lang": "rust",
+      "source_kind": "mirrored_test_fixture",
+      "source": [
+        "tests/cli_pdg_propagation.rs::setup_repo",
+        "tests/cli_impact_imports.rs"
+      ],
+      "failure_kind": "fn",
+      "primary_view": "dot",
+      "focus": "cross-file callsite use -> callee summary -> assigned def bridge",
+      "direction": "callees",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--format",
+          "dot"
+        ],
+        "pdg": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "src/callee.rs",
+          "src/main.rs"
+        ],
+        "initial_source": {
+          "src/callee.rs": "pub fn callee(a: i32) -> i32 { a + 1 }\n",
+          "src/main.rs": "mod callee;\nfn caller() {\n    let x = 1;\n    let y = callee::callee(x);\n    println!(\"{}\", y);\n}\n"
+        },
+        "mutation": {
+          "file": "src/main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        }
+      },
+      "current_gap": "current PDG build scope is likely to include the changed caller file but not the callee file, so cross-file summary-connected bridge edges are weak or absent",
+      "observables": {
+        "want_after_g4": [
+          "propagation lane shows cross-file bridge from callsite use(x) into callee-side flow and back to assigned def(y)",
+          "callee-file local nodes or witness edges become visible as the reason for enrichment"
+        ],
+        "avoid": [
+          "broad caller-file fan-out to unrelated defs"
+        ]
+      }
+    },
+    {
+      "case_id": "rust-cross-file-wrapper-return-flow",
+      "lang": "rust",
+      "source_kind": "new_mirror_fixture",
+      "source": [
+        "tests/cli_pdg_propagation.rs::setup_repo"
+      ],
+      "failure_kind": "fn",
+      "primary_view": "dot+json",
+      "focus": "cross-file wrapper temp variable plus return-flow into caller result",
+      "direction": "callees",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "pdg": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "src/core.rs",
+          "src/adapter.rs",
+          "src/main.rs"
+        ],
+        "initial_source": {
+          "src/core.rs": "pub fn core(a: i32) -> i32 { a + 1 }\n",
+          "src/adapter.rs": "pub fn wrap(a: i32) -> i32 {\n    let v = crate::core::core(a);\n    v + 1\n}\n",
+          "src/main.rs": "mod core;\nmod adapter;\nfn caller() {\n    let x = 1;\n    let y = adapter::wrap(x);\n    println!(\"{}\", y);\n}\n"
+        },
+        "mutation": {
+          "file": "src/main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        }
+      },
+      "current_gap": "call graph should still show caller -> wrap -> core, but wrapper-file temp-flow and returned-result stitching are weak when only the changed file gets local DFG",
+      "observables": {
+        "want_after_g4": [
+          "propagation lane retains temp alias flow around adapter::wrap",
+          "impacted witnesses include local_dfg or symbolic_propagation, not just plain call edges"
+        ],
+        "avoid": [
+          "skipping wrapper temp variable entirely",
+          "fan-out to unrelated adapter nodes"
+        ]
+      }
+    },
+    {
+      "case_id": "rust-cross-file-imported-result-alias-chain",
+      "lang": "rust",
+      "source_kind": "mirrored_unit_test_shape",
+      "source": [
+        "src/dfg.rs::rust_alias_chain_and_reassignment_prefers_latest_def",
+        "tests/cli_impact_imports.rs"
+      ],
+      "failure_kind": "fn_fp",
+      "primary_view": "dot",
+      "focus": "imported callee result stitched into caller-side alias chain",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "src/value.rs",
+          "src/main.rs"
+        ],
+        "initial_source": {
+          "src/value.rs": "pub fn make(a: i32) -> i32 { a + 1 }\n",
+          "src/main.rs": "mod value;\nfn caller() {\n    let x = 1;\n    let y = value::make(x);\n    let alias = y;\n    let out = alias;\n    println!(\"{}\", out);\n}\n"
+        },
+        "mutation": {
+          "file": "src/main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        },
+        "optional_extension": "add `let alias2 = alias;` to force a 2-hop alias chain if the 1-hop shape is too small"
+      },
+      "current_gap": "caller-side alias edges can exist, but the imported callee result often fails to stitch into that chain when the callee file is outside local DFG scope",
+      "observables": {
+        "want_after_g4": [
+          "result of value::make(x) flows into y -> alias -> out without falling back to call-only explanation"
+        ],
+        "avoid": [
+          "stale or broad alias edges that are not justified by the local chain"
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-cross-file-callees-chain-alias-return",
+      "lang": "ruby",
+      "source_kind": "split_fixture",
+      "source": [
+        "tests/fixtures/ruby/analyzer_hard_cases_callees_chain_alias_return.rb",
+        "tests/cli_impact_ruby_require.rs",
+        "tests/cli_impact_ruby_require_nested.rs"
+      ],
+      "failure_kind": "fn",
+      "primary_view": "dot+json",
+      "focus": "require-relative split fixture for temp alias and return-flow chain",
+      "direction": "callers",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "pdg": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "lib/leaf.rb",
+          "lib/mid.rb",
+          "app/main.rb"
+        ],
+        "builder": "split analyzer_hard_cases_callees_chain_alias_return.rb so the return-ish expression lives in leaf.rb and the temp alias lives in mid.rb",
+        "mutation": {
+          "file": "lib/leaf.rb",
+          "replace": "v + inc",
+          "with": "(v + inc) + 1"
+        }
+      },
+      "current_gap": "callers chain can remain visible through normal call graph, but multi-file temp alias / return-flow explanation is thin when DFG stays local to the changed file",
+      "observables": {
+        "want_after_g4": [
+          "mid-file temp alias and leaf-file return-ish flow appear in propagation evidence",
+          "witnesses explain where the local data bridge entered the callers chain"
+        ],
+        "avoid": [
+          "collapse of the chain around temp alias nodes",
+          "fan-out outside the intended linear chain"
+        ]
+      }
+    },
+    {
+      "case_id": "ruby-cross-file-dynamic-send-target-separation",
+      "lang": "ruby",
+      "source_kind": "split_fixture",
+      "source": [
+        "tests/fixtures/ruby/analyzer_hard_cases_dynamic_send_public_send.rb"
+      ],
+      "failure_kind": "fp",
+      "primary_view": "json",
+      "focus": "cross-file dynamic send/public_send separation guard under broader PDG scope",
+      "direction": "callers",
+      "lanes": {
+        "baseline": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--format",
+          "json",
+          "--with-edges"
+        ],
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callers",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "lib/targets.rb",
+          "lib/router.rb",
+          "app/main.rb"
+        ],
+        "builder": "split analyzer_hard_cases_dynamic_send_public_send.rb so target definitions live in targets.rb and dispatch calls live in router.rb",
+        "mutation": {
+          "file": "lib/router.rb",
+          "replace": "send(:target_sym)",
+          "with": "send(:target_sym).to_s"
+        }
+      },
+      "current_gap": "today this case is mainly a forward guard: scope expansion should not turn dynamic target separation into broad cross-file smearing",
+      "observables": {
+        "want_after_g4": [
+          "target_sym and target_str remain distinguishable",
+          "local-var mediated target edges stay specific"
+        ],
+        "avoid": [
+          "all dynamic targets collapsing into one broad impacted set"
+        ]
+      }
+    }
+  ]
+}
