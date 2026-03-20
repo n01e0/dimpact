@@ -186,6 +186,112 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_wrapper_two_arg_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("leaf.rs"),
+        r#"pub fn source(v: i32) -> i32 {
+    v + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("wrapper.rs"),
+        r#"use crate::leaf;
+
+pub fn wrap(left: i32, right: i32) -> i32 {
+    let mid = leaf::source(right);
+    mid
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod wrapper;
+
+fn caller() {
+    let x = 1;
+    let y = 2;
+    let out = wrapper::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod wrapper;
+
+fn caller() {
+    let x = 3;
+    let y = 2;
+    let out = wrapper::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
+fn setup_ruby_require_relative_alias_return_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::create_dir_all(path.join("app")).unwrap();
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"def bounce(value)
+  alias_value = value
+  return alias_value
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry(seed)
+  reply = bounce(seed)
+  return reply
+end
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"def bounce(value)
+  alias_value = value
+  return alias_value.to_s
+end
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn diff_text(repo: &std::path::Path) -> String {
     let diff_out = git(repo, &["diff", "--no-ext-diff", "--unified=0"]);
     String::from_utf8(diff_out.stdout).unwrap()
@@ -392,6 +498,55 @@ fn pdg_propagation_does_not_leak_irrelevant_two_arg_bridge() {
 }
 
 #[test]
+fn pdg_propagation_maps_multi_file_wrapper_return_without_leaking_irrelevant_arg() {
+    let (_tmp, repo) = setup_cross_file_wrapper_two_arg_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+
+    assert!(
+        !pdg.contains("\"wrapper.rs:def:right:3\""),
+        "plain PDG should not expand wrapper-file DFG nodes, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"main.rs:use:y:7\" -> \"main.rs:def:out:7\""),
+        "plain PDG should not synthesize the wrapper return bridge, got:\n{}",
+        pdg
+    );
+    assert!(
+        prop.contains("\"wrapper.rs:def:right:3\""),
+        "expected propagation to expand wrapper-file DFG nodes, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"main.rs:use:y:7\" -> \"main.rs:def:out:7\""),
+        "expected propagation to bridge the return flow from the relevant arg, got:\n{}",
+        prop
+    );
+    assert!(
+        !prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:7\""),
+        "unexpected irrelevant arg bridge leaked through wrapper summary, got:\n{}",
+        prop
+    );
+}
+
+#[test]
 fn propagation_callers_edges_keep_cross_file_callsite_bridges_but_drop_irrelevant_symbol_fanout() {
     let (_tmp, repo) = setup_cross_file_callers_repo();
     let diff = diff_text(&repo);
@@ -574,6 +729,101 @@ fn ruby_chain_fixture_only_gains_symbolic_edges_with_propagation() {
         prop_edges
             .iter()
             .any(|e| e["to"] == "demo/test.rb:use:v:16")
+    );
+}
+
+#[test]
+fn ruby_require_relative_alias_return_only_gains_symbolic_edges_with_propagation() {
+    let (_tmp, repo) = setup_ruby_require_relative_alias_return_repo();
+    let diff = diff_text(&repo);
+
+    let baseline = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let pdg = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+
+    let data_pairs = |value: &serde_json::Value| -> std::collections::BTreeSet<(String, String)> {
+        value["edges"]
+            .as_array()
+            .expect("edges array")
+            .iter()
+            .filter(|e| e["kind"] == "data")
+            .map(|e| {
+                (
+                    e["from"].as_str().unwrap().to_string(),
+                    e["to"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+
+    assert!(
+        data_pairs(&baseline).is_empty(),
+        "baseline should keep pure call edges"
+    );
+    assert!(
+        data_pairs(&pdg).is_empty(),
+        "plain PDG should not add cross-file alias bridges"
+    );
+
+    let prop_data = data_pairs(&prop);
+    assert!(
+        prop_data.contains(&(
+            "app/runner.rb:use:seed:4".to_string(),
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+        )),
+        "expected propagation to connect caller arg use into required callee: {prop:#}"
+    );
+    assert!(
+        prop_data.contains(&(
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+            "app/runner.rb:def:reply:4".to_string(),
+        )),
+        "expected propagation to connect callee return back into caller def: {prop:#}"
+    );
+    assert!(
+        prop["edges"].as_array().is_some_and(|edges| edges
+            .iter()
+            .filter(|e| e["kind"] == "data")
+            .all(|e| e["provenance"] == "symbolic_propagation")),
+        "expected propagation-only data edges to stay tagged as symbolic_propagation: {prop:#}"
     );
 }
 
