@@ -577,6 +577,64 @@ fn push_unique_edge(
     }
 }
 
+fn push_one_hop_completion_bridges(
+    pdg: &mut DataFlowGraph,
+    seen_edges: &mut std::collections::HashSet<(String, String, DependencyKind)>,
+    outer_callee_id: &str,
+    impacted_node_ids: &[String],
+    callsite_defs: &[String],
+    refs: &[Reference],
+    summary_by_fn: &std::collections::HashMap<String, FunctionSummary>,
+    node_loc_by_id: &std::collections::HashMap<String, (String, u32)>,
+) {
+    if callsite_defs.is_empty() {
+        return;
+    }
+
+    for impacted in impacted_node_ids {
+        let Some((file, line)) = node_loc_by_id.get(impacted) else {
+            continue;
+        };
+        for nested_ref in refs.iter().filter(|nested| {
+            nested.kind == crate::ir::reference::RefKind::Call
+                && nested.provenance == crate::ir::reference::EdgeProvenance::CallGraph
+                && nested.from.0 == outer_callee_id
+                && nested.file == *file
+                && nested.line == *line
+        }) {
+            let Some(nested_summary) = summary_by_fn.get(&nested_ref.to.0) else {
+                continue;
+            };
+            if nested_summary.inputs.len() != 1 {
+                continue;
+            }
+            let nested_input = nested_summary.inputs[0].clone();
+            push_unique_edge(
+                pdg,
+                seen_edges,
+                impacted.clone(),
+                nested_input.clone(),
+                DependencyKind::Data,
+            );
+            for nested_flow in nested_summary.flows.iter().filter(|flow| {
+                flow.input_node_id == nested_input && !flow.impacted_node_ids.is_empty()
+            }) {
+                for nested_impacted in &nested_flow.impacted_node_ids {
+                    for d in callsite_defs {
+                        push_unique_edge(
+                            pdg,
+                            seen_edges,
+                            nested_impacted.clone(),
+                            d.clone(),
+                            DependencyKind::Data,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl PdgBuilder {
     /// Build a PDG by combining the data/control flow graph and call references.
     pub fn build(dfg: &DataFlowGraph, refs: &[Reference]) -> DataFlowGraph {
@@ -627,6 +685,11 @@ impl PdgBuilder {
             .iter()
             .map(|e| (e.from.clone(), e.to.clone(), e.kind.clone()))
             .collect();
+        let node_loc_by_id: std::collections::HashMap<String, (String, u32)> = pdg
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), (node.file.clone(), node.line)))
+            .collect();
 
         // Precompute minimal function summaries and map by callee symbol ID.
         let summaries = Self::build_function_summaries(pdg, index);
@@ -637,7 +700,10 @@ impl PdgBuilder {
         }
 
         // 1) Call-site bridges + summary-connected inter-procedural bridges
-        for r in refs {
+        for r in refs.iter().filter(|r| {
+            r.kind == crate::ir::reference::RefKind::Call
+                && r.provenance == crate::ir::reference::EdgeProvenance::CallGraph
+        }) {
             let key = (r.file.clone(), r.line);
             let callsite_uses = uses_by_loc.get(&key).cloned().unwrap_or_default();
             let callsite_defs = defs_by_loc.get(&key).cloned().unwrap_or_default();
@@ -702,6 +768,16 @@ impl PdgBuilder {
                                 );
                             }
                         }
+                        push_one_hop_completion_bridges(
+                            pdg,
+                            &mut seen_edges,
+                            r.to.0.as_str(),
+                            &flow.impacted_node_ids,
+                            &callsite_defs,
+                            refs,
+                            &summary_by_fn,
+                            &node_loc_by_id,
+                        );
                         if callsite_defs.len() == 1 {
                             push_unique_edge(
                                 pdg,
@@ -733,6 +809,16 @@ impl PdgBuilder {
                                 );
                             }
                         }
+                        push_one_hop_completion_bridges(
+                            pdg,
+                            &mut seen_edges,
+                            r.to.0.as_str(),
+                            &flow.impacted_node_ids,
+                            &callsite_defs,
+                            refs,
+                            &summary_by_fn,
+                            &node_loc_by_id,
+                        );
                     }
                     if callsite_defs.len() == 1 {
                         push_unique_edge(
