@@ -1069,22 +1069,39 @@ struct SliceSelectionAccumulator {
 }
 
 impl SliceSelectionAccumulator {
-    fn select_path(&mut self, path: &str) {
+    fn mark_cache_update(&mut self, path: &str) {
         self.cache_update_paths.insert(path.to_string());
         let file_state = self.files.entry(path.to_string()).or_default();
         file_state.scopes.cache_update = true;
-        file_state.scopes.explanation = true;
+    }
+
+    fn mark_local_dfg(&mut self, path: &str) {
+        self.mark_cache_update(path);
         if supports_local_dfg(path) {
             self.local_dfg_paths.insert(path.to_string());
+            let file_state = self.files.entry(path.to_string()).or_default();
             file_state.scopes.local_dfg = true;
         }
     }
 
+    fn mark_explanation(&mut self, path: &str) {
+        self.mark_cache_update(path);
+        let file_state = self.files.entry(path.to_string()).or_default();
+        file_state.scopes.explanation = true;
+    }
+
     fn add_reason(&mut self, path: &str, reason: ImpactSliceReasonMetadata) {
-        self.select_path(path);
+        self.mark_explanation(path);
+        if supports_local_dfg(path) {
+            self.mark_local_dfg(path);
+        }
         if let Some(file_state) = self.files.get_mut(path) {
             file_state.reasons.insert(reason);
         }
+    }
+
+    fn add_pruned_candidate(&mut self, candidate: dimpact::ImpactSlicePrunedCandidate) {
+        self.pruned_candidates.insert(candidate);
     }
 
     fn merge(&mut self, other: &SliceSelectionAccumulator) {
@@ -1440,10 +1457,10 @@ fn plan_bounded_slice(
     let mut overall = SliceSelectionAccumulator::default();
 
     for path in cache_update_roots {
-        overall.select_path(path);
+        overall.mark_cache_update(path);
     }
     for path in local_dfg_roots {
-        overall.select_path(path);
+        overall.mark_local_dfg(path);
     }
     let symbol_file_by_id: std::collections::HashMap<_, _> = index
         .symbols
@@ -1583,13 +1600,11 @@ fn plan_bounded_slice(
                 .iter()
                 .skip(PER_BOUNDARY_SIDE_TIER2_FILES_MAX)
             {
-                seed_selection
-                    .pruned_candidates
-                    .insert(make_tier2_pruned_candidate(
-                        seed.id.0.as_str(),
-                        candidate,
-                        ImpactSlicePruneReason::RankedOut,
-                    ));
+                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                    seed.id.0.as_str(),
+                    candidate,
+                    ImpactSlicePruneReason::RankedOut,
+                ));
             }
             tier2_candidates.extend(
                 side_candidates
@@ -1609,13 +1624,11 @@ fn plan_bounded_slice(
                 continue;
             }
             if selected_tier2_paths.len() >= PER_SEED_TIER2_FILES_MAX {
-                seed_selection
-                    .pruned_candidates
-                    .insert(make_tier2_pruned_candidate(
-                        seed.id.0.as_str(),
-                        &candidate,
-                        ImpactSlicePruneReason::BridgeBudgetExhausted,
-                    ));
+                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                    seed.id.0.as_str(),
+                    &candidate,
+                    ImpactSlicePruneReason::BridgeBudgetExhausted,
+                ));
                 continue;
             }
             seed_selection.add_reason(
@@ -3303,6 +3316,58 @@ fn caller() -> i32 {
 
         assert!(plan.cache_update_paths.contains(&"helper.js".to_string()));
         assert_eq!(plan.local_dfg_paths, vec!["main.rs".to_string()]);
+    }
+
+    #[test]
+    fn bounded_slice_plan_keeps_initial_local_dfg_roots_out_of_explanation_scope_without_reasons() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let callee = test_symbol("rust:callee.rs:fn:callee:1", "callee", "callee.rs", 1);
+        let index = SymbolIndex::build(vec![seed.clone(), callee.clone()]);
+        let refs = vec![call_ref(
+            seed.id.0.as_str(),
+            callee.id.0.as_str(),
+            "main.rs",
+            4,
+        )];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone(), "notes.rs".to_string()],
+            &[seed.file.clone(), "notes.rs".to_string()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        let notes = slice_selection_file(&plan.slice_selection, "notes.rs");
+        assert_eq!(
+            notes.scopes,
+            ImpactSliceScopes {
+                cache_update: true,
+                local_dfg: true,
+                explanation: false,
+            }
+        );
+        assert!(
+            notes.reasons.is_empty(),
+            "notes.rs should stay cache/local-DFG only"
+        );
+
+        let main = slice_selection_file(&plan.slice_selection, "main.rs");
+        assert!(main.scopes.explanation);
+        assert_eq!(
+            main.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 0,
+                kind: ImpactSliceReasonKind::SeedFile,
+                via_symbol_id: None,
+                via_path: None,
+                bridge_kind: None,
+                scoring: None,
+            }]
+        );
     }
 
     #[test]
