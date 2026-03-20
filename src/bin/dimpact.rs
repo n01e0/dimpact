@@ -1,6 +1,7 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dimpact::DfgBuilder;
 use dimpact::EngineConfig;
+use dimpact::attach_slice_selection_summary;
 use dimpact::cache;
 use dimpact::compute_impact;
 use dimpact::dfg::{DataFlowGraph, DependencyKind, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
@@ -1510,13 +1511,6 @@ fn build_pdg_context(
         slice_selection: plan.slice_selection,
         per_seed_slice_selection: plan.per_seed_slice_selection,
     })
-}
-
-fn attach_slice_selection_summary(
-    output: &mut ImpactOutput,
-    slice_selection: &ImpactSliceSelectionSummary,
-) {
-    output.summary.slice_selection = Some(slice_selection.clone());
 }
 
 fn build_grouped_impact_outputs(

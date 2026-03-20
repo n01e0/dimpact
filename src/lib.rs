@@ -19,6 +19,7 @@ pub use impact::{
     ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSlicePrunedCandidate,
     ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes,
     ImpactSliceSelectionSummary, ImpactSummary, ImpactWitness, ImpactWitnessHop,
+    ImpactWitnessSliceContext, ImpactWitnessSliceFileContext, attach_slice_selection_summary,
     build_project_graph, compute_impact, path_is_ignored,
 };
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
