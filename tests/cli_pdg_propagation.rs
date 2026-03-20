@@ -110,6 +110,47 @@ fn setup_repo_with_file(
     (dir, path)
 }
 
+fn setup_cross_file_callsite_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("callee.rs"),
+        "pub fn callee(a: i32) -> i32 { a + 1 }\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod callee;
+fn caller() {
+    let x = 1;
+    let y = callee::callee(x);
+    println!("{}", y);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod callee;
+fn caller() {
+    let x = 2;
+    let y = callee::callee(x);
+    println!("{}", y);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn diff_text(repo: &std::path::Path) -> String {
     let diff_out = git(repo, &["diff", "--no-ext-diff", "--unified=0"]);
     String::from_utf8(diff_out.stdout).unwrap()
@@ -255,6 +296,45 @@ fn pdg_propagation_adds_direct_summary_bridge_for_single_line_callee() {
         stdout.contains("\"f.rs:use:x:4\" -> \"f.rs:def:y:4\""),
         "expected summary bridge from callsite arg use into assigned def, got:\n{}",
         stdout
+    );
+}
+
+#[test]
+fn pdg_propagation_adds_cross_file_summary_bridge_for_direct_callee() {
+    let (_tmp, repo) = setup_cross_file_callsite_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+
+    assert!(
+        !pdg.contains("\"main.rs:use:x:4\" -> \"main.rs:def:y:4\""),
+        "plain PDG should not synthesize the cross-file summary bridge, got:\n{}",
+        pdg
+    );
+    assert!(
+        prop.contains("\"main.rs:use:x:4\" -> \"main.rs:def:y:4\""),
+        "expected propagation to recover the cross-file summary bridge, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"callee.rs:def:a:1\""),
+        "expected callee-file DFG nodes to be present after related-file expansion, got:\n{}",
+        prop
     );
 }
 
