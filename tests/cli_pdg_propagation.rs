@@ -309,6 +309,35 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_two_seed_shared_callee_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("lib.rs"),
+        "pub mod shared;\npub mod left;\npub mod right;\n",
+    )
+    .unwrap();
+    fs::write(path.join("shared.rs"), "pub fn sink() {}\n").unwrap();
+    fs::write(
+        path.join("left.rs"),
+        "pub fn left() { crate::shared::sink(); }\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("right.rs"),
+        "pub fn right() { crate::shared::sink(); }\n",
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    (dir, path)
+}
+
 fn setup_ruby_require_relative_alias_return_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -369,6 +398,34 @@ fn run_impact_json(repo: &std::path::Path, diff: &str, args: &[&str]) -> serde_j
         .assert()
         .success();
     serde_json::from_slice(&assert.get_output().stdout).expect("json output")
+}
+
+fn run_impact_yaml(repo: &std::path::Path, diff: &str, args: &[&str]) -> serde_json::Value {
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .current_dir(repo)
+        .arg("impact")
+        .args(args)
+        .write_stdin(diff.to_string())
+        .assert()
+        .success();
+    let value: serde_yaml::Value =
+        serde_yaml::from_slice(&assert.get_output().stdout).expect("yaml output");
+    serde_json::to_value(value).expect("yaml->json value")
+}
+
+fn slice_selection_file<'a>(
+    slice_selection: &'a serde_json::Value,
+    path: &str,
+) -> &'a serde_json::Value {
+    slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .find(|file| file["path"] == path)
+        .unwrap_or_else(|| {
+            panic!("missing slice_selection file metadata for {path}: {slice_selection:#}")
+        })
 }
 
 fn run_impact_dot(repo: &std::path::Path, diff: &str, args: &[&str]) -> String {
@@ -1100,6 +1157,113 @@ fn ruby_send_fixture_keeps_target_separation_under_propagation() {
 }
 
 #[test]
+fn pdg_json_reports_slice_selection_summary() {
+    let (_tmp, repo) = setup_cross_file_callsite_repo();
+    let diff = diff_text(&repo);
+
+    let output = run_impact_json(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "json"],
+    );
+
+    let slice_selection = &output["summary"]["slice_selection"];
+    assert_eq!(slice_selection["planner"], "bounded_slice");
+    assert_eq!(slice_selection["pruned_candidates"], serde_json::json!([]));
+
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(paths, vec!["callee.rs", "main.rs"]);
+
+    let main = slice_selection_file(slice_selection, "main.rs");
+    assert_eq!(
+        main["scopes"],
+        serde_json::json!({
+            "cache_update": true,
+            "local_dfg": true,
+            "explanation": true,
+        })
+    );
+    assert_eq!(
+        main["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:main.rs:fn:caller:2",
+            "tier": 0,
+            "kind": "changed_file",
+        }])
+    );
+
+    let callee = slice_selection_file(slice_selection, "callee.rs");
+    assert_eq!(
+        callee["scopes"],
+        serde_json::json!({
+            "cache_update": true,
+            "local_dfg": true,
+            "explanation": true,
+        })
+    );
+    assert_eq!(
+        callee["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:main.rs:fn:caller:2",
+            "tier": 1,
+            "kind": "direct_callee_file",
+            "via_symbol_id": "rust:callee.rs:fn:callee:1",
+        }])
+    );
+}
+
+#[test]
+fn propagation_yaml_reports_slice_selection_summary() {
+    let (_tmp, repo) = setup_cross_file_callsite_repo();
+    let diff = diff_text(&repo);
+
+    let output = run_impact_yaml(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "yaml",
+        ],
+    );
+
+    let slice_selection = &output["summary"]["slice_selection"];
+    assert_eq!(slice_selection["planner"], "bounded_slice");
+    assert_eq!(slice_selection["pruned_candidates"], serde_json::json!([]));
+    assert_eq!(
+        slice_selection["files"]
+            .as_array()
+            .expect("slice_selection.files array")
+            .len(),
+        2
+    );
+    assert_eq!(
+        slice_selection_file(slice_selection, "main.rs")["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:main.rs:fn:caller:2",
+            "tier": 0,
+            "kind": "changed_file",
+        }])
+    );
+    assert_eq!(
+        slice_selection_file(slice_selection, "callee.rs")["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:main.rs:fn:caller:2",
+            "tier": 1,
+            "kind": "direct_callee_file",
+            "via_symbol_id": "rust:callee.rs:fn:callee:1",
+        }])
+    );
+}
+
+#[test]
 fn per_seed_seed_mode_pdg_keeps_three_file_wrapper_witness_compact() {
     let (_tmp, repo) = setup_cross_file_wrapper_two_arg_repo();
 
@@ -1381,5 +1545,94 @@ fn per_seed_seed_mode_supports_pdg() {
             .iter()
             .any(|e| { e["provenance"] == "call_graph" && e["kind"] == "call" })),
         "expected call graph edges in seed-based per-seed PDG output: {grouped:#?}"
+    );
+}
+
+#[test]
+fn per_seed_pdg_keeps_slice_selection_attribution_per_seed() {
+    let (_tmp, repo) = setup_two_seed_shared_callee_repo();
+
+    let grouped = run_impact_json(
+        &repo,
+        "",
+        &[
+            "--direction",
+            "callees",
+            "--seed-symbol",
+            "rust:left.rs:fn:left:1",
+            "--seed-symbol",
+            "rust:right.rs:fn:right:1",
+            "--with-pdg",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 2);
+
+    let left = grouped
+        .iter()
+        .find(|entry| entry["changed_symbol"]["id"] == "rust:left.rs:fn:left:1")
+        .expect("left seed output");
+    let left_slice = &left["impacts"][0]["output"]["summary"]["slice_selection"];
+    assert_eq!(left_slice["planner"], "bounded_slice");
+    assert_eq!(left_slice["pruned_candidates"], serde_json::json!([]));
+    let left_paths: Vec<&str> = left_slice["files"]
+        .as_array()
+        .expect("left slice files")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(left_paths, vec!["left.rs", "shared.rs"]);
+    assert_eq!(
+        slice_selection_file(left_slice, "left.rs")["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:left.rs:fn:left:1",
+            "tier": 0,
+            "kind": "seed_file",
+        }])
+    );
+    assert_eq!(
+        slice_selection_file(left_slice, "shared.rs")["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:left.rs:fn:left:1",
+            "tier": 1,
+            "kind": "direct_callee_file",
+            "via_symbol_id": "rust:shared.rs:fn:sink:1",
+        }])
+    );
+
+    let right = grouped
+        .iter()
+        .find(|entry| entry["changed_symbol"]["id"] == "rust:right.rs:fn:right:1")
+        .expect("right seed output");
+    let right_slice = &right["impacts"][0]["output"]["summary"]["slice_selection"];
+    assert_eq!(right_slice["planner"], "bounded_slice");
+    assert_eq!(right_slice["pruned_candidates"], serde_json::json!([]));
+    let right_paths: Vec<&str> = right_slice["files"]
+        .as_array()
+        .expect("right slice files")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(right_paths, vec!["right.rs", "shared.rs"]);
+    assert_eq!(
+        slice_selection_file(right_slice, "right.rs")["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:right.rs:fn:right:1",
+            "tier": 0,
+            "kind": "seed_file",
+        }])
+    );
+    assert_eq!(
+        slice_selection_file(right_slice, "shared.rs")["reasons"],
+        serde_json::json!([{
+            "seed_symbol_id": "rust:right.rs:fn:right:1",
+            "tier": 1,
+            "kind": "direct_callee_file",
+            "via_symbol_id": "rust:shared.rs:fn:sink:1",
+        }])
     );
 }
