@@ -994,15 +994,47 @@ pub fn compute_impact(
             .map(String::as_str)
             .chain(impacted_id_set.iter().copied())
             .collect();
+        let callsite_locs: std::collections::HashSet<(String, u32)> = refs
+            .iter()
+            .filter(|e| {
+                e.provenance == crate::ir::reference::EdgeProvenance::CallGraph
+                    && node_set.contains(e.from.0.as_str())
+                    && node_set.contains(e.to.0.as_str())
+            })
+            .map(|e| (e.file.clone(), e.line))
+            .collect();
         refs.iter()
             .filter(|e| {
                 let from = e.from.0.as_str();
                 let to = e.to.0.as_str();
-                if matches!(opts.direction, ImpactDirection::Callees) {
+                let in_scope = if matches!(opts.direction, ImpactDirection::Callees) {
                     node_set.contains(from) && node_set.contains(to)
                 } else {
                     node_set.contains(from) || node_set.contains(to)
+                };
+                if !in_scope {
+                    return false;
                 }
+                if !matches!(opts.direction, ImpactDirection::Callers) {
+                    return true;
+                }
+
+                let from_is_symbol = node_set.contains(from);
+                let to_is_symbol = node_set.contains(to);
+                let is_symbol_local_bridge = from_is_symbol ^ to_is_symbol;
+                if !is_symbol_local_bridge {
+                    return true;
+                }
+                if !matches!(
+                    e.provenance,
+                    crate::ir::reference::EdgeProvenance::LocalDfg
+                        | crate::ir::reference::EdgeProvenance::SymbolicPropagation
+                ) {
+                    return true;
+                }
+
+                let symbol_id = if from_is_symbol { from } else { to };
+                changed_ids.contains(symbol_id) || callsite_locs.contains(&(e.file.clone(), e.line))
             })
             .cloned()
             .collect()
