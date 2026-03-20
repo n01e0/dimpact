@@ -247,6 +247,92 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_dual_wrapper_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("left_leaf.rs"),
+        r#"pub fn source_left(shared: i32) -> i32 {
+    shared + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("right_leaf.rs"),
+        r#"pub fn source_right(shared: i32) -> i32 {
+    shared * 2
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("left_wrapper.rs"),
+        r#"use crate::left_leaf;
+
+pub fn wrap_left(shared: i32) -> i32 {
+    let mid = left_leaf::source_left(shared);
+    mid
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("right_wrapper.rs"),
+        r#"use crate::right_leaf;
+
+pub fn wrap_right(shared: i32) -> i32 {
+    let mid = right_leaf::source_right(shared);
+    mid
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod left_leaf;
+mod left_wrapper;
+mod right_leaf;
+mod right_wrapper;
+
+fn caller() {
+    let shared = 1;
+    let left = left_wrapper::wrap_left(shared);
+    let right = right_wrapper::wrap_right(shared);
+    let out = left + right;
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod left_leaf;
+mod left_wrapper;
+mod right_leaf;
+mod right_wrapper;
+
+fn caller() {
+    let shared = 2;
+    let left = left_wrapper::wrap_left(shared);
+    let right = right_wrapper::wrap_right(shared);
+    let out = left + right;
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_cross_file_imported_result_alias_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -741,6 +827,88 @@ fn pdg_propagation_maps_multi_file_wrapper_return_without_leaking_irrelevant_arg
         !prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:7\""),
         "unexpected irrelevant arg bridge leaked through wrapper summary, got:\n{}",
         prop
+    );
+}
+
+#[test]
+fn pdg_slice_selection_keeps_two_bridge_completions_for_distinct_boundaries() {
+    let (_tmp, repo) = setup_cross_file_dual_wrapper_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"left_leaf.rs:def:shared:1\""),
+        "expected bounded slice scope to keep the left third-file leaf DFG nodes, got:\n{}",
+        pdg
+    );
+    assert!(
+        pdg.contains("\"right_leaf.rs:def:shared:1\""),
+        "expected bounded slice scope to keep the right third-file leaf DFG nodes, got:\n{}",
+        pdg
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    assert_eq!(slice_selection["planner"], "bounded_slice");
+    assert_eq!(slice_selection["pruned_candidates"], serde_json::json!([]));
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "left_leaf.rs",
+            "left_wrapper.rs",
+            "main.rs",
+            "right_leaf.rs",
+            "right_wrapper.rs",
+        ]
+    );
+
+    let left_leaf = slice_selection_file(slice_selection, "left_leaf.rs");
+    assert!(
+        left_leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:left_wrapper.rs:fn:wrap_left:3"
+                    && reason["via_path"] == "left_wrapper.rs"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected left leaf to carry wrapper_return bridge metadata: {prop:#}"
+    );
+
+    let right_leaf = slice_selection_file(slice_selection, "right_leaf.rs");
+    assert!(
+        right_leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:right_wrapper.rs:fn:wrap_right:3"
+                    && reason["via_path"] == "right_wrapper.rs"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected right leaf to carry wrapper_return bridge metadata: {prop:#}"
     );
 }
 
