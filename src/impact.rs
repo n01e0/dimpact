@@ -100,6 +100,8 @@ pub struct ImpactSliceReasonMetadata {
     pub via_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge_kind: Option<ImpactSliceBridgeKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoring: Option<ImpactSliceCandidateScoringSummary>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -122,6 +124,53 @@ pub enum ImpactSliceBridgeKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ImpactSliceCandidateScoringSummary {
+    pub source_kind: ImpactSliceCandidateSourceKind,
+    pub lane: ImpactSliceCandidateLane,
+    pub primary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
+    pub secondary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
+    pub score_tuple: ImpactSliceScoreTuple,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSliceCandidateSourceKind {
+    GraphSecondHop,
+    NarrowFallback,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSliceCandidateLane {
+    ReturnContinuation,
+    AliasContinuation,
+    RequireRelativeContinuation,
+    ModuleCompanionFallback,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSliceEvidenceKind {
+    ReturnFlow,
+    AssignedResult,
+    AliasChain,
+    RequireRelativeEdge,
+    ModuleCompanion,
+    CallsitePositionHint,
+    NamePathHint,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ImpactSliceScoreTuple {
+    pub source_rank: u8,
+    pub lane_rank: u8,
+    pub primary_evidence_count: u8,
+    pub secondary_evidence_count: u8,
+    pub call_position_rank: u32,
+    pub lexical_tiebreak: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ImpactSlicePrunedCandidate {
     pub seed_symbol_id: String,
     pub path: String,
@@ -134,6 +183,8 @@ pub struct ImpactSlicePrunedCandidate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge_kind: Option<ImpactSliceBridgeKind>,
     pub prune_reason: ImpactSlicePruneReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoring: Option<ImpactSliceCandidateScoringSummary>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1992,6 +2043,7 @@ fn foo() { bar(); }
             via_symbol_id: Some(mid.id.0.clone()),
             via_path: None,
             bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+            scoring: None,
         };
         let wrapper_other_reason = ImpactSliceReasonMetadata {
             seed_symbol_id: "rust:other.rs:fn:other:1".to_string(),
@@ -2000,6 +2052,7 @@ fn foo() { bar(); }
             via_symbol_id: Some(mid.id.0.clone()),
             via_path: None,
             bridge_kind: None,
+            scoring: None,
         };
         let slice_selection = ImpactSliceSelectionSummary {
             planner: ImpactSlicePlannerKind::BoundedSlice,
@@ -2018,6 +2071,7 @@ fn foo() { bar(); }
                         via_symbol_id: None,
                         via_path: None,
                         bridge_kind: None,
+                        scoring: None,
                     }],
                 },
                 ImpactSliceFileMetadata {
@@ -2043,6 +2097,7 @@ fn foo() { bar(); }
                         via_symbol_id: Some(target.id.0.clone()),
                         via_path: None,
                         bridge_kind: None,
+                        scoring: None,
                     }],
                 },
                 ImpactSliceFileMetadata {
@@ -2059,6 +2114,7 @@ fn foo() { bar(); }
                         via_symbol_id: None,
                         via_path: Some("main.rs".to_string()),
                         bridge_kind: None,
+                        scoring: None,
                     }],
                 },
             ],
@@ -2087,6 +2143,7 @@ fn foo() { bar(); }
                             via_symbol_id: None,
                             via_path: None,
                             bridge_kind: None,
+                            scoring: None,
                         }],
                         seed_reasons: vec![ImpactSliceReasonMetadata {
                             seed_symbol_id: seed.id.0.clone(),
@@ -2095,6 +2152,7 @@ fn foo() { bar(); }
                             via_symbol_id: None,
                             via_path: None,
                             bridge_kind: None,
+                            scoring: None,
                         }],
                     },
                     ImpactWitnessSliceFileContext {
@@ -2108,6 +2166,7 @@ fn foo() { bar(); }
                             via_symbol_id: Some(mid.id.0.clone()),
                             via_path: None,
                             bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                            scoring: None,
                         }],
                     },
                     ImpactWitnessSliceFileContext {
@@ -2120,6 +2179,7 @@ fn foo() { bar(); }
                             via_symbol_id: Some(target.id.0.clone()),
                             via_path: None,
                             bridge_kind: None,
+                            scoring: None,
                         }],
                         seed_reasons: vec![ImpactSliceReasonMetadata {
                             seed_symbol_id: seed.id.0.clone(),
@@ -2128,6 +2188,7 @@ fn foo() { bar(); }
                             via_symbol_id: Some(target.id.0.clone()),
                             via_path: None,
                             bridge_kind: None,
+                            scoring: None,
                         }],
                     },
                 ],

@@ -15,12 +15,13 @@ pub use engine::EngineConfig;
 pub use engine::{AnalysisEngine, EngineKind};
 pub use impact::{
     ImpactAffectedModule, ImpactDepthBucket, ImpactDirection, ImpactOptions, ImpactOutput,
-    ImpactRiskLevel, ImpactRiskSummary, ImpactSliceBridgeKind, ImpactSliceFileMetadata,
-    ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSlicePrunedCandidate,
-    ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes,
-    ImpactSliceSelectionSummary, ImpactSummary, ImpactWitness, ImpactWitnessHop,
-    ImpactWitnessSliceContext, ImpactWitnessSliceFileContext, attach_slice_selection_summary,
-    build_project_graph, compute_impact, path_is_ignored,
+    ImpactRiskLevel, ImpactRiskSummary, ImpactSliceBridgeKind, ImpactSliceCandidateLane,
+    ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind, ImpactSliceEvidenceKind,
+    ImpactSliceFileMetadata, ImpactSlicePlannerKind, ImpactSlicePruneReason,
+    ImpactSlicePrunedCandidate, ImpactSliceReasonKind, ImpactSliceReasonMetadata,
+    ImpactSliceScopes, ImpactSliceScoreTuple, ImpactSliceSelectionSummary, ImpactSummary,
+    ImpactWitness, ImpactWitnessHop, ImpactWitnessSliceContext, ImpactWitnessSliceFileContext,
+    attach_slice_selection_summary, build_project_graph, compute_impact, path_is_ignored,
 };
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
 pub use languages::LanguageKind;
