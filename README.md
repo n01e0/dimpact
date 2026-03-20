@@ -116,11 +116,14 @@ CLI Overview
   - `provenance_chain` / `kind_chain` make it easier to see where call / data / control / symbolic-propagation edges entered that route
   - `path_compact` / `provenance_chain_compact` / `kind_chain_compact` keep the same route in a more compressed, explanation-oriented form
   - `slice_context.selected_files_on_path` lightly connects that witness route back to the bounded-slice planner, so you can see which selected files were actually on the witness path, which hop indices they covered, and which slice-selection reasons retained them
+  - `slice_context.selected_vs_pruned_reasons` adds the minimal "why this won" explanation when a selected bridge candidate beat a ranked-out competitor
   - this is still one selected shortest-path explanation, not an exhaustive proof of every possible route
 - `summary.slice_selection` is emitted on the PDG / propagation path and exposes the bounded-slice planner decision itself:
   - `files[*]` lists the selected file-level scope with `cache_update` / `local_dfg` / `explanation` split
   - `files[*].reasons[*]` records the selection reason per seed, including direct-boundary vs bridge-completion distinctions
+  - `files[*].reasons[*].scoring` and `pruned_candidates[*].scoring` expose the bridge-candidate score profile (`source_kind`, `lane`, evidence kinds, score tuple), so selected-vs-pruned comparisons are reviewable from JSON/YAML output
   - `pruned_candidates[*]` gives the minimal diagnostics for ranked-out / budget-pruned candidates when the planner had to drop alternatives
+  - read the scope split as: `cache_update` = execution preparation, `local_dfg` = local flow materialization, `explanation` = user-facing retained file; `local_dfg` and `explanation` may diverge, and pruned candidates do not become explanation files
 - With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol, and witness data stays nested under each grouped output.
 - DOT/HTML output stays compatible; the new summary fields are for JSON/YAML consumption.
 
@@ -214,6 +217,8 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
   - `impact --with-pdg -f dot` shows the raw PDG/DFG-style graph instead
 - Ruby has improved short multi-file coverage, but still has clear boundaries:
   - short `require_relative` / alias / wrapper-return chains are better than before, including no-paren wrapper parameter flow
+  - bridge scoring now tries to keep semantic alias / return-flow completions ahead of plain `require_relative` helper noise, while leaving weaker fallback paths visible as ranked-out candidates instead of silently broadening scope
+  - fallback discovery is still intentionally narrow: the goal is bounded explanation, not broad Ruby companion expansion
   - longer `require_relative` ladders, dynamic-send-heavy flows, and broader companion discovery are still intentionally under-modeled
   - treat Ruby PDG / propagation as a bounded explanation aid, not as a complete inter-procedural proof system
 - Engine integration is improved but still uneven:
@@ -225,6 +230,7 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - Add `--with-pdg` when you want to ask: "which nearby Rust/Ruby files belong in the bounded explanation slice, and what local data/control edges appear there?"
 - Escalate to `--with-propagation` when the interesting question is "does this value/argument/result flow across the call boundary?", especially for short Rust/Ruby multi-file bridges.
 - When the PDG / propagation output looks surprising, inspect `summary.slice_selection` first to see which files were selected or pruned, then inspect `impacted_witnesses[*].slice_context` to connect that file-level reason back to the chosen witness path.
+- If a bridge choice still looks odd, compare `files[*].reasons[*].scoring` against `pruned_candidates[*].scoring`, then check `slice_context.selected_vs_pruned_reasons` for the compact human-facing explanation.
 - If you need to review one seed at a time, add `--per-seed` to any of the above and inspect `impacted_witnesses`, especially the compact witness fields, for the chosen path summary.
 - If you are working in Go/Java/Python/JS/TS/TSX, do not assume `--with-pdg` adds much today; treat it as experimental unless the fixture/regression says otherwise.
 
