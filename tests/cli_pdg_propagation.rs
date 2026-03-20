@@ -1100,6 +1100,176 @@ fn ruby_send_fixture_keeps_target_separation_under_propagation() {
 }
 
 #[test]
+fn per_seed_seed_mode_pdg_keeps_three_file_wrapper_witness_compact() {
+    let (_tmp, repo) = setup_cross_file_wrapper_two_arg_repo();
+
+    let grouped = run_impact_json(
+        &repo,
+        "",
+        &[
+            "--direction",
+            "callers",
+            "--seed-symbol",
+            "rust:leaf.rs:fn:source:1",
+            "--with-pdg",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    assert_eq!(
+        grouped[0]["changed_symbol"]["id"].as_str(),
+        Some("rust:leaf.rs:fn:source:1")
+    );
+    let output = &grouped[0]["impacts"][0]["output"];
+    assert!(
+        output["impacted_symbols"]
+            .as_array()
+            .is_some_and(|syms| syms
+                .iter()
+                .any(|sym| sym["id"] == "rust:main.rs:fn:caller:4")),
+        "expected caller to stay impacted through the bounded three-file slice: {grouped:#?}"
+    );
+    let witness = &output["impacted_witnesses"]["rust:main.rs:fn:caller:4"];
+    assert_eq!(witness["depth"].as_u64(), Some(2));
+    assert_eq!(
+        witness["via_symbol_id"].as_str(),
+        Some("rust:wrapper.rs:fn:wrap:3")
+    );
+    assert_eq!(witness["path"].as_array().map(|v| v.len()), Some(2));
+    assert_eq!(witness["path_compact"].as_array().map(|v| v.len()), Some(2));
+    assert_eq!(
+        witness["path_compact"][0]["from_symbol_id"].as_str(),
+        Some("rust:leaf.rs:fn:source:1")
+    );
+    assert_eq!(
+        witness["path_compact"][1]["to_symbol_id"].as_str(),
+        Some("rust:main.rs:fn:caller:4")
+    );
+    assert_eq!(
+        witness["provenance_chain_compact"],
+        serde_json::json!(["call_graph", "call_graph"])
+    );
+    assert_eq!(
+        witness["kind_chain_compact"],
+        serde_json::json!(["call", "call"])
+    );
+}
+
+#[test]
+fn per_seed_diff_mode_propagation_keeps_imported_result_witness_compact() {
+    let (_tmp, repo) = setup_cross_file_imported_result_alias_repo();
+    let diff = diff_text(&repo);
+
+    let grouped = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    let output = &grouped[0]["impacts"][0]["output"];
+    assert!(
+        output["impacted_symbols"]
+            .as_array()
+            .is_some_and(|syms| syms
+                .iter()
+                .any(|sym| sym["id"] == "rust:value.rs:fn:make:1")),
+        "expected imported result callee to remain impacted in propagation output: {grouped:#?}"
+    );
+    let witness = &output["impacted_witnesses"]["rust:value.rs:fn:make:1"];
+    assert_eq!(witness["depth"].as_u64(), Some(2));
+    assert_eq!(
+        witness["root_symbol_id"].as_str(),
+        Some("rust:main.rs:fn:caller:4")
+    );
+    assert_eq!(
+        witness["via_symbol_id"].as_str(),
+        Some("rust:adapter.rs:fn:wrap:3")
+    );
+    assert_eq!(witness["path"].as_array().map(|v| v.len()), Some(2));
+    assert_eq!(witness["path_compact"].as_array().map(|v| v.len()), Some(2));
+    assert_eq!(
+        witness["path_compact"][0]["to_symbol_id"].as_str(),
+        Some("rust:adapter.rs:fn:wrap:3")
+    );
+    assert_eq!(
+        witness["path_compact"][1]["to_symbol_id"].as_str(),
+        Some("rust:value.rs:fn:make:1")
+    );
+    assert_eq!(
+        witness["provenance_chain_compact"],
+        serde_json::json!(["call_graph", "call_graph"])
+    );
+    assert_eq!(
+        witness["kind_chain_compact"],
+        serde_json::json!(["call", "call"])
+    );
+}
+
+#[test]
+fn per_seed_diff_mode_ruby_require_relative_propagation_keeps_compact_witness() {
+    let (_tmp, repo) = setup_ruby_require_relative_alias_return_repo();
+    let diff = diff_text(&repo);
+
+    let grouped = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    let output = &grouped[0]["impacts"][0]["output"];
+    let witness = &output["impacted_witnesses"]["ruby:app/runner.rb:method:entry:3"];
+    assert_eq!(witness["depth"].as_u64(), Some(1));
+    assert_eq!(
+        witness["root_symbol_id"].as_str(),
+        Some("ruby:lib/service.rb:method:bounce:1")
+    );
+    assert_eq!(
+        witness["path_compact"][0]["from_symbol_id"].as_str(),
+        Some("ruby:lib/service.rb:method:bounce:1")
+    );
+    assert_eq!(
+        witness["path_compact"][0]["to_symbol_id"].as_str(),
+        Some("ruby:app/runner.rb:method:entry:3")
+    );
+    assert_eq!(
+        witness["path_compact"][0]["collapsed_hops"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        witness["provenance_chain_compact"],
+        serde_json::json!(["call_graph"])
+    );
+    assert_eq!(witness["kind_chain_compact"], serde_json::json!(["call"]));
+}
+
+#[test]
 fn per_seed_diff_mode_supports_propagation() {
     let (_tmp, repo) = setup_repo();
     let diff = diff_text(&repo);
