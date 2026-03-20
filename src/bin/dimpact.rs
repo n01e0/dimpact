@@ -1221,6 +1221,44 @@ fn noise_keyword_hint(text: &str) -> bool {
         .any(|needle| text.contains(needle))
 }
 
+fn has_strong_semantic_tier2_evidence(primary_evidence_kinds: &[ImpactSliceEvidenceKind]) -> bool {
+    primary_evidence_kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            ImpactSliceEvidenceKind::AliasChain | ImpactSliceEvidenceKind::ReturnFlow
+        )
+    })
+}
+
+fn ruby_require_relative_scoring_summary(
+    completion_file: &str,
+    call_line: u32,
+    side_max_call_line: u32,
+) -> ImpactSliceCandidateScoringSummary {
+    let mut primary_evidence_kinds = vec![ImpactSliceEvidenceKind::RequireRelativeEdge];
+    let mut secondary_evidence_kinds = Vec::new();
+    if call_line == side_max_call_line {
+        secondary_evidence_kinds.push(ImpactSliceEvidenceKind::CallsitePositionHint);
+    }
+    primary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
+    secondary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
+    let secondary_evidence_count = u8::try_from(secondary_evidence_kinds.len()).unwrap_or(u8::MAX);
+    ImpactSliceCandidateScoringSummary {
+        source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+        lane: ImpactSliceCandidateLane::RequireRelativeContinuation,
+        primary_evidence_kinds,
+        secondary_evidence_kinds,
+        score_tuple: ImpactSliceScoreTuple {
+            source_rank: 0,
+            lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::RequireRelativeContinuation),
+            primary_evidence_count: 1,
+            secondary_evidence_count,
+            call_position_rank: call_line,
+            lexical_tiebreak: completion_file.to_string(),
+        },
+    }
+}
+
 fn evidence_kind_key(kind: ImpactSliceEvidenceKind) -> &'static str {
     match kind {
         ImpactSliceEvidenceKind::AliasChain => "alias_chain",
@@ -1263,32 +1301,8 @@ fn tier2_scoring_summary(
     call_line: u32,
     side_max_call_line: u32,
 ) -> ImpactSliceCandidateScoringSummary {
-    if boundary_file.ends_with(".rb") || completion_file.ends_with(".rb") {
-        let mut primary_evidence_kinds = vec![ImpactSliceEvidenceKind::RequireRelativeEdge];
-        let mut secondary_evidence_kinds = Vec::new();
-        if call_line == side_max_call_line {
-            secondary_evidence_kinds.push(ImpactSliceEvidenceKind::CallsitePositionHint);
-        }
-        primary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
-        secondary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
-        let secondary_evidence_count =
-            u8::try_from(secondary_evidence_kinds.len()).unwrap_or(u8::MAX);
-        return ImpactSliceCandidateScoringSummary {
-            source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
-            lane: ImpactSliceCandidateLane::RequireRelativeContinuation,
-            primary_evidence_kinds,
-            secondary_evidence_kinds,
-            score_tuple: ImpactSliceScoreTuple {
-                source_rank: 0,
-                lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::RequireRelativeContinuation),
-                primary_evidence_count: 1,
-                secondary_evidence_count,
-                call_position_rank: call_line,
-                lexical_tiebreak: completion_file.to_string(),
-            },
-        };
-    }
-
+    let is_ruby_chain_candidate =
+        boundary_file.ends_with(".rb") || completion_file.ends_with(".rb");
     let boundary_name = boundary_symbol.name.to_ascii_lowercase();
     let boundary_path = boundary_file.to_ascii_lowercase();
     let completion_name = completion_symbol.name.to_ascii_lowercase();
@@ -1342,6 +1356,14 @@ fn tier2_scoring_summary(
         ImpactSliceCandidateLane::ModuleCompanionFallback => {
             primary_evidence_kinds.push(ImpactSliceEvidenceKind::ModuleCompanion);
         }
+    }
+
+    if is_ruby_chain_candidate && !has_strong_semantic_tier2_evidence(&primary_evidence_kinds) {
+        return ruby_require_relative_scoring_summary(
+            completion_file,
+            call_line,
+            side_max_call_line,
+        );
     }
 
     let mut secondary_evidence_kinds = Vec::new();
@@ -3200,6 +3222,126 @@ fn caller() -> i32 {
                         })
                 }),
             "expected later helper noise to lose to the stronger alias continuation candidate: {:#?}",
+            plan.slice_selection.pruned_candidates
+        );
+    }
+
+    #[test]
+    fn bounded_slice_plan_prefers_ruby_return_completion_over_later_require_relative_helper_noise()
+    {
+        let seed = test_symbol(
+            "ruby:app/runner.rb:method:entry:3",
+            "entry",
+            "app/runner.rb",
+            3,
+        );
+        let service = test_symbol(
+            "ruby:lib/service.rb:method:bounce:4",
+            "bounce",
+            "lib/service.rb",
+            4,
+        );
+        let leaf = test_symbol(
+            "ruby:lib/leaf.rb:method:finish:1",
+            "finish",
+            "lib/leaf.rb",
+            1,
+        );
+        let helper = test_symbol(
+            "ruby:lib/zzz_helper.rb:method:helper_noise:1",
+            "helper_noise",
+            "lib/zzz_helper.rb",
+            1,
+        );
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            service.clone(),
+            leaf.clone(),
+            helper.clone(),
+        ]);
+        let refs = vec![
+            call_ref(
+                seed.id.0.as_str(),
+                service.id.0.as_str(),
+                "app/runner.rb",
+                5,
+            ),
+            call_ref(
+                service.id.0.as_str(),
+                leaf.id.0.as_str(),
+                "lib/service.rb",
+                6,
+            ),
+            call_ref(
+                service.id.0.as_str(),
+                helper.id.0.as_str(),
+                "lib/service.rb",
+                7,
+            ),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "app/runner.rb".to_string(),
+                "lib/leaf.rb".to_string(),
+                "lib/service.rb".to_string(),
+            ]
+        );
+
+        let leaf_file = slice_selection_file(&plan.slice_selection, "lib/leaf.rb");
+        assert_eq!(
+            leaf_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("ruby:lib/service.rb:method:bounce:4".to_string()),
+                via_path: Some("lib/service.rb".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    vec![ImpactSliceEvidenceKind::NamePathHint],
+                    6,
+                    "lib/leaf.rb",
+                )),
+            }]
+        );
+        assert!(
+            plan.slice_selection
+                .pruned_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.path == "lib/zzz_helper.rb"
+                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.bridge_kind
+                            == Some(ImpactSliceBridgeKind::RequireRelativeChain)
+                        && candidate.via_symbol_id.as_deref()
+                            == Some("ruby:lib/service.rb:method:bounce:4")
+                        && candidate.scoring.as_ref().is_some_and(|scoring| {
+                            scoring.lane == ImpactSliceCandidateLane::RequireRelativeContinuation
+                                && scoring.primary_evidence_kinds
+                                    == vec![ImpactSliceEvidenceKind::RequireRelativeEdge]
+                                && scoring.secondary_evidence_kinds
+                                    == vec![ImpactSliceEvidenceKind::CallsitePositionHint]
+                                && scoring.score_tuple.call_position_rank == 7
+                        })
+                }),
+            "expected later Ruby helper noise to stay a ranked-out require_relative fallback: {:#?}",
             plan.slice_selection.pruned_candidates
         );
     }

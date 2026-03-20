@@ -679,6 +679,78 @@ end
     (dir, path)
 }
 
+fn setup_ruby_require_relative_competing_leaf_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::create_dir_all(path.join("app")).unwrap();
+    fs::write(
+        path.join("lib/leaf.rb"),
+        r#"def finish(value)
+  alias_value = value
+  return alias_value
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/zzz_helper.rb"),
+        r#"def helper_noise(value)
+  debug_value = value.inspect
+  return debug_value
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"require_relative 'leaf'
+require_relative 'zzz_helper'
+
+def bounce(value)
+  alias_value = value
+  wrapped = finish(alias_value)
+  helper = helper_noise(value)
+  return wrapped
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry(seed)
+  prepared = seed + 1
+  reply = bounce(prepared)
+  return reply
+end
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry(seed)
+  prepared = seed + 2
+  reply = bounce(prepared)
+  return reply
+end
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn diff_text(repo: &std::path::Path) -> String {
     let diff_out = git(repo, &["diff", "--no-ext-diff", "--unified=0"]);
     String::from_utf8(diff_out.stdout).unwrap()
@@ -1270,6 +1342,145 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
                         })
             })),
         "expected later helper noise to be preserved only as ranked-out metadata: {prop:#}"
+    );
+}
+
+#[test]
+fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_noise() {
+    let (_tmp, repo) = setup_ruby_require_relative_competing_leaf_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--format",
+            "dot",
+        ],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"lib/leaf.rb:def:alias_value:2\""),
+        "expected bounded slice scope to keep the semantic Ruby leaf file, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"lib/zzz_helper.rb:def:debug_value:2\""),
+        "unexpected later Ruby helper noise entered the bounded slice scope, got:\n{}",
+        pdg
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["app/runner.rb", "lib/leaf.rb", "lib/service.rb"]
+    );
+
+    let leaf = slice_selection_file(slice_selection, "lib/leaf.rb");
+    assert!(
+        leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && reason["via_path"] == "lib/service.rb"
+                    && reason["bridge_kind"] == "wrapper_return"
+                    && reason["scoring"]
+                        == serde_json::json!({
+                            "source_kind": "graph_second_hop",
+                            "lane": "return_continuation",
+                            "primary_evidence_kinds": [
+                                "assigned_result",
+                                "return_flow"
+                            ],
+                            "secondary_evidence_kinds": [
+                                "name_path_hint"
+                            ],
+                            "score_tuple": {
+                                "source_rank": 0,
+                                "lane_rank": 0,
+                                "primary_evidence_count": 2,
+                                "secondary_evidence_count": 1,
+                                "call_position_rank": 6,
+                                "lexical_tiebreak": "lib/leaf.rb"
+                            }
+                        })
+            })),
+        "expected Ruby leaf to carry wrapper_return bridge metadata: {prop:#}"
+    );
+    assert!(
+        slice_selection["pruned_candidates"]
+            .as_array()
+            .is_some_and(|candidates| candidates.iter().any(|candidate| {
+                candidate["path"] == "lib/zzz_helper.rb"
+                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["via_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && candidate["bridge_kind"] == "require_relative_chain"
+                    && candidate["scoring"]
+                        == serde_json::json!({
+                            "source_kind": "graph_second_hop",
+                            "lane": "require_relative_continuation",
+                            "primary_evidence_kinds": [
+                                "require_relative_edge"
+                            ],
+                            "secondary_evidence_kinds": [
+                                "callsite_position_hint"
+                            ],
+                            "score_tuple": {
+                                "source_rank": 0,
+                                "lane_rank": 2,
+                                "primary_evidence_count": 1,
+                                "secondary_evidence_count": 1,
+                                "call_position_rank": 9,
+                                "lexical_tiebreak": "lib/zzz_helper.rb"
+                            }
+                        })
+            })),
+        "expected later Ruby helper noise to be preserved only as require_relative ranked-out metadata: {prop:#}"
+    );
+
+    let prop_dot = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+    assert!(
+        prop_dot.contains("\"app/runner.rb:use:prepared:5\" -> \"app/runner.rb:def:reply:5\""),
+        "expected propagation to recover the Ruby leaf-backed summary bridge, got:\n{}",
+        prop_dot
     );
 }
 
