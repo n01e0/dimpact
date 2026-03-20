@@ -114,6 +114,7 @@ CLI Overview
   - `edge` / `via_symbol_id` still point at the selected last hop
   - `path` expands that witness into one chosen hop-by-hop route from the root changed/seed symbol
   - `provenance_chain` / `kind_chain` make it easier to see where call / data / control / symbolic-propagation edges entered that route
+  - `path_compact` / `provenance_chain_compact` / `kind_chain_compact` keep the same route in a more compressed, explanation-oriented form
   - this is still one selected shortest-path explanation, not an exhaustive proof of every possible route
 - With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol, and witness data stays nested under each grouped output.
 - DOT/HTML output stays compatible; the new summary fields are for JSON/YAML consumption.
@@ -173,42 +174,47 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - For strict review/CI triage where false positives are costly, use `--op-profile precision-first` (or `--min-confidence confirmed --exclude-dynamic-fallback`).
   
 ### PDG / propagation: when to use which
+- Bounded slice is the current scope model for the PDG path:
+  - the goal is **not** to open the whole repo, but to recover the few nearby files that are most likely needed to explain a short multi-file bridge
+  - in practice that means: seed/changed file first, then direct boundary files, then at most one bridge-completion file, with small companion fallback only when needed
+  - `--with-pdg` and `--with-propagation` now share that same bounded slice planner in diff mode and seed mode
 - `--with-pdg`
-  - best when you want extra local data/control-dependence context around the changed or seeded file
-  - useful for Rust/Ruby cases where plain call-graph impact is too coarse or misses alias/control-flow relationships
-  - scope is still mostly file-local; think of this as the lighter-weight explanation pass
+  - best when you want extra Rust/Ruby local data/control-dependence context around the selected bounded slice
+  - useful when plain call-graph impact is too coarse and you want to confirm which nearby file(s) should even be in scope before asking stronger flow questions
+  - this is the lighter-weight option when you care more about local explanation than about bridging values across call boundaries
 - `--with-propagation`
-  - builds on `--with-pdg`
-  - best when you want call-site and function-summary bridges, especially for argument → callee → assigned-result style flows
-  - in Rust/Ruby diff/seed flows it can now widen local DFG construction to directly adjacent caller/callee files when that is needed to recover a short bridge
-  - use this when you suspect false negatives around local variable flow, alias chains, wrapper return-flow, or short inter-procedural propagation
+  - builds on the same bounded slice, then adds symbolic call-site / summary bridges on top
+  - best when the real question is "does this value / argument / result continue across the boundary?"
+  - use this when you suspect false negatives around alias chains, wrapper return-flow, imported-result continuation, or other short inter-procedural Rust/Ruby bridges
 - `--per-seed`
   - works with both normal impact and the PDG / propagation path
-  - useful when you want to compare how each changed/seed symbol fans out independently, including per-seed witnesses
+  - useful when you want to compare how each changed/seed symbol fans out independently, including per-seed witnesses and compact path summaries
 
 ### Current limits of the PDG / propagation path
 - Scope is intentionally bounded today:
-  - `--with-pdg` alone still constructs local DFG mainly for changed files (diff mode) or seed files (seed mode)
-  - `--with-propagation` can widen Rust/Ruby local DFG scope to direct boundary files adjacent to the current changed/seed symbols, but it still stops well short of recursive project-wide closure
+  - the planner is still closer to a **bounded project slice** than to project-wide closure
+  - current Rust/Ruby scope selection is roughly: root file(s) + direct boundary + at most one bridge-completion file
+  - that helps short 2-hop-style bridges, but it deliberately stops before recursive whole-project expansion
   - other languages still mostly fall back to the normal call-graph signal even if you pass `--with-pdg`
 - It is **not** a project-wide PDG yet:
-  - current behavior is still closer to `global call graph + local DFG augmentation`
+  - current behavior is still closer to `global call graph + bounded local DFG augmentation`
   - propagation is mostly call-site / summary-oriented, not a whole-program symbolic executor
 - Witnesses are better, but still intentionally minimal:
-  - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` now expose one chosen multi-hop explanation
+  - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` expose one chosen multi-hop explanation
+  - the `*_compact` witness fields make that explanation easier to read, but they are still summaries of one selected route
   - you still do **not** get all competing paths or a full proof that no alternative route exists
 - `-f dot` changes meaning when PDG is enabled:
   - normal `impact -f dot` shows the impact graph
   - `impact --with-pdg -f dot` shows the raw PDG/DFG-style graph instead
 - Engine integration is improved but still uneven:
-  - diff-mode PDG / propagation now use the selected engine for changed-symbol discovery, so strict-LSP failure semantics stay aligned with plain impact
+  - diff-mode PDG / propagation now honor the selected engine for changed-symbol discovery **and** strict impact-capability validation, so strict-LSP failure semantics stay aligned with plain impact
   - PDG / propagation still layer extra local graph construction on top of cached graph data, so engine-native edge richness is not fully preserved yet
 
 ### Practical guidance
 - Start with normal `impact` when you want stable repo-wide caller/callee answers.
-- Add `--with-pdg` when you want better local explanation around Rust/Ruby data/control dependencies inside or very near the changed/seeded file.
+- Add `--with-pdg` when you want to ask: "which nearby Rust/Ruby files belong in the bounded explanation slice, and what local data/control edges appear there?"
 - Escalate to `--with-propagation` when the interesting question is "does this value/argument/result flow across the call boundary?", especially for short Rust/Ruby multi-file bridges.
-- If you need to review one seed at a time, add `--per-seed` to any of the above and inspect `impacted_witnesses` for the chosen path summary.
+- If you need to review one seed at a time, add `--per-seed` to any of the above and inspect `impacted_witnesses`, especially the compact witness fields, for the chosen path summary.
 - If you are working in Go/Java/Python/JS/TS/TSX, do not assume `--with-pdg` adds much today; treat it as experimental unless the fixture/regression says otherwise.
 
 ### PDG Visualization
