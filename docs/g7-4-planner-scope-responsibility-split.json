@@ -1,0 +1,198 @@
+{
+  "generated_by": "manual G7-4 scope split memo",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "define responsibility split for bounded-slice planner file scopes: cache_update, local_dfg, explanation",
+  "extends": [
+    "docs/g4-3-pdg-build-scope-policy.md",
+    "docs/g7-1-bridge-candidate-scoring-design-memo.md",
+    "docs/g7-2-bridge-scoring-schema.md"
+  ],
+  "current_runtime_observation": {
+    "location": "src/bin/dimpact.rs / SliceSelectionAccumulator::select_path",
+    "behavior": [
+      "setting cache_update=true and explanation=true together",
+      "setting local_dfg=true only for Rust/Ruby paths",
+      "treating explanation as a side effect of generic path selection"
+    ],
+    "problem": "scope names exist, but selection responsibility is still effectively bundled"
+  },
+  "goals": [
+    "separate execution-preparation scope from DFG-materialization scope and user-facing explanation scope",
+    "make it explicit which files are selected for cache freshness, which for local DFG build, and which for user-visible summary",
+    "prepare G7-5 scope-slimming work without confusing selected files and pruned candidates",
+    "prepare G7-7 witness explanation work to rely only on explanation-visible files"
+  ],
+  "non_goals": [
+    "runtime implementation in G7-4",
+    "changing public witness wording in this task",
+    "promoting pruned candidates into selected file scope",
+    "designing project-wide recursive closure"
+  ],
+  "scope_definitions": {
+    "cache_update": {
+      "role": "execution preparation / cache freshness",
+      "protects": [
+        "symbol/reference freshness for selected planner inputs",
+        "symbol consistency before local DFG build",
+        "path companion and fallback resolution freshness"
+      ],
+      "does_not_protect": [
+        "user-facing explanation minimality",
+        "witness readability",
+        "local DFG materialization itself"
+      ]
+    },
+    "local_dfg": {
+      "role": "edge materialization / local file DFG build",
+      "protects": [
+        "propagation-time local flow recovery",
+        "short alias / return-flow stitching",
+        "materialized local_dfg and symbolic_propagation edges"
+      ],
+      "does_not_protect": [
+        "overall cache freshness semantics",
+        "user-facing explanation minimality",
+        "pruned candidate observability"
+      ]
+    },
+    "explanation": {
+      "role": "user-facing selected file summary",
+      "protects": [
+        "human-readable slice_selection.files relevance",
+        "witness slice context readability",
+        "selected-vs-pruned explanation basis"
+      ],
+      "does_not_protect": [
+        "cache freshness",
+        "DFG materialization coverage",
+        "all observed candidate exhaustiveness"
+      ]
+    }
+  },
+  "invariants": [
+    "local_dfg implies cache_update",
+    "explanation implies cache_update",
+    "local_dfg and explanation are independent subsets of cache_update",
+    "pruned_candidates must not be promoted into file-level selected scopes"
+  ],
+  "allowed_scope_combinations": [
+    {
+      "cache_update": true,
+      "local_dfg": false,
+      "explanation": true,
+      "example": "selected direct boundary file in a language or mode where local DFG is not built"
+    },
+    {
+      "cache_update": true,
+      "local_dfg": true,
+      "explanation": false,
+      "example": "helper file needed for local flow recovery but not worth surfacing in user-facing narration"
+    },
+    {
+      "cache_update": true,
+      "local_dfg": true,
+      "explanation": true,
+      "example": "selected root or bridge completion file actively used in propagation and explanation"
+    }
+  ],
+  "disallowed_scope_combinations": [
+    {
+      "cache_update": false,
+      "local_dfg": true,
+      "explanation": false,
+      "reason": "local DFG build must sit on top of cache freshness"
+    },
+    {
+      "cache_update": false,
+      "local_dfg": false,
+      "explanation": true,
+      "reason": "G7 initial split does not allow explanation-only files"
+    }
+  ],
+  "surface_rules": {
+    "slice_selection_files": {
+      "meaning": "union of files selected for at least one planner scope",
+      "important_note": "files may remain present with explanation=false after G7-5"
+    },
+    "pruned_candidates": {
+      "meaning": "selected-vs-pruned inventory only",
+      "rules": [
+        "no file-level scope flags",
+        "do not treat as selected files",
+        "do not attach to witness file context"
+      ]
+    },
+    "witness_slice_context": {
+      "rule": "attach only files with scopes.explanation=true",
+      "hide": [
+        "cache_update-only files",
+        "local_dfg-only files"
+      ]
+    }
+  },
+  "tier_guidance": [
+    {
+      "tier": 0,
+      "reasons": ["seed_file", "changed_file"],
+      "cache_update": "yes",
+      "local_dfg": "yes when language/mode supports it",
+      "explanation": "yes"
+    },
+    {
+      "tier": 1,
+      "reasons": ["direct_caller_file", "direct_callee_file"],
+      "cache_update": "yes",
+      "local_dfg": "yes when supported and propagation needs it",
+      "explanation": "yes"
+    },
+    {
+      "tier": 2,
+      "reasons": ["bridge_completion_file"],
+      "cache_update": "yes for selected candidates",
+      "local_dfg": "usually yes for supported languages",
+      "explanation": "yes for selected candidates",
+      "pruned": "stay only in pruned_candidates"
+    },
+    {
+      "tier": 3,
+      "reasons": ["module_companion_file"],
+      "cache_update": "yes for selected fallback files",
+      "local_dfg": "yes only when actually used",
+      "explanation": "may be true or false depending on whether fallback should be surfaced",
+      "pruned": "stay only in pruned_candidates"
+    }
+  ],
+  "implementation_shape": {
+    "recommended_api": [
+      "mark_cache_update(path)",
+      "mark_local_dfg(path)",
+      "mark_explanation(path)",
+      "add_reason(path, reason)",
+      "add_pruned_candidate(candidate)"
+    ],
+    "promotion_rules": [
+      "mark_local_dfg may call mark_cache_update",
+      "mark_explanation may call mark_cache_update",
+      "mark_cache_update must not automatically mark explanation",
+      "mark_local_dfg must not automatically mark explanation"
+    ]
+  },
+  "g7_connections": {
+    "g7_5": [
+      "split bundled path selection into scope-specific marks",
+      "allow files to remain in slice_selection with explanation=false",
+      "state explicitly whether slimming affected local_dfg or explanation scope"
+    ],
+    "g7_7": [
+      "build witness file context from explanation scope only",
+      "compare selected files to pruned_candidates without mixing scopes"
+    ]
+  },
+  "decisions": [
+    "cache_update = execution preparation",
+    "local_dfg = edge materialization",
+    "explanation = user-facing selected file summary",
+    "local_dfg and explanation are sibling subsets under cache_update",
+    "pruned candidates remain out-of-band from selected file scopes"
+  ]
+}
