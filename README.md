@@ -78,6 +78,7 @@ CLI Overview
     "impacted_files": [...],
     "edges": [...],
     "impacted_by_file": {...},
+    "impacted_witnesses": {...},
     "summary": {
       "by_depth": [
         { "depth": 1, "symbol_count": 3, "file_count": 2 },
@@ -109,7 +110,12 @@ CLI Overview
   - use `affected_modules` to decide which directories/modules to open next; `(root)` means the repo-root entry area, not a literal module named `main.rs`
   - then inspect `impacted_symbols` / `edges` for the concrete graph details
 - `confidence_filter` remains a top-level sibling of `summary`, not a field inside it.
-- With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol.
+- `impacted_witnesses` now carry a minimal path summary for each impacted symbol:
+  - `edge` / `via_symbol_id` still point at the selected last hop
+  - `path` expands that witness into one chosen hop-by-hop route from the root changed/seed symbol
+  - `provenance_chain` / `kind_chain` make it easier to see where call / data / control / symbolic-propagation edges entered that route
+  - this is still one selected shortest-path explanation, not an exhaustive proof of every possible route
+- With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol, and witness data stays nested under each grouped output.
 - DOT/HTML output stays compatible; the new summary fields are for JSON/YAML consumption.
 
 - Impact Options (subcommand `impact`):
@@ -170,33 +176,39 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - `--with-pdg`
   - best when you want extra local data/control-dependence context around the changed or seeded file
   - useful for Rust/Ruby cases where plain call-graph impact is too coarse or misses alias/control-flow relationships
+  - scope is still mostly file-local; think of this as the lighter-weight explanation pass
 - `--with-propagation`
   - builds on `--with-pdg`
   - best when you want call-site and function-summary bridges, especially for argument → callee → assigned-result style flows
-  - use this when you suspect false negatives around local variable flow, alias chains, or short inter-procedural propagation
+  - in Rust/Ruby diff/seed flows it can now widen local DFG construction to directly adjacent caller/callee files when that is needed to recover a short bridge
+  - use this when you suspect false negatives around local variable flow, alias chains, wrapper return-flow, or short inter-procedural propagation
 - `--per-seed`
   - works with both normal impact and the PDG / propagation path
-  - useful when you want to compare how each changed/seed symbol fans out independently
+  - useful when you want to compare how each changed/seed symbol fans out independently, including per-seed witnesses
 
 ### Current limits of the PDG / propagation path
-- Scope is intentionally local today:
-  - Rust/Ruby get local DFG construction for changed files (diff mode) or seed files (seed mode)
+- Scope is intentionally bounded today:
+  - `--with-pdg` alone still constructs local DFG mainly for changed files (diff mode) or seed files (seed mode)
+  - `--with-propagation` can widen Rust/Ruby local DFG scope to direct boundary files adjacent to the current changed/seed symbols, but it still stops well short of recursive project-wide closure
   - other languages still mostly fall back to the normal call-graph signal even if you pass `--with-pdg`
 - It is **not** a project-wide PDG yet:
-  - current behavior is closer to `global call graph + local DFG augmentation`
+  - current behavior is still closer to `global call graph + local DFG augmentation`
   - propagation is mostly call-site / summary-oriented, not a whole-program symbolic executor
+- Witnesses are better, but still intentionally minimal:
+  - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` now expose one chosen multi-hop explanation
+  - you still do **not** get all competing paths or a full proof that no alternative route exists
 - `-f dot` changes meaning when PDG is enabled:
   - normal `impact -f dot` shows the impact graph
   - `impact --with-pdg -f dot` shows the raw PDG/DFG-style graph instead
-- Engine integration is still uneven:
-  - the normal impact path goes through the selected engine abstraction
-  - PDG / propagation currently layer extra local graph construction on top of cached graph data
+- Engine integration is improved but still uneven:
+  - diff-mode PDG / propagation now use the selected engine for changed-symbol discovery, so strict-LSP failure semantics stay aligned with plain impact
+  - PDG / propagation still layer extra local graph construction on top of cached graph data, so engine-native edge richness is not fully preserved yet
 
 ### Practical guidance
 - Start with normal `impact` when you want stable repo-wide caller/callee answers.
-- Add `--with-pdg` when you want better local explanation around Rust/Ruby data/control dependencies.
-- Escalate to `--with-propagation` when the interesting question is "does this value/argument/result flow across the call boundary?"
-- If you need to review one seed at a time, add `--per-seed` to any of the above.
+- Add `--with-pdg` when you want better local explanation around Rust/Ruby data/control dependencies inside or very near the changed/seeded file.
+- Escalate to `--with-propagation` when the interesting question is "does this value/argument/result flow across the call boundary?", especially for short Rust/Ruby multi-file bridges.
+- If you need to review one seed at a time, add `--per-seed` to any of the above and inspect `impacted_witnesses` for the chosen path summary.
 - If you are working in Go/Java/Python/JS/TS/TSX, do not assume `--with-pdg` adds much today; treat it as experimental unless the fixture/regression says otherwise.
 
 ### PDG Visualization

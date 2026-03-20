@@ -94,6 +94,7 @@ dimpact id --name foo -f json
     "impacted_files": [...],
     "edges": [...],
     "impacted_by_file": {...},
+    "impacted_witnesses": {...},
     "summary": {
       "by_depth": [
         { "depth": 1, "symbol_count": 3, "file_count": 2 },
@@ -125,7 +126,12 @@ dimpact id --name foo -f json
   - `affected_modules` で、次に見るべきディレクトリ / モジュールを絞る。`(root)` は `main.rs` という file 名そのものではなく、repo root の entry 周辺を指します
   - 最後に `impacted_symbols` / `edges` で具体的な伝播経路を確認する
 - `confidence_filter` は `summary` の中ではなく、引き続きトップレベル sibling として出ます。
-- `--per-seed` 指定時は、各変更/シードシンボルごとの `impacts[].output.summary` 配下に同じ summary が入ります。
+- `impacted_witnesses` には、各 impacted symbol ごとの最小パス要約が入ります:
+  - `edge` / `via_symbol_id` は引き続き選ばれた last hop を指します
+  - `path` は root changed/seed symbol からそこに至る 1 本の hop-by-hop 経路を出します
+  - `provenance_chain` / `kind_chain` で、その経路のどこに call / data / control / symbolic_propagation が入ったかを追いやすくなります
+  - ただし、これは依然として 1 本の最短経路ベースの説明であり、すべての候補経路を網羅するものではありません
+- `--per-seed` 指定時は、各変更/シードシンボルごとの `impacts[].output.summary` 配下に同じ summary が入り、witness も各 grouped output の中にネストされます。
 - DOT/HTML 出力は互換維持で、今回の summary は JSON/YAML 利用を主対象としています。
 
 ### Impact オプション（`impact` サブコマンド）
@@ -186,33 +192,39 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - `--with-pdg`
   - 変更ファイルや seed ファイルの近傍で、追加の data/control dependence を見たいとき向けです
   - plain な call graph だけでは粗すぎる Rust/Ruby の alias / control-flow 周辺で特に有効です
+  - scope はまだほぼ file-local で、軽めの説明強化パスだと考えてください
 - `--with-propagation`
   - `--with-pdg` の上に乗る拡張です
   - 引数 → callee → 代入先 のような call-site bridge や function summary bridge を見たいときに使います
-  - local variable flow、alias chain、短い inter-procedural propagation の false negative を疑うときに向いています
+  - Rust/Ruby の diff/seed フローでは、短い bridge を回収するために、changed/seed symbol に隣接する direct caller/callee file までローカル DFG 対象を広げられるようになりました
+  - local variable flow、alias chain、wrapper return-flow、短い inter-procedural propagation の false negative を疑うときに向いています
 - `--per-seed`
   - 通常 impact だけでなく PDG / propagation path でも使えます
-  - changed/seed symbol ごとの波及を個別に見たいときに便利です
+  - changed/seed symbol ごとの波及を個別に見たいときに便利で、seed ごとの witness も追いやすくなります
 
 ## 現在の PDG / propagation の限界
-- いまはローカル寄りの実装です
-  - Rust/Ruby では changed file（diff モード）または seed file（seed モード）に対してローカル DFG を構築します
+- scope はまだ意図的に絞っています
+  - `--with-pdg` 単体では、ローカル DFG 構築は主に changed file（diff モード）または seed file（seed モード）止まりです
+  - `--with-propagation` では Rust/Ruby の direct boundary file まで広がることがありますが、再帰的な project-wide closure までは行きません
   - それ以外の言語では `--with-pdg` を付けても、実質的には通常の call graph シグナルに寄る場面が多いです
 - **project-wide PDG** ではありません
-  - 現状は `global call graph + local DFG augmentation` に近い挙動です
+  - 現状は依然として `global call graph + local DFG augmentation` に近い挙動です
   - propagation も whole-program symbolic execution ではなく、call-site / summary 中心の heuristic です
+- witness は改善されたが、まだ最小表現です
+  - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` で 1 本の multi-hop 説明を見られるようになりました
+  - ただし、競合する複数経路の列挙や、代替経路が存在しないことの証明まではしません
 - `-f dot` の意味が切り替わります
   - 通常の `impact -f dot` は impact graph
   - `impact --with-pdg -f dot` は raw な PDG/DFG 風グラフです
-- エンジン統合もまだ完全ではありません
-  - 通常 impact path は選択した engine abstraction を通ります
-  - PDG / propagation は現在、cache 済み graph の上にローカル graph 構築を重ねる経路です
+- エンジン統合は改善したが、まだ完全ではありません
+  - diff モードの PDG / propagation でも changed-symbol discovery は選択した engine を通るようになり、strict LSP の失敗条件も通常 impact と揃いました
+  - ただし PDG / propagation 自体は、いまも cache 済み graph の上にローカル graph 構築を重ねる経路なので、engine ネイティブな edge richness がそのまま保存されるわけではありません
 
 ## 実運用の目安
 - repo 全体で安定した caller/callee の答えが欲しいなら、まず通常の `impact` を使う
-- Rust/Ruby の data/control dependency を少し厚く見たいなら `--with-pdg` を足す
-- 「この値・引数・結果は call 境界を越えて伝播するか？」が本題なら `--with-propagation` まで上げる
-- seed ごとに分けて見たいなら、上のどれに対しても `--per-seed` を足す
+- changed/seed file の中やそのごく近傍で、Rust/Ruby の data/control dependency を少し厚く見たいなら `--with-pdg` を足す
+- 「この値・引数・結果は call 境界を越えて伝播するか？」が本題なら `--with-propagation` まで上げる。特に短い Rust/Ruby の multi-file bridge を見たいときに有効です
+- seed ごとに分けて見たいなら、上のどれに対しても `--per-seed` を足し、`impacted_witnesses` の path 要約を見る
 - Go/Java/Python/JS/TS/TSX では、現時点の `--with-pdg` に大きな上積みを期待しすぎない方が安全です。fixture / regression で確認できる範囲の experimental 機能として扱ってください
 
 ## PDG 可視化
