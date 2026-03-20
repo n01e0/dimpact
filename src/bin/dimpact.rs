@@ -1004,52 +1004,168 @@ fn build_local_dfg_for_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> Da
     combined
 }
 
-fn expand_related_local_dfg_paths(
-    initial_paths: &[String],
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SliceSelectionTier {
+    Root,
+    DirectBoundary,
+    BridgeCompletion,
+}
+
+#[derive(Debug, Default)]
+struct BoundedSlicePlan {
+    cache_update_paths: Vec<String>,
+    local_dfg_paths: Vec<String>,
+}
+
+fn supports_local_dfg(path: &str) -> bool {
+    path.ends_with(".rs") || path.ends_with(".rb")
+}
+
+fn is_call_graph_ref(r: &Reference) -> bool {
+    r.kind == RefKind::Call && r.provenance == EdgeProvenance::CallGraph
+}
+
+fn collect_related_call_symbols(
+    symbol_id: &str,
+    refs: &[Reference],
+    direction: ImpactDirection,
+) -> Vec<String> {
+    let mut related = std::collections::BTreeSet::new();
+    for r in refs.iter().filter(|r| is_call_graph_ref(r)) {
+        match direction {
+            ImpactDirection::Callers if r.to.0 == symbol_id => {
+                related.insert(r.from.0.clone());
+            }
+            ImpactDirection::Callees if r.from.0 == symbol_id => {
+                related.insert(r.to.0.clone());
+            }
+            ImpactDirection::Both => {
+                if r.to.0 == symbol_id {
+                    related.insert(r.from.0.clone());
+                }
+                if r.from.0 == symbol_id {
+                    related.insert(r.to.0.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    related.into_iter().collect()
+}
+
+fn add_slice_path(
+    cache_update_paths: &mut std::collections::BTreeSet<String>,
+    local_dfg_paths: &mut std::collections::BTreeSet<String>,
+    path: &str,
+    _tier: SliceSelectionTier,
+) {
+    cache_update_paths.insert(path.to_string());
+    if supports_local_dfg(path) {
+        local_dfg_paths.insert(path.to_string());
+    }
+}
+
+fn plan_bounded_slice(
+    cache_update_roots: &[String],
+    local_dfg_roots: &[String],
     seeds: &[dimpact::Symbol],
     index: &SymbolIndex,
     refs: &[Reference],
     direction: ImpactDirection,
-    with_propagation: bool,
-) -> Vec<String> {
-    let mut paths: std::collections::BTreeSet<String> = initial_paths.iter().cloned().collect();
-    if !with_propagation || seeds.is_empty() {
-        return paths.into_iter().collect();
+) -> BoundedSlicePlan {
+    let mut cache_update_paths = std::collections::BTreeSet::new();
+    let mut local_dfg_paths = std::collections::BTreeSet::new();
+
+    for path in cache_update_roots {
+        add_slice_path(
+            &mut cache_update_paths,
+            &mut local_dfg_paths,
+            path,
+            SliceSelectionTier::Root,
+        );
+    }
+    for path in local_dfg_roots {
+        add_slice_path(
+            &mut cache_update_paths,
+            &mut local_dfg_paths,
+            path,
+            SliceSelectionTier::Root,
+        );
+    }
+    for seed in seeds {
+        add_slice_path(
+            &mut cache_update_paths,
+            &mut local_dfg_paths,
+            seed.file.as_str(),
+            SliceSelectionTier::Root,
+        );
     }
 
-    let by_id: std::collections::HashMap<&str, &dimpact::Symbol> =
-        index.symbols.iter().map(|s| (s.id.0.as_str(), s)).collect();
+    if seeds.is_empty() {
+        return BoundedSlicePlan {
+            cache_update_paths: cache_update_paths.into_iter().collect(),
+            local_dfg_paths: local_dfg_paths.into_iter().collect(),
+        };
+    }
 
-    let mut add_path_for_symbol_id = |symbol_id: &str| {
-        if let Some(sym) = by_id.get(symbol_id) {
-            paths.insert(sym.file.clone());
-        }
-    };
+    let symbol_file_by_id: std::collections::HashMap<_, _> = index
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.id.0.clone(), symbol.file.as_str()))
+        .collect();
 
     for seed in seeds {
-        match direction {
-            ImpactDirection::Callers => {
-                for r in refs.iter().filter(|r| r.to == seed.id) {
-                    add_path_for_symbol_id(r.from.0.as_str());
-                }
+        let root_file = seed.file.as_str();
+        let direct_boundary_symbols =
+            collect_related_call_symbols(seed.id.0.as_str(), refs, direction);
+        let mut bridge_completion_added = false;
+
+        for boundary_symbol_id in &direct_boundary_symbols {
+            let Some(boundary_file) = symbol_file_by_id.get(boundary_symbol_id).copied() else {
+                continue;
+            };
+            if boundary_file != root_file {
+                add_slice_path(
+                    &mut cache_update_paths,
+                    &mut local_dfg_paths,
+                    boundary_file,
+                    SliceSelectionTier::DirectBoundary,
+                );
             }
-            ImpactDirection::Callees => {
-                for r in refs.iter().filter(|r| r.from == seed.id) {
-                    add_path_for_symbol_id(r.to.0.as_str());
-                }
+
+            if bridge_completion_added {
+                continue;
             }
-            ImpactDirection::Both => {
-                for r in refs.iter().filter(|r| r.to == seed.id) {
-                    add_path_for_symbol_id(r.from.0.as_str());
+
+            for completion_symbol_id in
+                collect_related_call_symbols(boundary_symbol_id, refs, direction)
+            {
+                let Some(completion_file) = symbol_file_by_id.get(&completion_symbol_id).copied()
+                else {
+                    continue;
+                };
+                if completion_file == root_file || completion_file == boundary_file {
+                    continue;
                 }
-                for r in refs.iter().filter(|r| r.from == seed.id) {
-                    add_path_for_symbol_id(r.to.0.as_str());
+                if cache_update_paths.contains(completion_file) {
+                    continue;
                 }
+                add_slice_path(
+                    &mut cache_update_paths,
+                    &mut local_dfg_paths,
+                    completion_file,
+                    SliceSelectionTier::BridgeCompletion,
+                );
+                bridge_completion_added = true;
+                break;
             }
         }
     }
 
-    paths.into_iter().collect()
+    BoundedSlicePlan {
+        cache_update_paths: cache_update_paths.into_iter().collect(),
+        local_dfg_paths: local_dfg_paths.into_iter().collect(),
+    }
 }
 
 fn build_pdg_context(
@@ -1065,19 +1181,41 @@ fn build_pdg_context(
     if st.symbols == 0 {
         cache::build_all(&mut db.conn)?;
     }
-    if !cache_update_paths.is_empty() {
-        cache::update_paths(&mut db.conn, cache_update_paths)?;
+
+    let mut initial_cache_update_paths: std::collections::BTreeSet<String> =
+        cache_update_paths.iter().cloned().collect();
+    initial_cache_update_paths.extend(local_dfg_paths.iter().cloned());
+    initial_cache_update_paths.extend(seeds.iter().map(|seed| seed.file.clone()));
+    let initial_cache_update_paths: Vec<String> = initial_cache_update_paths.into_iter().collect();
+
+    if !initial_cache_update_paths.is_empty() {
+        cache::update_paths(&mut db.conn, &initial_cache_update_paths)?;
     }
-    let (index, refs) = cache::load_graph(&db.conn)?;
-    let related_paths = expand_related_local_dfg_paths(
+
+    let (mut index, mut refs) = cache::load_graph(&db.conn)?;
+    let plan = plan_bounded_slice(
+        &initial_cache_update_paths,
         local_dfg_paths,
         seeds,
         &index,
         &refs,
         direction,
-        with_propagation,
     );
-    let combined = build_local_dfg_for_paths(related_paths.iter().map(String::as_str));
+
+    let additional_cache_update_paths: Vec<String> = plan
+        .cache_update_paths
+        .iter()
+        .filter(|path| !initial_cache_update_paths.contains(path))
+        .cloned()
+        .collect();
+    if !additional_cache_update_paths.is_empty() {
+        cache::update_paths(&mut db.conn, &additional_cache_update_paths)?;
+        let loaded = cache::load_graph(&db.conn)?;
+        index = loaded.0;
+        refs = loaded.1;
+    }
+
+    let combined = build_local_dfg_for_paths(plan.local_dfg_paths.iter().map(String::as_str));
     let mut pdg = PdgBuilder::build(&combined, &refs);
     if with_propagation {
         PdgBuilder::augment_symbolic_propagation(&mut pdg, &refs, &index);
@@ -2001,6 +2139,99 @@ mod tests {
                 && r.from.0 == "f.rs:use:x:10"
                 && r.to.0 == "f.rs:def:y:10"
         }));
+    }
+
+    fn test_symbol(id: &str, name: &str, file: &str, line: u32) -> dimpact::Symbol {
+        dimpact::Symbol {
+            id: SymbolId(id.to_string()),
+            name: name.to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: file.to_string(),
+            range: dimpact::TextRange {
+                start_line: line,
+                end_line: line + 2,
+            },
+            language: if file.ends_with(".rb") {
+                "ruby".to_string()
+            } else {
+                "rust".to_string()
+            },
+        }
+    }
+
+    fn call_ref(from: &str, to: &str, file: &str, line: u32) -> Reference {
+        Reference {
+            from: SymbolId(from.to_string()),
+            to: SymbolId(to.to_string()),
+            kind: RefKind::Call,
+            file: file.to_string(),
+            line,
+            certainty: EdgeCertainty::Confirmed,
+            provenance: EdgeProvenance::CallGraph,
+        }
+    }
+
+    #[test]
+    fn bounded_slice_plan_selects_direct_boundary_and_single_bridge_completion() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let wrapper = test_symbol("rust:wrapper.rs:fn:wrap:1", "wrap", "wrapper.rs", 1);
+        let leaf = test_symbol("rust:leaf.rs:fn:source:1", "source", "leaf.rs", 1);
+        let sibling = test_symbol("rust:side.rs:fn:side:1", "side", "side.rs", 1);
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            wrapper.clone(),
+            leaf.clone(),
+            sibling.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), wrapper.id.0.as_str(), "main.rs", 4),
+            call_ref(wrapper.id.0.as_str(), leaf.id.0.as_str(), "wrapper.rs", 3),
+            call_ref(
+                wrapper.id.0.as_str(),
+                sibling.id.0.as_str(),
+                "wrapper.rs",
+                5,
+            ),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "leaf.rs".to_string(),
+                "main.rs".to_string(),
+                "wrapper.rs".to_string(),
+            ]
+        );
+        assert_eq!(plan.local_dfg_paths, plan.cache_update_paths);
+    }
+
+    #[test]
+    fn bounded_slice_plan_limits_local_dfg_scope_to_rust_and_ruby_files() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let js = test_symbol("js:helper.js:fn:helper:1", "helper", "helper.js", 1);
+        let index = SymbolIndex::build(vec![seed.clone(), js.clone()]);
+        let refs = vec![call_ref(seed.id.0.as_str(), js.id.0.as_str(), "main.rs", 4)];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+        );
+
+        assert!(plan.cache_update_paths.contains(&"helper.js".to_string()));
+        assert_eq!(plan.local_dfg_paths, vec!["main.rs".to_string()]);
     }
 
     #[test]

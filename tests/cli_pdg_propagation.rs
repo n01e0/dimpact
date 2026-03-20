@@ -589,18 +589,28 @@ fn pdg_propagation_maps_multi_file_wrapper_return_without_leaking_irrelevant_arg
     );
 
     assert!(
-        !pdg.contains("\"wrapper.rs:def:right:3\""),
-        "plain PDG should not expand wrapper-file DFG nodes, got:\n{}",
+        pdg.contains("\"wrapper.rs:def:right:3\""),
+        "expected shared bounded-slice scope to include wrapper-file DFG nodes for plain PDG, got:\n{}",
+        pdg
+    );
+    assert!(
+        pdg.contains("\"leaf.rs:def:v:1\""),
+        "expected bounded slice builder to pull the third-file leaf DFG nodes into plain PDG scope, got:\n{}",
         pdg
     );
     assert!(
         !pdg.contains("\"main.rs:use:y:7\" -> \"main.rs:def:out:7\""),
-        "plain PDG should not synthesize the wrapper return bridge, got:\n{}",
+        "plain PDG should still avoid synthesizing the wrapper return bridge without propagation, got:\n{}",
         pdg
     );
     assert!(
         prop.contains("\"wrapper.rs:def:right:3\""),
-        "expected propagation to expand wrapper-file DFG nodes, got:\n{}",
+        "expected propagation to keep wrapper-file DFG nodes in scope, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"leaf.rs:def:v:1\""),
+        "expected propagation to keep the third-file leaf DFG nodes in scope, got:\n{}",
         prop
     );
     assert!(
