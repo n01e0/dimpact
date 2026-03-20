@@ -1,0 +1,188 @@
+{
+  "generated_by": "manual G4-3 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "policy for expanding PDG build scope from seed-only files to a minimal related-file set",
+  "principles": [
+    "graph-first file selection",
+    "one-hop boundary expansion by direction",
+    "single bridge-completion expansion at most once",
+    "separate cache update scope from local DFG scope",
+    "attach selection reasons to every chosen path"
+  ],
+  "non_goals": [
+    "project-wide DFG build",
+    "full multi-language local DFG parity",
+    "full engine-policy integration",
+    "final witness schema design"
+  ],
+  "plan_contract": {
+    "inputs": [
+      "seed_symbols",
+      "changed_files",
+      "symbol_index",
+      "references",
+      "direction",
+      "with_propagation"
+    ],
+    "outputs": [
+      "cache_update_paths",
+      "local_dfg_paths",
+      "reasons_by_path"
+    ]
+  },
+  "reason_kinds": [
+    "seed_file",
+    "changed_file",
+    "direct_caller_file",
+    "direct_callee_file",
+    "bridge_completion_file",
+    "module_companion_file"
+  ],
+  "tiers": [
+    {
+      "tier": 0,
+      "name": "seed_or_changed_core",
+      "rule": "always include changed files in diff mode and seed-symbol files in explicit-seed mode",
+      "cache_update": true,
+      "local_dfg": "include only when extension is .rs or .rb",
+      "reasons": [
+        "seed_file",
+        "changed_file"
+      ]
+    },
+    {
+      "tier": 1,
+      "name": "direction_aware_direct_boundary",
+      "rule": "select files of symbols one hop away on the base ref graph; callers uses incoming edges, callees uses outgoing edges, both uses the union",
+      "cache_update": true,
+      "local_dfg": "include only when extension is .rs or .rb",
+      "reasons": [
+        "direct_caller_file",
+        "direct_callee_file"
+      ]
+    },
+    {
+      "tier": 2,
+      "name": "bridge_completion",
+      "rule": "allow one extra file only when needed to close wrapper-return or boundary-side alias/summary propagation across the current one-hop boundary",
+      "cache_update": true,
+      "local_dfg": "include only when extension is .rs or .rb",
+      "reasons": [
+        "bridge_completion_file"
+      ],
+      "budget": "at most one bridge-completion file per seed"
+    },
+    {
+      "tier": 3,
+      "name": "module_companion_fallback",
+      "rule": "use path/module heuristics only as a fallback for already-selected graph boundary files (for example Rust foo.rs <-> foo/mod.rs or Ruby require_relative companions)",
+      "cache_update": true,
+      "local_dfg": "include only when extension is .rs or .rb and budget allows",
+      "reasons": [
+        "module_companion_file"
+      ]
+    }
+  ],
+  "budgets": {
+    "cache_update_paths_max": 12,
+    "local_dfg_paths_max": 8,
+    "bridge_completion_per_seed_max": 1
+  },
+  "ordering": {
+    "tier_priority": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "within_tier": [
+      "seed hop depth",
+      "reason priority",
+      "lexical path order"
+    ],
+    "stop_rule": "do not recurse beyond tier 2 boundary expansion"
+  },
+  "scope_split": {
+    "cache_update_scope": "tier0 + tier1 + tier2 + necessary tier3, bounded by cache_update_paths_max",
+    "local_dfg_scope": "rust/ruby subset of selected files, bounded by local_dfg_paths_max",
+    "invariant": "cache_update_scope is a superset of local_dfg_scope"
+  },
+  "mode_specific_policy": {
+    "diff_mode": {
+      "tier0": "changed_files",
+      "tier1": "files of direct boundary symbols adjacent to changed symbols",
+      "tier2": "one wrapper/alias completion if needed"
+    },
+    "seed_mode": {
+      "tier0": "files containing explicit seeds",
+      "tier1": "files of direct callers/callees of the seed symbols according to direction",
+      "tier2": "one wrapper/alias completion if needed"
+    },
+    "per_seed_mode": {
+      "rule": "plan per-seed first so scope reasons remain attributable even if execution later unions the resulting path sets"
+    }
+  },
+  "g4_2_mapping": {
+    "rust-cross-file-callsite-summary-bridge": {
+      "tier0": [
+        "main.rs"
+      ],
+      "tier1": [
+        "callee.rs"
+      ],
+      "tier2": []
+    },
+    "rust-cross-file-wrapper-return-flow": {
+      "tier0": [
+        "main.rs"
+      ],
+      "tier1": [
+        "adapter.rs"
+      ],
+      "tier2": [
+        "core.rs"
+      ]
+    },
+    "rust-cross-file-imported-result-alias-chain": {
+      "tier0": [
+        "main.rs"
+      ],
+      "tier1": [
+        "value.rs"
+      ],
+      "tier2": []
+    },
+    "ruby-cross-file-callees-chain-alias-return": {
+      "tier0": [
+        "changed file"
+      ],
+      "tier1": [
+        "mid.rb or main.rb boundary file"
+      ],
+      "tier2": [
+        "leaf.rb"
+      ]
+    },
+    "ruby-cross-file-dynamic-send-target-separation": {
+      "tier0": [
+        "dispatch file"
+      ],
+      "tier1": [
+        "target definition file"
+      ],
+      "tier2": []
+    }
+  },
+  "implementation_notes": {
+    "replace_current_ad_hoc_inputs_at": [
+      "src/bin/dimpact.rs::run_impact",
+      "src/bin/dimpact.rs::build_pdg_context"
+    ],
+    "recommended_entrypoint": "plan_pdg_build_scope(...) -> PdgBuildScopePlan",
+    "initial_test_surface": [
+      "planner unit tests for selected paths/reasons",
+      "CLI regressions against G4-2 fixtures",
+      "budget determinism tests"
+    ]
+  }
+}
