@@ -247,6 +247,68 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_imported_result_alias_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("value.rs"),
+        r#"pub fn make(a: i32) -> i32 {
+    a + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("adapter.rs"),
+        r#"use crate::value;
+
+pub fn wrap(a: i32) -> i32 {
+    value::make(a)
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod value;
+mod adapter;
+
+fn caller() {
+    let x = 1;
+    let y = adapter::wrap(x);
+    let alias = y;
+    let out = alias;
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod value;
+mod adapter;
+
+fn caller() {
+    let x = 2;
+    let y = adapter::wrap(x);
+    let alias = y;
+    let out = alias;
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_ruby_require_relative_alias_return_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -621,6 +683,60 @@ fn pdg_propagation_maps_multi_file_wrapper_return_without_leaking_irrelevant_arg
     assert!(
         !prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:7\""),
         "unexpected irrelevant arg bridge leaked through wrapper summary, got:\n{}",
+        prop
+    );
+}
+
+#[test]
+fn pdg_propagation_extends_imported_result_into_caller_alias_chain() {
+    let (_tmp, repo) = setup_cross_file_imported_result_alias_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"value.rs:def:a:1\""),
+        "expected bounded slice builder to include third-file callee DFG nodes in plain PDG scope, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"value.rs:use:a:2\" -> \"main.rs:def:y:6\""),
+        "plain PDG should not synthesize the imported-result bridge into the caller alias chain, got:\n{}",
+        pdg
+    );
+    assert!(
+        prop.contains("\"adapter.rs:use:a:4\" -> \"value.rs:def:a:1\""),
+        "expected propagation to bridge the boundary callsite into the completion callee input, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"value.rs:use:a:2\" -> \"main.rs:def:y:6\""),
+        "expected propagation to carry the imported result back into caller def y, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"main.rs:def:y:6\" -> \"main.rs:def:alias:7\""),
+        "expected caller-side alias chain to remain connected after the imported result bridge, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"main.rs:def:alias:7\" -> \"main.rs:def:out:8\""),
+        "expected caller-side alias continuation to reach the final output def, got:\n{}",
         prop
     );
 }
