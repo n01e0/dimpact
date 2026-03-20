@@ -151,6 +151,41 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_callers_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("callee.rs"),
+        "pub fn callee(a: i32) -> i32 { a + 1 }\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod callee;
+fn caller() {
+    let x = 1;
+    let y = callee::callee(x);
+    println!("{}", y);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("callee.rs"),
+        "pub fn callee(a: i32) -> i32 { a + 2 }\n",
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn diff_text(repo: &std::path::Path) -> String {
     let diff_out = git(repo, &["diff", "--no-ext-diff", "--unified=0"]);
     String::from_utf8(diff_out.stdout).unwrap()
@@ -353,6 +388,57 @@ fn pdg_propagation_does_not_leak_irrelevant_two_arg_bridge() {
         !stdout.contains("\"f.rs:use:x:5\" -> \"f.rs:def:out:5\""),
         "unexpected irrelevant arg bridge leaked into output, got:\n{}",
         stdout
+    );
+}
+
+#[test]
+fn propagation_callers_edges_keep_cross_file_callsite_bridges_but_drop_irrelevant_symbol_fanout() {
+    let (_tmp, repo) = setup_cross_file_callers_repo();
+    let diff = diff_text(&repo);
+
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let edges = prop["edges"].as_array().expect("edges array");
+    let pairs: std::collections::BTreeSet<(String, String)> = edges
+        .iter()
+        .map(|e| {
+            (
+                e["from"].as_str().unwrap().to_string(),
+                e["to"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+
+    assert!(
+        pairs.contains(&(
+            "rust:main.rs:fn:caller:2".to_string(),
+            "main.rs:use:x:4".to_string(),
+        )),
+        "expected impacted caller to retain the callsite-use bridge: {prop:#}"
+    );
+    assert!(
+        !pairs.contains(&(
+            "rust:main.rs:fn:caller:2".to_string(),
+            "main.rs:def:x:3".to_string(),
+        )),
+        "unexpected non-callsite fanout into caller-local seed def leaked into edges: {prop:#}"
+    );
+    assert!(
+        !pairs.contains(&(
+            "rust:main.rs:fn:caller:2".to_string(),
+            "main.rs:use:y:5".to_string(),
+        )),
+        "unexpected post-call use fanout leaked into edges: {prop:#}"
     );
 }
 
