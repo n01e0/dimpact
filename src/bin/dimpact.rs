@@ -1168,6 +1168,16 @@ fn plan_bounded_slice(
     }
 }
 
+fn validate_selected_engine_for_pdg_diff(
+    engine: &dyn dimpact::engine::AnalysisEngine,
+    files: &[dimpact::FileChanges],
+    lang: LanguageMode,
+    opts: &ImpactOptions,
+) -> anyhow::Result<()> {
+    let _ = engine.impact(files, lang, opts)?;
+    Ok(())
+}
+
 fn build_pdg_context(
     cache_update_paths: &[String],
     local_dfg_paths: &[String],
@@ -1490,6 +1500,7 @@ fn run_impact(
             };
             if with_pdg || with_propagation {
                 let changed: ChangedOutput = engine.changed_symbols(&files, lang)?;
+                validate_selected_engine_for_pdg_diff(&*engine, &files, lang, &opts)?;
                 let pdg = build_pdg_context(
                     &changed.changed_files,
                     &changed.changed_files,
@@ -1602,6 +1613,7 @@ fn run_impact(
         );
         if with_pdg || with_propagation {
             let changed: ChangedOutput = engine.changed_symbols(&files, lang)?;
+            validate_selected_engine_for_pdg_diff(&*engine, &files, lang, &opts)?;
             let pdg = build_pdg_context(
                 &changed.changed_files,
                 &changed.changed_files,
@@ -1961,6 +1973,70 @@ enum CompletionShell {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dimpact::engine::CapsHint;
+    use serial_test::serial;
+    use std::fs;
+    use std::process::Command as ProcessCommand;
+    use tempfile::TempDir;
+
+    fn git(cwd: &std::path::Path, args: &[&str]) -> std::process::Output {
+        let mut cmd = ProcessCommand::new("git");
+        cmd.args(args).current_dir(cwd);
+        let out = cmd.output().expect("git command failed to spawn");
+        if !out.status.success() {
+            panic!(
+                "git {:?} failed: status {:?}\nstdout:{}\nstderr:{}",
+                args,
+                out.status,
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        out
+    }
+
+    fn setup_pdg_engine_repo() -> (TempDir, std::path::PathBuf, Vec<dimpact::FileChanges>) {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().to_path_buf();
+        git(&path, &["init", "-q"]);
+        git(&path, &["config", "user.email", "tester@example.com"]);
+        git(&path, &["config", "user.name", "Tester"]);
+
+        fs::write(
+            path.join("main.rs"),
+            r#"fn callee(value: i32) -> i32 {
+    value + 1
+}
+
+fn caller() -> i32 {
+    let x = 1;
+    callee(x)
+}
+"#,
+        )
+        .unwrap();
+        git(&path, &["add", "."]);
+        git(&path, &["commit", "-m", "init", "-q"]);
+
+        fs::write(
+            path.join("main.rs"),
+            r#"fn callee(value: i32) -> i32 {
+    value + 1
+}
+
+fn caller() -> i32 {
+    let x = 2;
+    callee(x)
+}
+"#,
+        )
+        .unwrap();
+
+        let diff_out = git(&path, &["diff", "--no-ext-diff", "--unified=0"]);
+        let diff = String::from_utf8(diff_out.stdout).unwrap();
+        let files = parse_unified_diff(&diff).expect("parse diff");
+        (dir, path, files)
+    }
 
     #[test]
     fn lang_mode_from_str_accepts_python_aliases() {
@@ -2042,6 +2118,92 @@ mod tests {
         unsafe {
             std::env::remove_var("DIMPACT_AUTO_POLICY");
         }
+    }
+
+    #[test]
+    #[serial]
+    fn pdg_diff_validation_honors_strict_lsp_impact_capabilities() {
+        let (_tmp, repo, files) = setup_pdg_engine_repo();
+        let caps = CapsHint {
+            document_symbol: true,
+            workspace_symbol: true,
+            call_hierarchy: false,
+            references: false,
+            definition: false,
+        };
+        let engine = make_engine_with_auto_policy(
+            EngineKind::Lsp,
+            EngineConfig {
+                lsp_strict: true,
+                dump_capabilities: false,
+                mock_lsp: true,
+                mock_caps: Some(caps),
+            },
+            None,
+        );
+        let opts = ImpactOptions {
+            direction: ImpactDirection::Callers,
+            max_depth: Some(4),
+            with_edges: Some(false),
+            ignore_dirs: Vec::new(),
+        };
+
+        let cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&repo).unwrap();
+        let err =
+            validate_selected_engine_for_pdg_diff(&*engine, &files, LanguageMode::Rust, &opts)
+                .expect_err("strict LSP without impact caps should fail for PDG diff validation");
+        std::env::set_current_dir(cwd).unwrap();
+
+        let msg = err.to_string();
+        assert!(msg.contains("impact capability missing"));
+        assert!(msg.contains("direction=Callers"));
+    }
+
+    #[test]
+    #[serial]
+    fn pdg_diff_validation_baseline_matches_selected_engine_when_caps_exist() {
+        let (_tmp, repo, files) = setup_pdg_engine_repo();
+        let lsp_engine = make_engine_with_auto_policy(
+            EngineKind::Lsp,
+            EngineConfig {
+                lsp_strict: true,
+                dump_capabilities: false,
+                mock_lsp: true,
+                mock_caps: Some(CapsHint {
+                    document_symbol: true,
+                    workspace_symbol: true,
+                    call_hierarchy: true,
+                    references: false,
+                    definition: false,
+                }),
+            },
+            None,
+        );
+        let ts_engine = make_engine_with_auto_policy(
+            EngineKind::Ts,
+            EngineConfig {
+                lsp_strict: false,
+                dump_capabilities: false,
+                mock_lsp: false,
+                mock_caps: None,
+            },
+            None,
+        );
+        let opts = ImpactOptions {
+            direction: ImpactDirection::Callers,
+            max_depth: Some(4),
+            with_edges: Some(false),
+            ignore_dirs: Vec::new(),
+        };
+
+        let cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&repo).unwrap();
+        validate_selected_engine_for_pdg_diff(&*lsp_engine, &files, LanguageMode::Rust, &opts)
+            .expect("mock LSP with impact caps should pass PDG diff validation");
+        validate_selected_engine_for_pdg_diff(&*ts_engine, &files, LanguageMode::Rust, &opts)
+            .expect("TS engine should pass the same PDG diff validation baseline");
+        std::env::set_current_dir(cwd).unwrap();
     }
 
     #[test]
