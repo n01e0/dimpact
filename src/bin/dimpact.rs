@@ -1048,6 +1048,7 @@ struct Tier2Candidate {
     via_symbol_id: String,
     via_path: String,
     bridge_kind: Option<ImpactSliceBridgeKind>,
+    call_line: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1207,6 +1208,7 @@ fn tier2_bridge_priority(kind: Option<ImpactSliceBridgeKind>) -> u8 {
 fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp::Ordering {
     tier2_bridge_priority(a.bridge_kind)
         .cmp(&tier2_bridge_priority(b.bridge_kind))
+        .then_with(|| b.call_line.cmp(&a.call_line))
         .then_with(|| a.path.cmp(&b.path))
         .then_with(|| a.via_path.cmp(&b.via_path))
         .then_with(|| a.via_symbol_id.cmp(&b.via_symbol_id))
@@ -1318,12 +1320,29 @@ fn plan_bounded_slice(
             };
 
             let mut side_candidates = std::collections::BTreeMap::new();
-            for completion in collect_related_call_symbols(
-                boundary.symbol_id.as_str(),
-                refs,
-                boundary_follow_direction(boundary.kind),
-            ) {
-                let Some(completion_file) = symbol_file_by_id.get(&completion.symbol_id).copied()
+            for reference in refs.iter().filter(|r| is_call_graph_ref(r)) {
+                let completion_symbol_id = match boundary_follow_direction(boundary.kind) {
+                    ImpactDirection::Callers if reference.to.0 == boundary.symbol_id => {
+                        Some(reference.from.0.as_str())
+                    }
+                    ImpactDirection::Callees if reference.from.0 == boundary.symbol_id => {
+                        Some(reference.to.0.as_str())
+                    }
+                    ImpactDirection::Both => {
+                        if reference.to.0 == boundary.symbol_id {
+                            Some(reference.from.0.as_str())
+                        } else if reference.from.0 == boundary.symbol_id {
+                            Some(reference.to.0.as_str())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                let Some(completion_symbol_id) = completion_symbol_id else {
+                    continue;
+                };
+                let Some(completion_file) = symbol_file_by_id.get(completion_symbol_id).copied()
                 else {
                     continue;
                 };
@@ -1333,18 +1352,26 @@ fn plan_bounded_slice(
                 if direct_boundary_paths.contains(completion_file) {
                     continue;
                 }
+
+                let candidate = Tier2Candidate {
+                    path: completion_file.to_string(),
+                    via_symbol_id: boundary.symbol_id.clone(),
+                    via_path: boundary_file.to_string(),
+                    bridge_kind: infer_tier2_bridge_kind(
+                        boundary_symbol,
+                        boundary_file,
+                        completion_file,
+                    ),
+                    call_line: reference.line,
+                };
                 side_candidates
                     .entry(completion_file.to_string())
-                    .or_insert_with(|| Tier2Candidate {
-                        path: completion_file.to_string(),
-                        via_symbol_id: boundary.symbol_id.clone(),
-                        via_path: boundary_file.to_string(),
-                        bridge_kind: infer_tier2_bridge_kind(
-                            boundary_symbol,
-                            boundary_file,
-                            completion_file,
-                        ),
-                    });
+                    .and_modify(|existing: &mut Tier2Candidate| {
+                        if compare_tier2_candidates(&candidate, existing).is_lt() {
+                            *existing = candidate.clone();
+                        }
+                    })
+                    .or_insert(candidate);
             }
 
             let mut side_candidates: Vec<_> = side_candidates.into_values().collect();
@@ -2636,13 +2663,13 @@ fn caller() -> i32 {
         ]);
         let refs = vec![
             call_ref(seed.id.0.as_str(), wrapper.id.0.as_str(), "main.rs", 4),
-            call_ref(wrapper.id.0.as_str(), leaf.id.0.as_str(), "wrapper.rs", 3),
             call_ref(
                 wrapper.id.0.as_str(),
                 sibling.id.0.as_str(),
                 "wrapper.rs",
-                5,
+                3,
             ),
+            call_ref(wrapper.id.0.as_str(), leaf.id.0.as_str(), "wrapper.rs", 5),
         ];
 
         let plan = plan_bounded_slice(
@@ -2777,6 +2804,55 @@ fn caller() -> i32 {
     }
 
     #[test]
+    fn bounded_slice_plan_prefers_later_wrapper_return_call_over_lexically_earlier_noise() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let wrapper = test_symbol("rust:wrapper.rs:fn:wrap:3", "wrap", "wrapper.rs", 3);
+        let helper = test_symbol("rust:aaa_helper.rs:fn:noise:1", "noise", "aaa_helper.rs", 1);
+        let leaf = test_symbol("rust:leaf.rs:fn:source:1", "source", "leaf.rs", 1);
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            wrapper.clone(),
+            helper.clone(),
+            leaf.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), wrapper.id.0.as_str(), "main.rs", 5),
+            call_ref(wrapper.id.0.as_str(), helper.id.0.as_str(), "wrapper.rs", 4),
+            call_ref(wrapper.id.0.as_str(), leaf.id.0.as_str(), "wrapper.rs", 5),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "leaf.rs".to_string(),
+                "main.rs".to_string(),
+                "wrapper.rs".to_string(),
+            ]
+        );
+        assert!(
+            plan.slice_selection
+                .pruned_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.path == "aaa_helper.rs"
+                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+                        && candidate.via_symbol_id.as_deref() == Some("rust:wrapper.rs:fn:wrap:3")
+                })
+        );
+    }
+
+    #[test]
     fn bounded_slice_plan_records_ranked_out_and_budget_pruned_tier2_candidates() {
         let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
         let wrap_a = test_symbol("rust:a_wrapper.rs:fn:wrap_a:3", "wrap_a", "a_wrapper.rs", 3);
@@ -2800,13 +2876,13 @@ fn caller() -> i32 {
             call_ref(seed.id.0.as_str(), wrap_a.id.0.as_str(), "main.rs", 4),
             call_ref(seed.id.0.as_str(), wrap_b.id.0.as_str(), "main.rs", 5),
             call_ref(seed.id.0.as_str(), wrap_c.id.0.as_str(), "main.rs", 6),
+            call_ref(wrap_a.id.0.as_str(), alt_a.id.0.as_str(), "a_wrapper.rs", 4),
             call_ref(
                 wrap_a.id.0.as_str(),
                 leaf_a.id.0.as_str(),
                 "a_wrapper.rs",
-                4,
+                5,
             ),
-            call_ref(wrap_a.id.0.as_str(), alt_a.id.0.as_str(), "a_wrapper.rs", 5),
             call_ref(
                 wrap_b.id.0.as_str(),
                 leaf_b.id.0.as_str(),
