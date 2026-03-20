@@ -1,0 +1,161 @@
+{
+  "generated_by": "manual G7-2 scoring schema note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "minimal public schema for bridge-kind / evidence-kind scoring in bounded-slice tier2/tier3 candidate ranking",
+  "extends": [
+    "docs/g6-2-planner-reason-file-metadata-schema.md",
+    "docs/g7-1-bridge-candidate-scoring-design-memo.md"
+  ],
+  "applies_to": [
+    "summary.slice_selection.files[].reasons[]",
+    "summary.slice_selection.pruned_candidates[]"
+  ],
+  "goal": [
+    "separate bridge_kind labels from ranking material",
+    "make graph-first vs narrow-fallback competition observable",
+    "share the same score profile shape across selected and pruned candidates",
+    "support future Rust ranking fixes, Ruby fallback fixes, and selected-vs-pruned witness explanations"
+  ],
+  "non_goals": [
+    "runtime implementation in G7-2",
+    "opaque single weighted score",
+    "full witness explanation wording",
+    "project-wide closure or proof graph design"
+  ],
+  "schema_changes": {
+    "impact_slice_reason_metadata": {
+      "adds": [
+        "scoring?: ImpactSliceCandidateScoringSummary"
+      ],
+      "scoring_present_when": [
+        "tier=2 and kind=bridge_completion_file",
+        "tier=3 and kind=module_companion_file when the candidate participated in ranking"
+      ],
+      "scoring_omitted_when": [
+        "tier=0 root reasons",
+        "tier=1 direct boundary reasons",
+        "reasons that did not go through candidate competition"
+      ]
+    },
+    "impact_slice_pruned_candidate": {
+      "adds": [
+        "scoring: ImpactSliceCandidateScoringSummary"
+      ],
+      "required_when": [
+        "tier=2 bridge_completion_file",
+        "tier=3 module_companion_file"
+      ]
+    }
+  },
+  "scoring_shape": {
+    "fields": [
+      "source_kind",
+      "lane",
+      "primary_evidence_kinds",
+      "secondary_evidence_kinds",
+      "score_tuple"
+    ],
+    "source_kind": [
+      "graph_second_hop",
+      "narrow_fallback"
+    ],
+    "lane": [
+      "return_continuation",
+      "alias_continuation",
+      "require_relative_continuation",
+      "module_companion_fallback"
+    ],
+    "evidence_kind": [
+      "return_flow",
+      "assigned_result",
+      "alias_chain",
+      "require_relative_edge",
+      "module_companion",
+      "callsite_position_hint",
+      "name_path_hint"
+    ],
+    "score_tuple": {
+      "fields": [
+        "source_rank",
+        "lane_rank",
+        "primary_evidence_count",
+        "secondary_evidence_count",
+        "call_position_rank",
+        "lexical_tiebreak"
+      ],
+      "compare_order": [
+        "source_rank ascending",
+        "lane_rank ascending",
+        "primary_evidence_count descending",
+        "secondary_evidence_count descending",
+        "call_position_rank descending",
+        "lexical_tiebreak ascending"
+      ]
+    }
+  },
+  "bridge_kind": {
+    "retained_values": [
+      "wrapper_return",
+      "boundary_alias_continuation",
+      "require_relative_chain"
+    ],
+    "role": "human-facing bridge family label, not the full ranking basis",
+    "mapping_to_lane": {
+      "wrapper_return": "return_continuation",
+      "boundary_alias_continuation": "alias_continuation",
+      "require_relative_chain": "require_relative_continuation"
+    },
+    "null_allowed_for": [
+      "module_companion_file fallback candidates"
+    ]
+  },
+  "source_rank_values": {
+    "graph_second_hop": 0,
+    "narrow_fallback": 1
+  },
+  "lane_rank_values": {
+    "return_continuation": 0,
+    "alias_continuation": 1,
+    "require_relative_continuation": 2,
+    "module_companion_fallback": 3
+  },
+  "evidence_partition": {
+    "primary": [
+      "return_flow",
+      "assigned_result",
+      "alias_chain",
+      "require_relative_edge",
+      "module_companion"
+    ],
+    "secondary": [
+      "callsite_position_hint",
+      "name_path_hint"
+    ],
+    "rule": "callsite and name/path hints must not be the sole primary basis for a candidate"
+  },
+  "stability": {
+    "primary_evidence_kinds": "emit [] when scoring is present but no primary evidence kinds were materialized",
+    "secondary_evidence_kinds": "emit [] when scoring is present but no secondary evidence kinds were materialized",
+    "evidence_order": "snake_case lexical order",
+    "selected_and_pruned_share_same_shape": true
+  },
+  "intended_runtime_rules": [
+    "graph_second_hop wins over narrow_fallback when all later tuple dimensions are equal",
+    "return_continuation outranks alias_continuation, which outranks require_relative_continuation, which outranks module_companion_fallback",
+    "callsite_position_hint and name_path_hint are tie-break material only",
+    "docs, tests, and runtime comparison order must match"
+  ],
+  "future_hooks": {
+    "g7_3": [
+      "attach scoring to selected/pruned Rust tier2 candidates",
+      "replace bridge_kind+call_line compare with score-profile compare"
+    ],
+    "g7_6": [
+      "keep Ruby graph-first and fallback lanes distinct",
+      "avoid collapsing all Ruby candidates into require_relative_chain"
+    ],
+    "g7_7": [
+      "derive selected-vs-pruned explanation from scoring tuple and evidence arrays"
+    ]
+  }
+}
