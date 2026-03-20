@@ -3321,27 +3321,26 @@ fn caller() -> i32 {
                 )),
             }]
         );
-        assert!(
-            plan.slice_selection
-                .pruned_candidates
-                .iter()
-                .any(|candidate| {
-                    candidate.path == "lib/zzz_helper.rb"
-                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
-                        && candidate.bridge_kind
-                            == Some(ImpactSliceBridgeKind::RequireRelativeChain)
-                        && candidate.via_symbol_id.as_deref()
-                            == Some("ruby:lib/service.rb:method:bounce:4")
-                        && candidate.scoring.as_ref().is_some_and(|scoring| {
-                            scoring.lane == ImpactSliceCandidateLane::RequireRelativeContinuation
-                                && scoring.primary_evidence_kinds
-                                    == vec![ImpactSliceEvidenceKind::RequireRelativeEdge]
-                                && scoring.secondary_evidence_kinds
-                                    == vec![ImpactSliceEvidenceKind::CallsitePositionHint]
-                                && scoring.score_tuple.call_position_rank == 7
-                        })
-                }),
-            "expected later Ruby helper noise to stay a ranked-out require_relative fallback: {:#?}",
+        assert_eq!(
+            plan.slice_selection.pruned_candidates,
+            vec![dimpact::ImpactSlicePrunedCandidate {
+                seed_symbol_id: seed.id.0.clone(),
+                path: "lib/zzz_helper.rb".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("ruby:lib/service.rb:method:bounce:4".to_string()),
+                via_path: Some("lib/service.rb".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::RequireRelativeChain),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::RequireRelativeContinuation,
+                    vec![ImpactSliceEvidenceKind::RequireRelativeEdge],
+                    vec![ImpactSliceEvidenceKind::CallsitePositionHint],
+                    7,
+                    "lib/zzz_helper.rb",
+                )),
+            }],
+            "expected later Ruby helper noise to stay a single ranked-out require_relative fallback: {:#?}",
             plan.slice_selection.pruned_candidates
         );
     }

@@ -1487,6 +1487,34 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
             })),
         "expected later Ruby helper noise to be preserved only as require_relative ranked-out metadata: {prop:#}"
     );
+    let witness = &prop["impacted_witnesses"]["ruby:lib/leaf.rb:method:finish:1"];
+    let leaf_context = witness_slice_file(witness, "lib/leaf.rb");
+    assert_eq!(
+        leaf_context["selected_vs_pruned_reasons"],
+        serde_json::json!([{
+            "via_symbol_id": "ruby:lib/service.rb:method:bounce:4",
+            "via_path": "lib/service.rb",
+            "selected_bridge_kind": "wrapper_return",
+            "pruned_path": "lib/zzz_helper.rb",
+            "prune_reason": "ranked_out",
+            "pruned_bridge_kind": "require_relative_chain",
+            "selected_better_by": "lane",
+            "summary": "selected over lib/zzz_helper.rb because return_continuation outranked require_relative_continuation",
+        }])
+    );
+    let helper_witness =
+        &prop["impacted_witnesses"]["ruby:lib/zzz_helper.rb:method:helper_noise:1"];
+    let helper_paths: Vec<&str> = helper_witness["slice_context"]["selected_files_on_path"]
+        .as_array()
+        .expect("helper witness slice_context.selected_files_on_path array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(
+        helper_paths,
+        vec!["app/runner.rb", "lib/service.rb"],
+        "expected Ruby helper noise to stay outside the bounded explanation slice even if it remains reachable: {prop:#}"
+    );
 
     let prop_dot = run_impact_dot(
         &repo,
