@@ -131,7 +131,12 @@ dimpact id --name foo -f json
   - `path` は root changed/seed symbol からそこに至る 1 本の hop-by-hop 経路を出します
   - `provenance_chain` / `kind_chain` で、その経路のどこに call / data / control / symbolic_propagation が入ったかを追いやすくなります
   - `path_compact` / `provenance_chain_compact` / `kind_chain_compact` は、その同じ経路をより説明しやすい圧縮形で返します
+  - `slice_context.selected_files_on_path` を見ると、その witness 経路上の file が bounded-slice planner でどう選ばれたか、どの hop index を担当したか、どの seed-specific reason で残ったかを軽く追えます
   - ただし、これは依然として 1 本の最短経路ベースの説明であり、すべての候補経路を網羅するものではありません
+- `summary.slice_selection` は PDG / propagation path で出力され、bounded-slice planner 自体の判断を見せます:
+  - `files[*]` で選ばれた file-level scope と `cache_update` / `local_dfg` / `explanation` の分離を確認できます
+  - `files[*].reasons[*]` で direct boundary と bridge completion を含む seed ごとの選定理由を確認できます
+  - `pruned_candidates[*]` で ranked-out / budget prune された候補の最小診断を確認できます
 - `--per-seed` 指定時は、各変更/シードシンボルごとの `impacts[].output.summary` 配下に同じ summary が入り、witness も各 grouped output の中にネストされます。
 - DOT/HTML 出力は互換維持で、今回の summary は JSON/YAML 利用を主対象としています。
 
@@ -192,7 +197,7 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 ## PDG / propagation の使い分け
 - bounded slice は、いまの PDG path の scope モデルです
   - 目的は repo 全体を開くことではなく、短い multi-file bridge を説明するのに必要な近傍 file だけを拾うことです
-  - 実際のイメージは、seed/changed file を起点に、direct boundary file、さらに必要なら bridge completion 1 file を足す、という bounded な project slice です
+  - 現在の planner は **controlled 2-hop** で、seed/changed file → direct boundary file → boundary side ごとに必要な bridge completion file を少数だけ足す、という bounded な project slice を狙っています
   - `--with-pdg` と `--with-propagation` は、diff モードでも seed モードでも、この同じ bounded slice planner を共有します
 - `--with-pdg`
   - 選ばれた bounded slice 上で、Rust/Ruby の local data/control dependence を少し厚く見たいとき向けです
@@ -209,7 +214,7 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 ## 現在の PDG / propagation の限界
 - scope はまだ意図的に絞っています
   - 現状は **bounded project slice** であって project-wide closure ではありません
-  - Rust/Ruby ではおおむね `root file + direct boundary + bridge completion 1 file` くらいのスコープを狙っています
+  - Rust/Ruby ではおおむね「root file + direct boundary + いくつかの boundary side ごとの controlled second-hop bridge file」くらいのスコープを狙っています
   - そのため、短い 2-hop bridge には効きますが、再帰的な whole-project expansion はしません
   - それ以外の言語では `--with-pdg` を付けても、実質的には通常の call graph シグナルに寄る場面が多いです
 - **project-wide PDG** ではありません
@@ -217,11 +222,16 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
   - propagation も whole-program symbolic execution ではなく、call-site / summary 中心の heuristic です
 - witness は改善されたが、まだ最小表現です
   - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` で 1 本の multi-hop 説明を見られるようになりました
+  - `impacted_witnesses.slice_context` を見ると、その経路上に出てくる selected file が bounded-slice planner でどう選ばれたかを軽く辿れます
   - `*_compact` 系フィールドでその説明を読みやすく圧縮していますが、依然として 1 本の選択経路の要約です
   - 競合する複数経路の列挙や、代替経路が存在しないことの証明まではしません
 - `-f dot` の意味が切り替わります
   - 通常の `impact -f dot` は impact graph
   - `impact --with-pdg -f dot` は raw な PDG/DFG 風グラフです
+- Ruby は short multi-file case が前進した一方で、限界もまだあります
+  - `require_relative` / alias / wrapper-return の短い chain や no-paren wrapper parameter flow は以前より拾いやすくなりました
+  - ただし、長い `require_relative` ladder、dynamic-send が強い flow、広い companion discovery はまだ意図的に弱く抑えています
+  - Ruby の PDG / propagation は、完全な inter-procedural proof system ではなく、bounded な explainability aid として見るのが安全です
 - エンジン統合は改善したが、まだ完全ではありません
   - diff モードの PDG / propagation でも changed-symbol discovery だけでなく strict な impact capability check も選択した engine に揃うようになりました
   - ただし PDG / propagation 自体は、いまも cache 済み graph の上にローカル graph 構築を重ねる経路なので、engine ネイティブな edge richness がそのまま保存されるわけではありません
@@ -230,6 +240,7 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - repo 全体で安定した caller/callee の答えが欲しいなら、まず通常の `impact` を使う
 - 「どの近傍 file まで bounded slice に入るのか」と、その中の Rust/Ruby data/control dependency を見たいなら `--with-pdg` を足す
 - 「この値・引数・結果は call 境界を越えて伝播するか？」が本題なら `--with-propagation` まで上げる。特に短い Rust/Ruby の multi-file bridge を見たいときに有効です
+- PDG / propagation の結果が意外だったら、まず `summary.slice_selection` で selected / pruned file を見て、その後に `impacted_witnesses[*].slice_context` で why-this-file と why-this-path の対応を追うのが分かりやすいです
 - seed ごとに分けて見たいなら、上のどれに対しても `--per-seed` を足し、`impacted_witnesses` と compact witness fields を見る
 - Go/Java/Python/JS/TS/TSX では、現時点の `--with-pdg` に大きな上積みを期待しすぎない方が安全です。fixture / regression で確認できる範囲の experimental 機能として扱ってください
 

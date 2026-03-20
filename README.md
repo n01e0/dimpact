@@ -115,7 +115,12 @@ CLI Overview
   - `path` expands that witness into one chosen hop-by-hop route from the root changed/seed symbol
   - `provenance_chain` / `kind_chain` make it easier to see where call / data / control / symbolic-propagation edges entered that route
   - `path_compact` / `provenance_chain_compact` / `kind_chain_compact` keep the same route in a more compressed, explanation-oriented form
+  - `slice_context.selected_files_on_path` lightly connects that witness route back to the bounded-slice planner, so you can see which selected files were actually on the witness path, which hop indices they covered, and which slice-selection reasons retained them
   - this is still one selected shortest-path explanation, not an exhaustive proof of every possible route
+- `summary.slice_selection` is emitted on the PDG / propagation path and exposes the bounded-slice planner decision itself:
+  - `files[*]` lists the selected file-level scope with `cache_update` / `local_dfg` / `explanation` split
+  - `files[*].reasons[*]` records the selection reason per seed, including direct-boundary vs bridge-completion distinctions
+  - `pruned_candidates[*]` gives the minimal diagnostics for ranked-out / budget-pruned candidates when the planner had to drop alternatives
 - With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol, and witness data stays nested under each grouped output.
 - DOT/HTML output stays compatible; the new summary fields are for JSON/YAML consumption.
 
@@ -176,7 +181,7 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 ### PDG / propagation: when to use which
 - Bounded slice is the current scope model for the PDG path:
   - the goal is **not** to open the whole repo, but to recover the few nearby files that are most likely needed to explain a short multi-file bridge
-  - in practice that means: seed/changed file first, then direct boundary files, then at most one bridge-completion file, with small companion fallback only when needed
+  - the current planner is a **controlled 2-hop** model: seed/changed file first, then direct boundary files, then at most one bridge-completion file per boundary side under a small per-seed budget
   - `--with-pdg` and `--with-propagation` now share that same bounded slice planner in diff mode and seed mode
 - `--with-pdg`
   - best when you want extra Rust/Ruby local data/control-dependence context around the selected bounded slice
@@ -193,19 +198,24 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 ### Current limits of the PDG / propagation path
 - Scope is intentionally bounded today:
   - the planner is still closer to a **bounded project slice** than to project-wide closure
-  - current Rust/Ruby scope selection is roughly: root file(s) + direct boundary + at most one bridge-completion file
-  - that helps short 2-hop-style bridges, but it deliberately stops before recursive whole-project expansion
+  - current Rust/Ruby scope selection is roughly: root file(s) + direct boundary + controlled second-hop bridge files for a few boundary sides
+  - that helps short 2-hop-style bridges, but it still deliberately stops before recursive whole-project expansion
   - other languages still mostly fall back to the normal call-graph signal even if you pass `--with-pdg`
 - It is **not** a project-wide PDG yet:
   - current behavior is still closer to `global call graph + bounded local DFG augmentation`
   - propagation is mostly call-site / summary-oriented, not a whole-program symbolic executor
 - Witnesses are better, but still intentionally minimal:
   - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` expose one chosen multi-hop explanation
+  - `impacted_witnesses.slice_context` now tells you which selected files on that route came from the bounded-slice planner and which seed-specific reasons retained them
   - the `*_compact` witness fields make that explanation easier to read, but they are still summaries of one selected route
   - you still do **not** get all competing paths or a full proof that no alternative route exists
 - `-f dot` changes meaning when PDG is enabled:
   - normal `impact -f dot` shows the impact graph
   - `impact --with-pdg -f dot` shows the raw PDG/DFG-style graph instead
+- Ruby has improved short multi-file coverage, but still has clear boundaries:
+  - short `require_relative` / alias / wrapper-return chains are better than before, including no-paren wrapper parameter flow
+  - longer `require_relative` ladders, dynamic-send-heavy flows, and broader companion discovery are still intentionally under-modeled
+  - treat Ruby PDG / propagation as a bounded explanation aid, not as a complete inter-procedural proof system
 - Engine integration is improved but still uneven:
   - diff-mode PDG / propagation now honor the selected engine for changed-symbol discovery **and** strict impact-capability validation, so strict-LSP failure semantics stay aligned with plain impact
   - PDG / propagation still layer extra local graph construction on top of cached graph data, so engine-native edge richness is not fully preserved yet
@@ -214,6 +224,7 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - Start with normal `impact` when you want stable repo-wide caller/callee answers.
 - Add `--with-pdg` when you want to ask: "which nearby Rust/Ruby files belong in the bounded explanation slice, and what local data/control edges appear there?"
 - Escalate to `--with-propagation` when the interesting question is "does this value/argument/result flow across the call boundary?", especially for short Rust/Ruby multi-file bridges.
+- When the PDG / propagation output looks surprising, inspect `summary.slice_selection` first to see which files were selected or pruned, then inspect `impacted_witnesses[*].slice_context` to connect that file-level reason back to the chosen witness path.
 - If you need to review one seed at a time, add `--per-seed` to any of the above and inspect `impacted_witnesses`, especially the compact witness fields, for the chosen path summary.
 - If you are working in Go/Java/Python/JS/TS/TSX, do not assume `--with-pdg` adds much today; treat it as experimental unless the fixture/regression says otherwise.
 
