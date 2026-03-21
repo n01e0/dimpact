@@ -1932,7 +1932,7 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
             .as_array()
             .is_some_and(|candidates| candidates.iter().any(|candidate| {
                 candidate["path"] == "later.rs"
-                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["prune_reason"] == "weaker_same_family_sibling"
                     && candidate["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
                     && candidate["bridge_kind"] == "wrapper_return"
                     && candidate["scoring"]
@@ -1957,7 +1957,7 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
                             }
                         })
             })),
-        "expected later.rs to remain only as ranked-out metadata once param flow is observed: {prop:#}"
+        "expected later.rs to remain only as weaker same-family sibling metadata once param flow is observed: {prop:#}"
     );
 
     let witness = &prop["impacted_witnesses"]["rust:step.rs:fn:step:1"];
@@ -1969,7 +1969,7 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
             "via_path": "wrapper.rs",
             "selected_bridge_kind": "wrapper_return",
             "pruned_path": "later.rs",
-            "prune_reason": "ranked_out",
+            "prune_reason": "weaker_same_family_sibling",
             "pruned_bridge_kind": "wrapper_return",
             "selected_better_by": "primary_evidence_count",
             "winning_primary_evidence_kinds": [

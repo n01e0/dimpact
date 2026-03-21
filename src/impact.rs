@@ -263,6 +263,7 @@ pub enum ImpactSlicePruneReason {
     LocalDfgBudgetExhausted,
     SuppressedBeforeAdmit,
     WeakerSamePathDuplicate,
+    WeakerSameFamilySibling,
     RankedOut,
 }
 
@@ -1086,7 +1087,9 @@ fn selected_reason_matches_pruned_candidate(
     reason.kind == ImpactSliceReasonKind::BridgeCompletionFile
         && matches!(
             candidate.prune_reason,
-            ImpactSlicePruneReason::RankedOut | ImpactSlicePruneReason::SuppressedBeforeAdmit
+            ImpactSlicePruneReason::RankedOut
+                | ImpactSlicePruneReason::SuppressedBeforeAdmit
+                | ImpactSlicePruneReason::WeakerSameFamilySibling
         )
         && candidate.path != selected_path
         && reason.seed_symbol_id == candidate.seed_symbol_id
@@ -3191,6 +3194,104 @@ fn foo() { bar(); }
                 winning_support: None,
                 losing_side_reason: Some("negative_evidence=noisy_return_hint".to_string()),
                 summary: "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1); losing side: negative_evidence=noisy_return_hint".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn selected_vs_pruned_reason_matches_weaker_same_family_sibling_prune_reason() {
+        let seed_symbol_id = "rust:main.rs:fn:caller:1".to_string();
+        let via_symbol_id = "rust:wrapper.rs:fn:wrap:4".to_string();
+        let reasons = build_selected_vs_pruned_reasons(
+            "step.rs",
+            &[ImpactSliceReasonMetadata {
+                seed_symbol_id: seed_symbol_id.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(via_symbol_id.clone()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ParamToReturnFlow,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 3,
+                        secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 2,
+                        call_position_rank: 5,
+                        lexical_tiebreak: "step.rs".to_string(),
+                    },
+                    support: Some(ImpactSliceCandidateSupportMetadata {
+                        local_dfg_support: true,
+                        ..ImpactSliceCandidateSupportMetadata::default()
+                    }),
+                }),
+            }],
+            &[ImpactSlicePrunedCandidate {
+                seed_symbol_id,
+                path: "later.rs".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(via_symbol_id),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                prune_reason: ImpactSlicePruneReason::WeakerSameFamilySibling,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 2,
+                        secondary_evidence_count: 2,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 0,
+                        call_position_rank: 6,
+                        lexical_tiebreak: "later.rs".to_string(),
+                    },
+                    support: None,
+                }),
+            }],
+        );
+
+        assert_eq!(
+            reasons,
+            vec![ImpactWitnessSliceSelectedVsPrunedReason {
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:4".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                selected_bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                pruned_path: "later.rs".to_string(),
+                prune_reason: ImpactSlicePruneReason::WeakerSameFamilySibling,
+                pruned_bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                selected_better_by: ImpactWitnessSliceRankingBasis::PrimaryEvidenceCount,
+                winning_primary_evidence_kinds: Some(vec![
+                    ImpactSliceEvidenceKind::ParamToReturnFlow,
+                ]),
+                winning_support: Some(ImpactSliceCandidateSupportMetadata {
+                    local_dfg_support: true,
+                    ..ImpactSliceCandidateSupportMetadata::default()
+                }),
+                losing_side_reason: None,
+                summary: "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support".to_string(),
             }]
         );
     }

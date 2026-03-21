@@ -2042,6 +2042,80 @@ fn suppress_before_admit(
     admitted
 }
 
+fn rust_same_family_sibling_lane(candidate: &Tier2Candidate) -> Option<ImpactSliceCandidateLane> {
+    (candidate.scoring.source_kind == ImpactSliceCandidateSourceKind::GraphSecondHop
+        && candidate.path.ends_with(".rs")
+        && candidate.via_path.ends_with(".rs")
+        && matches!(
+            candidate.scoring.lane,
+            ImpactSliceCandidateLane::ReturnContinuation
+                | ImpactSliceCandidateLane::AliasContinuation
+        ))
+    .then_some(candidate.scoring.lane)
+}
+
+fn candidate_has_rust_semantic_support(candidate: &Tier2Candidate) -> bool {
+    candidate.scoring.score_tuple.semantic_support_rank > 0
+}
+
+fn suppress_weaker_same_family_rust_siblings(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    side_candidates: Vec<Tier2Candidate>,
+) -> Vec<Tier2Candidate> {
+    let mut strongest_semantic_ready_by_lane = std::collections::BTreeMap::new();
+    for candidate in &side_candidates {
+        let Some(lane) = rust_same_family_sibling_lane(candidate) else {
+            continue;
+        };
+        if !candidate_has_rust_semantic_support(candidate) {
+            continue;
+        }
+
+        match strongest_semantic_ready_by_lane.entry(lane) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(candidate.clone());
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                if compare_tier2_candidates(candidate, entry.get()).is_lt() {
+                    entry.insert(candidate.clone());
+                }
+            }
+        }
+    }
+
+    if strongest_semantic_ready_by_lane.is_empty() {
+        return side_candidates;
+    }
+
+    let mut admitted = Vec::new();
+    for candidate in side_candidates {
+        let Some(lane) = rust_same_family_sibling_lane(&candidate) else {
+            admitted.push(candidate);
+            continue;
+        };
+        let Some(stronger_candidate) = strongest_semantic_ready_by_lane.get(&lane) else {
+            admitted.push(candidate);
+            continue;
+        };
+        if candidate_has_rust_semantic_support(&candidate)
+            || stronger_candidate == &candidate
+            || !compare_tier2_candidates(stronger_candidate, &candidate).is_lt()
+        {
+            admitted.push(candidate);
+            continue;
+        }
+
+        seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+            seed_symbol_id,
+            &candidate,
+            ImpactSlicePruneReason::WeakerSameFamilySibling,
+        ));
+    }
+
+    admitted
+}
+
 fn plan_bounded_slice(
     cache_update_roots: &[String],
     local_dfg_roots: &[String],
@@ -2208,10 +2282,15 @@ fn plan_bounded_slice(
                 );
             }
 
-            let mut side_candidates = suppress_before_admit(
+            let side_candidates = suppress_before_admit(
                 seed.id.0.as_str(),
                 &mut seed_selection,
                 side_candidates.into_values().collect(),
+            );
+            let mut side_candidates = suppress_weaker_same_family_rust_siblings(
+                seed.id.0.as_str(),
+                &mut seed_selection,
+                side_candidates,
             );
             side_candidates.sort_by(compare_tier2_candidates);
             for candidate in side_candidates
@@ -4125,7 +4204,7 @@ fn caller() -> i32 {
                 .iter()
                 .any(|candidate| {
                     candidate.path == "later.rs"
-                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.prune_reason == ImpactSlicePruneReason::WeakerSameFamilySibling
                         && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
                         && candidate.via_symbol_id.as_deref() == Some("rust:wrapper.rs:fn:wrap:4")
                         && candidate.scoring.as_ref().is_some_and(|scoring| {
@@ -4142,7 +4221,7 @@ fn caller() -> i32 {
                                     ]
                         })
                 }),
-            "expected later neutral helper to be ranked out once param-to-return evidence is available: {:#?}",
+            "expected later neutral helper to be pruned as a weaker same-family sibling once param-to-return evidence is available: {:#?}",
             plan.slice_selection.pruned_candidates
         );
     }
