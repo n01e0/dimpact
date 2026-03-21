@@ -1012,6 +1012,7 @@ struct RubyNarrowFallbackBoundaryEvidence {
     explicit_require_relative_loads: std::collections::BTreeSet<String>,
     literal_dynamic_targets: std::collections::BTreeMap<String, u32>,
     literal_dynamic_target_hints: std::collections::BTreeSet<String>,
+    literal_runtime_constant_target_families: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1029,6 +1030,15 @@ fn ruby_dynamic_target_hints(target: &str) -> std::collections::BTreeSet<String>
         }
     }
     hints
+}
+
+fn ruby_constant_target_family(target: &str) -> Option<String> {
+    let family = target.rsplit("::").next()?.trim();
+    let first = family.chars().next()?;
+    if !first.is_ascii_uppercase() {
+        return None;
+    }
+    Some(family.to_string())
 }
 
 fn symbol_id_node_name(node_id: &str) -> Option<&str> {
@@ -1229,11 +1239,39 @@ fn collect_ruby_narrow_fallback_boundary_evidence(
         .keys()
         .flat_map(|target| ruby_dynamic_target_hints(target))
         .collect();
+    let runtime_constant_target_re = regex::Regex::new(
+        r#"(?:const_get\s*\(\s*(?:"([A-Z][A-Za-z0-9_:]*)"|'([A-Z][A-Za-z0-9_:]*)')|([A-Z][A-Za-z0-9_:]*)\.new\b)"#,
+    )
+    .unwrap();
+    let literal_runtime_constant_target_families = src
+        .lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let line_no = u32::try_from(idx + 1).ok()?;
+            if line_no < boundary_symbol.range.start_line
+                || line_no > boundary_symbol.range.end_line
+            {
+                return None;
+            }
+            Some(line)
+        })
+        .flat_map(|line| {
+            runtime_constant_target_re
+                .captures_iter(line)
+                .filter_map(|caps| {
+                    caps.get(1)
+                        .or_else(|| caps.get(2))
+                        .or_else(|| caps.get(3))
+                        .and_then(|m| ruby_constant_target_family(m.as_str()))
+                })
+        })
+        .collect();
 
     RubyNarrowFallbackBoundaryEvidence {
         explicit_require_relative_loads,
         literal_dynamic_targets,
         literal_dynamic_target_hints,
+        literal_runtime_constant_target_families,
     }
 }
 
@@ -1241,6 +1279,7 @@ fn collect_ruby_narrow_fallback_candidate_evidence(
     candidate_file: &str,
     literal_dynamic_targets: &std::collections::BTreeMap<String, u32>,
     literal_dynamic_target_hints: &std::collections::BTreeSet<String>,
+    literal_runtime_constant_target_families: &std::collections::BTreeSet<String>,
 ) -> Option<RubyNarrowFallbackCandidateEvidence> {
     if literal_dynamic_targets.is_empty() || !candidate_file.ends_with(".rb") {
         return None;
@@ -1260,6 +1299,16 @@ fn collect_ruby_narrow_fallback_candidate_evidence(
         })
         .map(|symbol| symbol.name)
         .collect();
+    let declared_runtime_constant_re =
+        regex::Regex::new(r#"(?m)^\s*(?:class|module)\s+([A-Z][A-Za-z0-9_:]*)"#).unwrap();
+    let declared_runtime_constant_families: std::collections::BTreeSet<String> =
+        declared_runtime_constant_re
+            .captures_iter(&src)
+            .filter_map(|caps| {
+                caps.get(1)
+                    .and_then(|m| ruby_constant_target_family(m.as_str()))
+            })
+            .collect();
 
     let has_exact_target_match = literal_dynamic_targets
         .keys()
@@ -1270,10 +1319,18 @@ fn collect_ruby_narrow_fallback_candidate_evidence(
     let has_related_dynamic_target_hint = literal_dynamic_target_hints
         .iter()
         .any(|hint| !hint.is_empty() && src.contains(hint));
+    let has_related_runtime_constant_target_family = literal_runtime_constant_target_families
+        .is_empty()
+        || declared_runtime_constant_families
+            .iter()
+            .any(|family| literal_runtime_constant_target_families.contains(family));
     if !has_exact_target_match && !has_dynamic_runtime {
         return None;
     }
     if !has_exact_target_match && !has_related_dynamic_target_hint {
+        return None;
+    }
+    if !has_exact_target_match && !has_related_runtime_constant_target_family {
         return None;
     }
 
@@ -1352,6 +1409,7 @@ fn collect_ruby_narrow_fallback_candidates(
                 candidate_file.as_str(),
                 &boundary_evidence.literal_dynamic_targets,
                 &boundary_evidence.literal_dynamic_target_hints,
+                &boundary_evidence.literal_runtime_constant_target_families,
             )?;
             Some(Tier2Candidate {
                 path: candidate_file.clone(),
@@ -4779,6 +4837,7 @@ fn caller() -> i32 {
                 &generic_runtime_file,
                 &boundary_evidence.literal_dynamic_targets,
                 &boundary_evidence.literal_dynamic_target_hints,
+                &boundary_evidence.literal_runtime_constant_target_families,
             )
             .is_none()
         );
@@ -4786,6 +4845,7 @@ fn caller() -> i32 {
             &route_runtime_file,
             &boundary_evidence.literal_dynamic_targets,
             &boundary_evidence.literal_dynamic_target_hints,
+            &boundary_evidence.literal_runtime_constant_target_families,
         )
         .expect("route runtime fallback evidence");
         assert_eq!(route_runtime_evidence.matched_call_line, 10);
@@ -4799,6 +4859,94 @@ fn caller() -> i32 {
             &std::collections::BTreeSet::new(),
             &boundary,
             &router_file,
+        );
+        assert_eq!(
+            candidates
+                .into_iter()
+                .map(|candidate| candidate.path)
+                .collect::<Vec<_>>(),
+            vec![route_runtime_file]
+        );
+    }
+
+    #[test]
+    fn ruby_narrow_fallback_filters_route_like_runtime_without_matching_constant_family() {
+        let dir = TempDir::new().expect("tempdir");
+        let app_dir = dir.path().join("app");
+        let lib_dir = dir.path().join("lib");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
+
+        let main = app_dir.join("main.rb");
+        let service = lib_dir.join("service.rb");
+        let generic_runtime = lib_dir.join("aaa_runtime.rb");
+        let route_runtime = lib_dir.join("route_runtime.rb");
+        fs::write(
+            &main,
+            "require_relative \"../lib/service\"\n\ndef entry(payload)\n  bounce(payload)\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &service,
+            "require_relative \"aaa_runtime\"\nrequire_relative \"route_runtime\"\n\ndef bounce(payload)\n  runtime = Object.const_get(\"RuntimeProxy\").new\n  runtime.public_send(\"route_created\", payload)\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &generic_runtime,
+            "class GenericRuntime\n  def method_missing(name, *args)\n    return args.first if name.to_s.start_with?(\"route_\")\n    super\n  end\n\n  def respond_to_missing?(name, include_private = false)\n    name.to_s.start_with?(\"route_\") || super\n  end\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &route_runtime,
+            "class RuntimeProxy\n  def method_missing(name, *args)\n    return args.first if name.to_s.start_with?(\"route_\")\n    super\n  end\n\n  def respond_to_missing?(name, include_private = false)\n    name.to_s.start_with?(\"route_\") || super\n  end\nend\n",
+        )
+        .unwrap();
+
+        let main_file = main.to_string_lossy().to_string();
+        let service_file = service.to_string_lossy().to_string();
+        let generic_runtime_file = generic_runtime.to_string_lossy().to_string();
+        let route_runtime_file = route_runtime.to_string_lossy().to_string();
+
+        let boundary = dimpact::Symbol {
+            id: SymbolId("ruby:lib/service.rb:fn:bounce:4".to_string()),
+            name: "bounce".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: service_file.clone(),
+            range: dimpact::TextRange {
+                start_line: 4,
+                end_line: 7,
+            },
+            language: "ruby".to_string(),
+        };
+        let boundary_evidence = collect_ruby_narrow_fallback_boundary_evidence(&boundary);
+        assert_eq!(
+            boundary_evidence.literal_runtime_constant_target_families,
+            std::collections::BTreeSet::from(["RuntimeProxy".to_string()])
+        );
+        assert!(
+            collect_ruby_narrow_fallback_candidate_evidence(
+                &generic_runtime_file,
+                &boundary_evidence.literal_dynamic_targets,
+                &boundary_evidence.literal_dynamic_target_hints,
+                &boundary_evidence.literal_runtime_constant_target_families,
+            )
+            .is_none()
+        );
+        assert!(
+            collect_ruby_narrow_fallback_candidate_evidence(
+                &route_runtime_file,
+                &boundary_evidence.literal_dynamic_targets,
+                &boundary_evidence.literal_dynamic_target_hints,
+                &boundary_evidence.literal_runtime_constant_target_families,
+            )
+            .is_some()
+        );
+
+        let candidates = collect_ruby_narrow_fallback_candidates(
+            &main_file,
+            &std::collections::BTreeSet::new(),
+            &boundary,
+            &service_file,
         );
         assert_eq!(
             candidates
@@ -4865,6 +5013,7 @@ fn caller() -> i32 {
             &runtime_file,
             &boundary_evidence.literal_dynamic_targets,
             &boundary_evidence.literal_dynamic_target_hints,
+            &boundary_evidence.literal_runtime_constant_target_families,
         )
         .expect("runtime fallback evidence");
         assert_eq!(candidate_evidence.matched_call_line, 9);
