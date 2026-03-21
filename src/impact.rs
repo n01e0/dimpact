@@ -2676,7 +2676,29 @@ fn foo() { bar(); }
             },
             language: "rust".to_string(),
         };
-        let index = SymbolIndex::build(vec![seed.clone(), mid.clone(), target.clone()]);
+        let helper = Symbol {
+            id: crate::ir::SymbolId::new(
+                "rust",
+                "aaa_helper.rs",
+                &crate::ir::SymbolKind::Function,
+                "noise",
+                4,
+            ),
+            name: "noise".to_string(),
+            kind: crate::ir::SymbolKind::Function,
+            file: "aaa_helper.rs".to_string(),
+            range: crate::ir::TextRange {
+                start_line: 4,
+                end_line: 4,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            mid.clone(),
+            target.clone(),
+            helper.clone(),
+        ]);
         let refs = vec![
             Reference {
                 from: seed.id.clone(),
@@ -2693,6 +2715,15 @@ fn foo() { bar(); }
                 kind: crate::ir::reference::RefKind::Call,
                 file: "wrapper.rs".to_string(),
                 line: 20,
+                certainty: crate::ir::reference::EdgeCertainty::Confirmed,
+                provenance: crate::ir::reference::EdgeProvenance::CallGraph,
+            },
+            Reference {
+                from: mid.id.clone(),
+                to: helper.id.clone(),
+                kind: crate::ir::reference::RefKind::Call,
+                file: "wrapper.rs".to_string(),
+                line: 21,
                 certainty: crate::ir::reference::EdgeCertainty::Confirmed,
                 provenance: crate::ir::reference::EdgeProvenance::CallGraph,
             },
@@ -2837,6 +2868,20 @@ fn foo() { bar(); }
                 summary: "selected over aaa_helper.rs because return_continuation outranked alias_continuation; winning primary evidence: return_flow".to_string(),
             }]
         );
+
+        let helper_witness = out
+            .impacted_witnesses
+            .get(&helper.id.0)
+            .expect("witness for helper");
+        let helper_paths: Vec<&str> = helper_witness
+            .slice_context
+            .as_ref()
+            .expect("helper witness slice context")
+            .selected_files_on_path
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        assert_eq!(helper_paths, vec!["main.rs", "wrapper.rs"]);
     }
 
     #[test]
