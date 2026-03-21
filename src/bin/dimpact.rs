@@ -9,6 +9,8 @@ use dimpact::dfg_to_dot;
 use dimpact::engine::{AutoPolicy, EngineKind, make_engine_with_auto_policy};
 use dimpact::ir::SymbolId;
 use dimpact::ir::reference::{EdgeCertainty, EdgeProvenance, RefKind, Reference, SymbolIndex};
+use dimpact::languages::path::normalize_path_like;
+use dimpact::languages::{LanguageKind, analyzer_for_path};
 use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{DiffParseError, parse_unified_diff};
 use dimpact::{
@@ -996,6 +998,18 @@ struct Tier2SemanticEvidence {
     param_to_return_flow: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct RubyNarrowFallbackBoundaryEvidence {
+    explicit_require_relative_loads: std::collections::BTreeSet<String>,
+    literal_dynamic_targets: std::collections::BTreeMap<String, u32>,
+}
+
+#[derive(Debug, Clone)]
+struct RubyNarrowFallbackCandidateEvidence {
+    matched_call_line: u32,
+    edge_certainty: dimpact::ImpactSliceSupportEdgeCertainty,
+}
+
 fn symbol_id_node_name(node_id: &str) -> Option<&str> {
     let mut parts = node_id.split(':');
     let _file = parts.next()?;
@@ -1114,6 +1128,193 @@ fn collect_rust_tier2_semantic_evidence(
     }
 }
 
+fn collect_ruby_narrow_fallback_boundary_evidence(
+    boundary_symbol: &dimpact::Symbol,
+) -> RubyNarrowFallbackBoundaryEvidence {
+    if boundary_symbol.language != "ruby" || !boundary_symbol.file.ends_with(".rb") {
+        return RubyNarrowFallbackBoundaryEvidence::default();
+    }
+    let Ok(src) = fs::read_to_string(&boundary_symbol.file) else {
+        return RubyNarrowFallbackBoundaryEvidence::default();
+    };
+
+    let require_relative_re =
+        regex::Regex::new(r#"(?m)^\s*require_relative\s+["']([^"']+)["']"#).unwrap();
+    let explicit_require_relative_loads = require_relative_re
+        .captures_iter(&src)
+        .filter_map(|caps| caps.get(1).map(|m| m.as_str()))
+        .map(|raw| {
+            let base_dir = std::path::Path::new(boundary_symbol.file.as_str())
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let resolved = normalize_path_like(&base_dir.join(raw));
+            format!("{resolved}.rb")
+        })
+        .filter(|path| fs::metadata(path).map(|m| m.is_file()).unwrap_or(false))
+        .collect();
+
+    let dynamic_target_re = regex::Regex::new(
+        r#"(?:send|public_send)\s*\(\s*(?::([A-Za-z_][A-Za-z0-9_?!]*)|"([A-Za-z_][A-Za-z0-9_?!]*)"|'([A-Za-z_][A-Za-z0-9_?!]*)')"#,
+    )
+    .unwrap();
+    let literal_dynamic_targets = src
+        .lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let line_no = u32::try_from(idx + 1).ok()?;
+            if line_no < boundary_symbol.range.start_line
+                || line_no > boundary_symbol.range.end_line
+            {
+                return None;
+            }
+            Some((line_no, line))
+        })
+        .flat_map(|(line_no, line)| {
+            dynamic_target_re
+                .captures_iter(line)
+                .filter_map(move |caps| {
+                    caps.get(1)
+                        .or_else(|| caps.get(2))
+                        .or_else(|| caps.get(3))
+                        .map(|m| (m.as_str().to_string(), line_no))
+                })
+        })
+        .fold(
+            std::collections::BTreeMap::new(),
+            |mut acc, (target, line_no)| {
+                acc.entry(target)
+                    .and_modify(|existing: &mut u32| *existing = (*existing).max(line_no))
+                    .or_insert(line_no);
+                acc
+            },
+        );
+
+    RubyNarrowFallbackBoundaryEvidence {
+        explicit_require_relative_loads,
+        literal_dynamic_targets,
+    }
+}
+
+fn collect_ruby_narrow_fallback_candidate_evidence(
+    candidate_file: &str,
+    literal_dynamic_targets: &std::collections::BTreeMap<String, u32>,
+) -> Option<RubyNarrowFallbackCandidateEvidence> {
+    if literal_dynamic_targets.is_empty() || !candidate_file.ends_with(".rb") {
+        return None;
+    }
+    let Ok(src) = fs::read_to_string(candidate_file) else {
+        return None;
+    };
+    let analyzer = analyzer_for_path(candidate_file, LanguageKind::Ruby)?;
+    let declared_method_names: std::collections::BTreeSet<String> = analyzer
+        .symbols_in_file(candidate_file, &src)
+        .into_iter()
+        .filter(|symbol| {
+            matches!(
+                symbol.kind,
+                dimpact::SymbolKind::Method | dimpact::SymbolKind::Function
+            )
+        })
+        .map(|symbol| symbol.name)
+        .collect();
+
+    let has_exact_target_match = literal_dynamic_targets
+        .keys()
+        .any(|target| declared_method_names.contains(target));
+    let has_dynamic_runtime = src.contains("def method_missing")
+        || src.contains("def respond_to_missing?")
+        || src.contains("define_method");
+    if !has_exact_target_match && !has_dynamic_runtime {
+        return None;
+    }
+
+    let matched_call_line = literal_dynamic_targets
+        .values()
+        .copied()
+        .max()
+        .unwrap_or_default();
+    let edge_certainty = if has_exact_target_match {
+        dimpact::ImpactSliceSupportEdgeCertainty::Inferred
+    } else {
+        dimpact::ImpactSliceSupportEdgeCertainty::DynamicFallback
+    };
+    Some(RubyNarrowFallbackCandidateEvidence {
+        matched_call_line,
+        edge_certainty,
+    })
+}
+
+fn ruby_narrow_fallback_scoring_summary(
+    completion_file: &str,
+    matched_call_line: u32,
+    edge_certainty: dimpact::ImpactSliceSupportEdgeCertainty,
+) -> ImpactSliceCandidateScoringSummary {
+    let primary_evidence_kinds = vec![
+        ImpactSliceEvidenceKind::CompanionFileMatch,
+        ImpactSliceEvidenceKind::DynamicDispatchLiteralTarget,
+        ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad,
+    ];
+    ImpactSliceCandidateScoringSummary {
+        source_kind: ImpactSliceCandidateSourceKind::NarrowFallback,
+        lane: ImpactSliceCandidateLane::ModuleCompanionFallback,
+        score_tuple: ImpactSliceScoreTuple {
+            source_rank: 1,
+            lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::ModuleCompanionFallback),
+            primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap_or(u8::MAX),
+            secondary_evidence_count: 0,
+            call_position_rank: matched_call_line,
+            lexical_tiebreak: completion_file.to_string(),
+        },
+        primary_evidence_kinds,
+        secondary_evidence_kinds: Vec::new(),
+        support: Some(ImpactSliceCandidateSupportMetadata {
+            edge_certainty: Some(edge_certainty),
+            ..ImpactSliceCandidateSupportMetadata::default()
+        }),
+    }
+}
+
+fn collect_ruby_narrow_fallback_candidates(
+    seed_file: &str,
+    direct_boundary_paths: &std::collections::BTreeSet<String>,
+    boundary_symbol: &dimpact::Symbol,
+    boundary_file: &str,
+) -> Vec<Tier2Candidate> {
+    let boundary_evidence = collect_ruby_narrow_fallback_boundary_evidence(boundary_symbol);
+    if boundary_evidence.explicit_require_relative_loads.is_empty()
+        || boundary_evidence.literal_dynamic_targets.is_empty()
+    {
+        return Vec::new();
+    }
+
+    boundary_evidence
+        .explicit_require_relative_loads
+        .into_iter()
+        .filter(|candidate_file| {
+            candidate_file != seed_file
+                && candidate_file != boundary_file
+                && !direct_boundary_paths.contains(candidate_file)
+        })
+        .filter_map(|candidate_file| {
+            let candidate_evidence = collect_ruby_narrow_fallback_candidate_evidence(
+                candidate_file.as_str(),
+                &boundary_evidence.literal_dynamic_targets,
+            )?;
+            Some(Tier2Candidate {
+                path: candidate_file.clone(),
+                via_symbol_id: boundary_symbol.id.0.clone(),
+                via_path: boundary_file.to_string(),
+                bridge_kind: None,
+                scoring: ruby_narrow_fallback_scoring_summary(
+                    candidate_file.as_str(),
+                    candidate_evidence.matched_call_line,
+                    candidate_evidence.edge_certainty,
+                ),
+            })
+        })
+        .collect()
+}
+
 fn build_local_dfg_for_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> DataFlowGraph {
     let mut combined = DataFlowGraph {
         nodes: Vec::new(),
@@ -1142,6 +1343,7 @@ enum SliceSelectionTier {
     Root,
     DirectBoundary,
     BridgeCompletion,
+    ModuleCompanionFallback,
 }
 
 const PER_BOUNDARY_SIDE_TIER2_FILES_MAX: usize = 1;
@@ -1152,6 +1354,7 @@ fn slice_selection_tier_value(tier: SliceSelectionTier) -> u8 {
         SliceSelectionTier::Root => 0,
         SliceSelectionTier::DirectBoundary => 1,
         SliceSelectionTier::BridgeCompletion => 2,
+        SliceSelectionTier::ModuleCompanionFallback => 3,
     }
 }
 
@@ -1588,14 +1791,34 @@ fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp:
         .then_with(|| a.via_symbol_id.cmp(&b.via_symbol_id))
 }
 
+fn candidate_reason_kind(candidate: &Tier2Candidate) -> ImpactSliceReasonKind {
+    match candidate.scoring.source_kind {
+        ImpactSliceCandidateSourceKind::GraphSecondHop => {
+            ImpactSliceReasonKind::BridgeCompletionFile
+        }
+        ImpactSliceCandidateSourceKind::NarrowFallback => {
+            ImpactSliceReasonKind::ModuleCompanionFile
+        }
+    }
+}
+
+fn candidate_tier(candidate: &Tier2Candidate) -> SliceSelectionTier {
+    match candidate.scoring.source_kind {
+        ImpactSliceCandidateSourceKind::GraphSecondHop => SliceSelectionTier::BridgeCompletion,
+        ImpactSliceCandidateSourceKind::NarrowFallback => {
+            SliceSelectionTier::ModuleCompanionFallback
+        }
+    }
+}
+
 fn make_tier2_reason(
     seed_symbol_id: &str,
     candidate: &Tier2Candidate,
 ) -> ImpactSliceReasonMetadata {
     ImpactSliceReasonMetadata {
         seed_symbol_id: seed_symbol_id.to_string(),
-        tier: slice_selection_tier_value(SliceSelectionTier::BridgeCompletion),
-        kind: ImpactSliceReasonKind::BridgeCompletionFile,
+        tier: slice_selection_tier_value(candidate_tier(candidate)),
+        kind: candidate_reason_kind(candidate),
         via_symbol_id: Some(candidate.via_symbol_id.clone()),
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
@@ -1611,8 +1834,8 @@ fn make_tier2_pruned_candidate(
     dimpact::ImpactSlicePrunedCandidate {
         seed_symbol_id: seed_symbol_id.to_string(),
         path: candidate.path.clone(),
-        tier: slice_selection_tier_value(SliceSelectionTier::BridgeCompletion),
-        kind: ImpactSliceReasonKind::BridgeCompletionFile,
+        tier: slice_selection_tier_value(candidate_tier(candidate)),
+        kind: candidate_reason_kind(candidate),
         via_symbol_id: Some(candidate.via_symbol_id.clone()),
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
@@ -1768,6 +1991,21 @@ fn plan_bounded_slice(
                 };
                 side_candidates
                     .entry(completion_file.to_string())
+                    .and_modify(|existing: &mut Tier2Candidate| {
+                        if compare_tier2_candidates(&candidate, existing).is_lt() {
+                            *existing = candidate.clone();
+                        }
+                    })
+                    .or_insert(candidate);
+            }
+            for candidate in collect_ruby_narrow_fallback_candidates(
+                root_file,
+                &direct_boundary_paths,
+                boundary_symbol,
+                boundary_file,
+            ) {
+                side_candidates
+                    .entry(candidate.path.clone())
                     .and_modify(|existing: &mut Tier2Candidate| {
                         if compare_tier2_candidates(&candidate, existing).is_lt() {
                             *existing = candidate.clone();
@@ -3064,6 +3302,35 @@ fn caller() -> i32 {
         }
     }
 
+    fn test_narrow_fallback_scoring(
+        call_position_rank: u32,
+        lexical_tiebreak: &str,
+        edge_certainty: dimpact::ImpactSliceSupportEdgeCertainty,
+    ) -> ImpactSliceCandidateScoringSummary {
+        ImpactSliceCandidateScoringSummary {
+            source_kind: ImpactSliceCandidateSourceKind::NarrowFallback,
+            lane: ImpactSliceCandidateLane::ModuleCompanionFallback,
+            score_tuple: ImpactSliceScoreTuple {
+                source_rank: 1,
+                lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::ModuleCompanionFallback),
+                primary_evidence_count: 3,
+                secondary_evidence_count: 0,
+                call_position_rank,
+                lexical_tiebreak: lexical_tiebreak.to_string(),
+            },
+            primary_evidence_kinds: vec![
+                ImpactSliceEvidenceKind::CompanionFileMatch,
+                ImpactSliceEvidenceKind::DynamicDispatchLiteralTarget,
+                ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad,
+            ],
+            secondary_evidence_kinds: vec![],
+            support: Some(ImpactSliceCandidateSupportMetadata {
+                edge_certainty: Some(edge_certainty),
+                ..ImpactSliceCandidateSupportMetadata::default()
+            }),
+        }
+    }
+
     #[test]
     fn collect_rust_tier2_semantic_evidence_detects_param_to_return_flow() {
         let dir = TempDir::new().expect("tempdir");
@@ -3687,6 +3954,112 @@ fn caller() -> i32 {
             "expected later Ruby helper noise to stay a single ranked-out require_relative fallback: {:#?}",
             plan.slice_selection.pruned_candidates
         );
+    }
+
+    #[test]
+    fn bounded_slice_plan_selects_ruby_method_missing_companion_as_narrow_fallback() {
+        let dir = TempDir::new().expect("tempdir");
+        let app_dir = dir.path().join("app");
+        let lib_dir = dir.path().join("lib");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
+
+        let main = app_dir.join("main.rb");
+        let router = lib_dir.join("router.rb");
+        let runtime = lib_dir.join("runtime.rb");
+        fs::write(
+            &main,
+            "require_relative \"../lib/router\"\n\nclass Main\n  def run\n    Router.new.run_created(\"alpha\")\n  end\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &router,
+            "require_relative \"runtime\"\n\nclass Router\n  def initialize\n    @runtime = Object.const_get(\"RuntimeProxy\").new\n  end\n\n  def run_created(payload)\n    @runtime.public_send(\"route_created\", payload)\n  end\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &runtime,
+            "class RuntimeProxy\n  def method_missing(name, *args)\n    return args.first if name.to_s.start_with?(\"route_\")\n    super\n  end\n\n  def respond_to_missing?(name, include_private = false)\n    name.to_s.start_with?(\"route_\") || super\n  end\nend\n",
+        )
+        .unwrap();
+
+        let main_file = main.to_string_lossy().to_string();
+        let router_file = router.to_string_lossy().to_string();
+        let runtime_file = runtime.to_string_lossy().to_string();
+
+        let seed = test_symbol("ruby:app/main.rb:method:run:4", "run", &main_file, 4);
+        let boundary = dimpact::Symbol {
+            id: SymbolId("ruby:lib/router.rb:method:run_created:8".to_string()),
+            name: "run_created".to_string(),
+            kind: dimpact::SymbolKind::Method,
+            file: router_file.clone(),
+            range: dimpact::TextRange {
+                start_line: 8,
+                end_line: 10,
+            },
+            language: "ruby".to_string(),
+        };
+        let boundary_evidence = collect_ruby_narrow_fallback_boundary_evidence(&boundary);
+        assert_eq!(
+            boundary_evidence.explicit_require_relative_loads,
+            std::collections::BTreeSet::from([runtime_file.clone()])
+        );
+        assert_eq!(
+            boundary_evidence.literal_dynamic_targets,
+            std::collections::BTreeMap::from([("route_created".to_string(), 9)])
+        );
+        let candidate_evidence = collect_ruby_narrow_fallback_candidate_evidence(
+            &runtime_file,
+            &boundary_evidence.literal_dynamic_targets,
+        )
+        .expect("runtime fallback evidence");
+        assert_eq!(candidate_evidence.matched_call_line, 9);
+        assert_eq!(
+            candidate_evidence.edge_certainty,
+            dimpact::ImpactSliceSupportEdgeCertainty::DynamicFallback
+        );
+
+        let index = SymbolIndex::build(vec![seed.clone(), boundary.clone()]);
+        let refs = vec![call_ref(
+            seed.id.0.as_str(),
+            boundary.id.0.as_str(),
+            &main_file,
+            5,
+        )];
+
+        let plan = plan_bounded_slice(
+            std::slice::from_ref(&main_file),
+            std::slice::from_ref(&main_file),
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![main_file.clone(), router_file.clone(), runtime_file.clone()]
+        );
+
+        let runtime_file_meta = slice_selection_file(&plan.slice_selection, &runtime_file);
+        assert_eq!(
+            runtime_file_meta.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 3,
+                kind: ImpactSliceReasonKind::ModuleCompanionFile,
+                via_symbol_id: Some(boundary.id.0.clone()),
+                via_path: Some(router_file.clone()),
+                bridge_kind: None,
+                scoring: Some(test_narrow_fallback_scoring(
+                    9,
+                    &runtime_file,
+                    dimpact::ImpactSliceSupportEdgeCertainty::DynamicFallback,
+                )),
+            }]
+        );
+        assert!(plan.slice_selection.pruned_candidates.is_empty());
     }
 
     #[test]
