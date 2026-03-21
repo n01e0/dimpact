@@ -1312,7 +1312,10 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
             "prune_reason": "ranked_out",
             "pruned_bridge_kind": "boundary_alias_continuation",
             "selected_better_by": "lane",
-            "summary": "selected over aaa_helper.rs because return_continuation outranked alias_continuation",
+            "winning_primary_evidence_kinds": [
+                "return_flow"
+            ],
+            "summary": "selected over aaa_helper.rs because return_continuation outranked alias_continuation; winning primary evidence: return_flow",
         }])
     );
 
@@ -1566,7 +1569,13 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
             "prune_reason": "ranked_out",
             "pruned_bridge_kind": "wrapper_return",
             "selected_better_by": "primary_evidence_count",
-            "summary": "selected over later.rs because it had more primary evidence (3 > 2)",
+            "winning_primary_evidence_kinds": [
+                "param_to_return_flow"
+            ],
+            "winning_support": {
+                "local_dfg_support": true
+            },
+            "summary": "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support",
         }])
     );
 }
@@ -1701,7 +1710,11 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
             "prune_reason": "ranked_out",
             "pruned_bridge_kind": "require_relative_chain",
             "selected_better_by": "lane",
-            "summary": "selected over lib/zzz_helper.rb because return_continuation outranked require_relative_continuation",
+            "winning_primary_evidence_kinds": [
+                "assigned_result",
+                "return_flow"
+            ],
+            "summary": "selected over lib/zzz_helper.rb because return_continuation outranked require_relative_continuation; winning primary evidence: assigned_result + return_flow",
         }])
     );
     let helper_witness =
