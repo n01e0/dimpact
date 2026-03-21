@@ -127,6 +127,22 @@ CLI Overview
 - With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol, and witness data stays nested under each grouped output.
 - DOT/HTML output stays compatible; the new summary fields are for JSON/YAML consumption.
 
+### Evidence-driven selection: how to think about it
+- The PDG / propagation planner is intentionally **not** trying to include every reachable helper file.
+  - the goal is to keep a small bounded explanation slice and choose the strongest local continuation for each boundary side
+- In practice, bridge / fallback selection is evidence-driven in four layers:
+  1. `source_kind`: prefer graph-backed continuations first; use narrow fallback when the bounded runtime companion evidence is strong enough
+  2. `lane`: prefer semantically stronger continuations such as `return_continuation` / `alias_continuation` over weaker helper-style continuations when both are available
+  3. `primary_evidence_kinds` / `secondary_evidence_kinds`: compare the concrete observed facts, such as `param_to_return_flow`, `return_flow`, `explicit_require_relative_load`, `companion_file_match`, or `dynamic_dispatch_literal_target`
+  4. `support`: use flags like `local_dfg_support`, `symbolic_propagation_support`, and `edge_certainty` to explain why a selected candidate was trustworthy
+- The important operational idea is: **better evidence should improve precision without widening scope**.
+  - a stronger winner becomes the selected explanation file
+  - weaker alternatives stay visible in `pruned_candidates[*]` or `slice_context.selected_vs_pruned_reasons` instead of silently expanding the slice
+- A good reading order for surprising Rust/Ruby PDG output is:
+  1. inspect `summary.slice_selection.files[*].reasons[*].scoring`
+  2. compare against `summary.slice_selection.pruned_candidates[*].scoring`
+  3. finish with `impacted_witnesses[*].slice_context.selected_vs_pruned_reasons` for the shortest human-facing explanation
+
 - Impact Options (subcommand `impact`):
   - `--direction callers|callees|both` : traversal direction (default: callers)
   - `--max-depth N`             : max traversal depth (default: 100)
