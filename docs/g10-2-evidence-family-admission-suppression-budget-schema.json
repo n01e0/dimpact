@@ -1,0 +1,360 @@
+{
+  "generated_by": "manual G10-2 evidence family schema note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "define coarse-grained evidence families used for admission, suppression, and budget decisions in G10 evidence-budgeted bounded planning",
+  "extends": [
+    "docs/g9-2-evidence-normalization-rules.md",
+    "docs/g9-2-evidence-normalization-rules.json",
+    "docs/g10-1-g9-admission-pruning-stop-inventory-and-evidence-budget-memo.md"
+  ],
+  "category_model": [
+    "primary",
+    "support",
+    "fallback",
+    "negative"
+  ],
+  "candidate_families": {
+    "return_continuation": {
+      "role": "graph-side or promoted fallback candidate that closes return-oriented continuity",
+      "local_budget": 1,
+      "priority": 0
+    },
+    "alias_continuation": {
+      "role": "graph-side candidate that closes alias/value/result continuity",
+      "local_budget": 1,
+      "priority": 1
+    },
+    "weak_require_relative_continuation": {
+      "role": "weak Ruby continuation supported mainly by require_relative provenance rather than strong semantic continuity",
+      "local_budget": 1,
+      "priority": 2
+    },
+    "module_companion_fallback": {
+      "role": "bounded Ruby fallback candidate admitted by companion/runtime provenance",
+      "local_budget": 1,
+      "priority": 3
+    }
+  },
+  "evidence_families": {
+    "primary": {
+      "return_semantic_continuity": {
+        "role": "direct semantic continuity for return-oriented completion",
+        "raw_sources": [
+          "param_to_return_flow",
+          "observed_return_passthrough",
+          "observed_result_assignment_continuity_when_return_side"
+        ]
+      },
+      "alias_semantic_continuity": {
+        "role": "direct semantic continuity for alias/value/result completion",
+        "raw_sources": [
+          "observed_local_alias_flow",
+          "observed_imported_result_alias_continuity",
+          "semantic_portion_of_alias_chain"
+        ]
+      },
+      "fallback_promoted_semantic_continuity": {
+        "role": "semantic continuity discovered on a fallback candidate after bounded admission",
+        "raw_sources": [
+          "narrow_fallback_candidate_with_method_family_match",
+          "narrow_fallback_candidate_with_local_continuity"
+        ]
+      }
+    },
+    "support": {
+      "semantic_provenance": {
+        "role": "local DFG, propagation, or stronger semantic aggregation support",
+        "raw_sources": [
+          "local_dfg_support",
+          "symbolic_propagation_support",
+          "semantic_support_rank"
+        ]
+      },
+      "call_position_strength": {
+        "role": "late or side-max callsite positional strength",
+        "raw_sources": [
+          "callsite_position_hint",
+          "side_max_call_line"
+        ]
+      },
+      "positive_lexical_hint": {
+        "role": "weak positive lexical or structural hint that must not justify admission alone",
+        "raw_sources": [
+          "positive_portion_of_name_path_hint",
+          "lexical_portion_of_return_flow",
+          "lexical_portion_of_assigned_result",
+          "lexical_portion_of_alias_chain"
+        ]
+      },
+      "certainty_support": {
+        "role": "certainty or provenance strength",
+        "raw_sources": [
+          "edge_certainty",
+          "future_call_graph_certainty_split"
+        ]
+      }
+    },
+    "fallback": {
+      "require_relative_provenance": {
+        "role": "bounded require_relative load or structural provenance",
+        "raw_sources": [
+          "require_relative_edge",
+          "explicit_require_relative_load"
+        ]
+      },
+      "dynamic_target_provenance": {
+        "role": "literal dynamic dispatch target family used to narrow fallback materialization",
+        "raw_sources": [
+          "dynamic_dispatch_literal_target"
+        ]
+      },
+      "companion_path_provenance": {
+        "role": "companion/module path provenance used for bounded fallback admission",
+        "raw_sources": [
+          "companion_file_match",
+          "module_companion_fallback_portion"
+        ]
+      }
+    },
+    "negative": {
+      "helper_noise_suppressor": {
+        "role": "suppresses helper/debug/tmp/noisy-return candidates before or during compare",
+        "raw_sources": [
+          "noisy_return_hint",
+          "helper_noise_debug_tmp_hint"
+        ]
+      },
+      "fallback_only_suppressor": {
+        "role": "marks candidates that only have fallback provenance and lack meaningful semantic continuity",
+        "raw_sources": [
+          "fallback_without_primary_family",
+          "weak_require_relative_only_state"
+        ]
+      },
+      "weaker_certainty_suppressor": {
+        "role": "marks weaker certainty against a stronger competitor",
+        "raw_sources": [
+          "edge_certainty_dynamic_fallback_loser",
+          "edge_certainty_inferred_loser"
+        ]
+      },
+      "late_call_only_suppressor": {
+        "role": "marks candidates whose main strength is positional lateness without stronger continuity",
+        "raw_sources": [
+          "callsite_position_only_candidate"
+        ]
+      }
+    }
+  },
+  "profile_shape": {
+    "name": "CandidateAdmissionProfile",
+    "fields": [
+      "source_kind",
+      "candidate_family",
+      "primary_families",
+      "support_families",
+      "fallback_families",
+      "negative_families",
+      "admission_class",
+      "representative_key"
+    ],
+    "admission_class": [
+      "semantic_ready",
+      "fallback_ready",
+      "structural_only",
+      "suppressed_before_admit"
+    ],
+    "rules": [
+      "family arrays are deduplicated and emitted in lexical order",
+      "support families alone do not justify admission",
+      "fallback families justify bounded fallback admission but do not replace semantic-ready primary by default",
+      "negative families stay explicit and are not inferred only by absence"
+    ]
+  },
+  "raw_to_family_mapping": {
+    "param_to_return_flow": {
+      "primary": [
+        "return_semantic_continuity"
+      ],
+      "support": [
+        "semantic_provenance"
+      ]
+    },
+    "return_flow": {
+      "primary_if_semantic": [
+        "return_semantic_continuity"
+      ],
+      "support_if_lexical": [
+        "positive_lexical_hint"
+      ]
+    },
+    "assigned_result": {
+      "primary_if_semantic": [
+        "return_semantic_continuity",
+        "alias_semantic_continuity"
+      ],
+      "support_if_lexical": [
+        "positive_lexical_hint"
+      ]
+    },
+    "alias_chain": {
+      "primary_if_semantic": [
+        "alias_semantic_continuity"
+      ],
+      "support_if_lexical": [
+        "positive_lexical_hint"
+      ]
+    },
+    "callsite_position_hint": {
+      "support": [
+        "call_position_strength"
+      ]
+    },
+    "name_path_hint": {
+      "support_positive": [
+        "positive_lexical_hint"
+      ],
+      "negative_suppressing": [
+        "helper_noise_suppressor"
+      ]
+    },
+    "require_relative_edge": {
+      "fallback": [
+        "require_relative_provenance"
+      ]
+    },
+    "explicit_require_relative_load": {
+      "fallback": [
+        "require_relative_provenance"
+      ]
+    },
+    "dynamic_dispatch_literal_target": {
+      "fallback": [
+        "dynamic_target_provenance"
+      ]
+    },
+    "companion_file_match": {
+      "fallback": [
+        "companion_path_provenance"
+      ]
+    },
+    "module_companion": {
+      "fallback": [
+        "companion_path_provenance"
+      ],
+      "primary_if_promoted": [
+        "fallback_promoted_semantic_continuity"
+      ]
+    },
+    "noisy_return_hint": {
+      "negative": [
+        "helper_noise_suppressor"
+      ]
+    },
+    "edge_certainty": {
+      "support": [
+        "certainty_support"
+      ],
+      "negative_when_loser": [
+        "weaker_certainty_suppressor"
+      ]
+    }
+  },
+  "admission_rules": {
+    "semantic_ready": [
+      "requires at least one primary family",
+      "must not trip a hard suppress gate",
+      "preferred admission class for graph-first candidates"
+    ],
+    "fallback_ready": [
+      "requires fallback family contract to be satisfied",
+      "may have no primary families",
+      "used for weak require_relative and narrow fallback candidates before semantic promotion"
+    ],
+    "structural_only": [
+      "has support and/or partial fallback provenance but no meaningful primary family",
+      "should usually not enter the final compare pool unchanged"
+    ],
+    "suppressed_before_admit": [
+      "used when negative families dominate or a stronger representative already exists",
+      "must remain explainable in slice summary or witness surfaces"
+    ]
+  },
+  "suppression_layers": {
+    "hard_suppress_gate": [
+      "helper_noise_suppressor with thin primary/fallback coverage",
+      "same-path stronger representative already selected",
+      "same-family weaker sibling that does not update representative coverage",
+      "fallback provenance contract not satisfied"
+    ],
+    "soft_demotion": [
+      "weaker_certainty_suppressor",
+      "fallback_only_suppressor",
+      "late_call_only_suppressor"
+    ],
+    "representative_shadowing": [
+      "same representative key but weaker profile",
+      "same candidate family and no new family coverage"
+    ]
+  },
+  "budget_rules": {
+    "apply_in_order": [
+      "same_path_duplicate_suppression",
+      "same_candidate_family_representative_selection",
+      "family_local_budget",
+      "cross_family_per_seed_budget"
+    ],
+    "same_path_duplicate_suppression": {
+      "rule": "keep one representative per path and merge reasons without spending extra budget unless family coverage improves"
+    },
+    "family_local_budget": {
+      "return_continuation": 1,
+      "alias_continuation": 1,
+      "weak_require_relative_continuation": 1,
+      "module_companion_fallback": 1
+    },
+    "cross_family_per_seed_budget": {
+      "initial_value": 2,
+      "rule": "apply after family representatives are chosen, not before"
+    },
+    "family_budget_exhausted_when": [
+      "a strongest representative for the candidate family already exists",
+      "the new candidate does not update representative quality or family coverage",
+      "keeping the new candidate would only duplicate same-family variation"
+    ]
+  },
+  "stop_rules": {
+    "family_representatives_satisfied": "stop when the relevant family representatives are already present and only weaker siblings or duplicates remain",
+    "only_suppressing_leftovers": "stop when remaining candidates are composed mainly of helper_noise, fallback_only, or late_call_only suppressors",
+    "fallback_provenance_exhausted": "stop Ruby fallback widening when require_relative, dynamic_target, or companion provenance contracts can no longer be satisfied"
+  },
+  "compact_explanation_hooks": {
+    "selected_vs_pruned": [
+      "winning_primary_family",
+      "winning_support_family",
+      "winning_fallback_family",
+      "losing_negative_family"
+    ],
+    "dropped_before_admit": [
+      "suppressed_before_admit=helper_noise_suppressor",
+      "suppressed_before_admit=fallback_only_suppressor",
+      "suppressed_before_admit=weaker_same_path_duplicate",
+      "family_budget_exhausted=<candidate_family>"
+    ]
+  },
+  "follow_up_tasks": {
+    "g10_3": [
+      "materialize CandidateAdmissionProfile in planner runtime",
+      "apply hard suppress gate before final compare pool admission"
+    ],
+    "g10_4": [
+      "use return_continuation and alias_continuation family representatives to suppress weaker Rust siblings"
+    ],
+    "g10_5": [
+      "apply require_relative, dynamic_target, and companion provenance contracts to Ruby fallback admission"
+    ],
+    "g10_6": [
+      "render dropped-before-admit and family-budget reasons using family labels"
+    ]
+  }
+}
