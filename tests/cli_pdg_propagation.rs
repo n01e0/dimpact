@@ -1512,7 +1512,7 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
             .as_array()
             .is_some_and(|candidates| candidates.iter().any(|candidate| {
                 candidate["path"] == "aaa_helper.rs"
-                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["prune_reason"] == "suppressed_before_admit"
                     && candidate["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
                     && candidate["bridge_kind"] == "boundary_alias_continuation"
                     && candidate["scoring"]
@@ -1535,7 +1535,7 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
                             }
                         })
             })),
-        "expected helper candidate to be kept only as ranked-out metadata: {prop:#}"
+        "expected helper candidate to be kept only as suppressed-before-admit metadata: {prop:#}"
     );
     let witness = &prop["impacted_witnesses"]["rust:leaf.rs:fn:source:1"];
     let leaf_context = witness_slice_file(witness, "leaf.rs");
@@ -1546,7 +1546,7 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
             "via_path": "wrapper.rs",
             "selected_bridge_kind": "wrapper_return",
             "pruned_path": "aaa_helper.rs",
-            "prune_reason": "ranked_out",
+            "prune_reason": "suppressed_before_admit",
             "pruned_bridge_kind": "boundary_alias_continuation",
             "selected_better_by": "lane",
             "winning_primary_evidence_kinds": [
@@ -1792,7 +1792,7 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
             .as_array()
             .is_some_and(|candidates| candidates.iter().any(|candidate| {
                 candidate["path"] == "zzz_helper.rs"
-                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["prune_reason"] == "suppressed_before_admit"
                     && candidate["via_symbol_id"] == "rust:adapter.rs:fn:wrap:4"
                     && candidate["bridge_kind"] == "boundary_alias_continuation"
                     && candidate["scoring"]
@@ -1816,7 +1816,7 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
                             }
                         })
             })),
-        "expected later helper noise to be preserved only as ranked-out metadata: {prop:#}"
+        "expected later helper noise to be preserved only as suppressed-before-admit metadata: {prop:#}"
     );
 
     let witness = &prop["impacted_witnesses"]["rust:value.rs:fn:make:1"];
@@ -1828,7 +1828,7 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
             "via_path": "adapter.rs",
             "selected_bridge_kind": "boundary_alias_continuation",
             "pruned_path": "zzz_helper.rs",
-            "prune_reason": "ranked_out",
+            "prune_reason": "suppressed_before_admit",
             "pruned_bridge_kind": "boundary_alias_continuation",
             "selected_better_by": "primary_evidence_count",
             "winning_primary_evidence_kinds": [
@@ -2219,7 +2219,7 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
             .as_array()
             .is_some_and(|candidates| candidates.iter().any(|candidate| {
                 candidate["path"] == "lib/zzz_helper.rb"
-                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["prune_reason"] == "suppressed_before_admit"
                     && candidate["via_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
                     && candidate["bridge_kind"] == "require_relative_chain"
                     && candidate["scoring"]
@@ -2242,7 +2242,7 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
                             }
                         })
             })),
-        "expected later Ruby helper noise to be preserved only as require_relative ranked-out metadata: {prop:#}"
+        "expected later Ruby helper noise to be preserved only as require_relative suppressed metadata: {prop:#}"
     );
     let witness = &prop["impacted_witnesses"]["ruby:lib/leaf.rb:method:finish:1"];
     let leaf_context = witness_slice_file(witness, "lib/leaf.rb");
@@ -2253,7 +2253,7 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
             "via_path": "lib/service.rb",
             "selected_bridge_kind": "wrapper_return",
             "pruned_path": "lib/zzz_helper.rb",
-            "prune_reason": "ranked_out",
+            "prune_reason": "suppressed_before_admit",
             "pruned_bridge_kind": "require_relative_chain",
             "selected_better_by": "lane",
             "winning_primary_evidence_kinds": [
@@ -2322,10 +2322,17 @@ fn pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise() {
         paths,
         vec!["app/runner.rb", "lib/route_runtime.rb", "lib/service.rb"]
     );
-    assert_eq!(
-        slice_selection["pruned_candidates"],
-        serde_json::json!([]),
-        "expected unrelated generic dynamic runtime to be filtered before tier-2 ranking: {prop:#}"
+    assert!(
+        slice_selection["pruned_candidates"]
+            .as_array()
+            .is_some_and(|candidates| {
+                !candidates.is_empty()
+                    && candidates.iter().all(|candidate| {
+                        candidate["path"] == "lib/route_runtime.rb"
+                            && candidate["prune_reason"] == "weaker_same_path_duplicate"
+                    })
+            }),
+        "expected generic runtime noise to stay filtered while same-path route_runtime losers are recorded explicitly: {prop:#}"
     );
 
     let route_runtime = slice_selection_file(slice_selection, "lib/route_runtime.rb");
