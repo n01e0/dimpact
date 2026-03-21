@@ -3414,6 +3414,7 @@ fn caller() -> i32 {
     }
 
     #[test]
+    #[serial]
     fn bounded_slice_plan_prefers_rust_param_passthrough_over_later_neutral_helper() {
         let dir = TempDir::new().expect("tempdir");
         let root = dir.path();
