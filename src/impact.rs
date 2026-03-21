@@ -231,6 +231,8 @@ pub struct ImpactSliceScoreTuple {
     pub secondary_evidence_count: u8,
     #[serde(default, skip_serializing_if = "impact_slice_u8_is_zero")]
     pub negative_evidence_count: u8,
+    #[serde(default, skip_serializing_if = "impact_slice_u8_is_zero")]
+    pub semantic_support_rank: u8,
     pub call_position_rank: u32,
     pub lexical_tiebreak: String,
 }
@@ -323,6 +325,7 @@ pub enum ImpactWitnessSliceRankingBasis {
     Lane,
     PrimaryEvidenceCount,
     NegativeEvidenceCount,
+    SemanticSupportRank,
     SecondaryEvidenceCount,
     CallsitePosition,
     LexicalTiebreak,
@@ -879,6 +882,10 @@ fn selected_vs_pruned_summary(
             selected.score_tuple.negative_evidence_count,
             pruned.score_tuple.negative_evidence_count
         ),
+        ImpactWitnessSliceRankingBasis::SemanticSupportRank => format!(
+            "it had stronger semantic support ({} > {})",
+            selected.score_tuple.semantic_support_rank, pruned.score_tuple.semantic_support_rank
+        ),
         ImpactWitnessSliceRankingBasis::SecondaryEvidenceCount => format!(
             "it had more secondary evidence ({} > {})",
             selected.score_tuple.secondary_evidence_count,
@@ -967,6 +974,17 @@ fn selected_reason_ranking_basis(
             return Some(ImpactWitnessSliceRankingBasis::NegativeEvidenceCount);
         }
         std::cmp::Ordering::Greater => return None,
+        std::cmp::Ordering::Equal => {}
+    }
+    match selected
+        .score_tuple
+        .semantic_support_rank
+        .cmp(&pruned.score_tuple.semantic_support_rank)
+    {
+        std::cmp::Ordering::Greater => {
+            return Some(ImpactWitnessSliceRankingBasis::SemanticSupportRank);
+        }
+        std::cmp::Ordering::Less => return None,
         std::cmp::Ordering::Equal => {}
     }
     match selected
@@ -2789,6 +2807,7 @@ fn foo() { bar(); }
                     primary_evidence_count: 2,
                     secondary_evidence_count: 1,
                     negative_evidence_count: 0,
+                    semantic_support_rank: 0,
                     call_position_rank: 8,
                     lexical_tiebreak: "leaf.rs".to_string(),
                 },
@@ -2863,6 +2882,7 @@ fn foo() { bar(); }
                         primary_evidence_count: 1,
                         secondary_evidence_count: 1,
                         negative_evidence_count: 0,
+                        semantic_support_rank: 0,
                         call_position_rank: 7,
                         lexical_tiebreak: "aaa_helper.rs".to_string(),
                     },
@@ -2948,6 +2968,7 @@ fn foo() { bar(); }
                         primary_evidence_count: 2,
                         secondary_evidence_count: 0,
                         negative_evidence_count: 0,
+                        semantic_support_rank: 0,
                         call_position_rank: 0,
                         lexical_tiebreak: "lib/leaf.rb".to_string(),
                     },
@@ -2979,6 +3000,7 @@ fn foo() { bar(); }
                         primary_evidence_count: 1,
                         secondary_evidence_count: 0,
                         negative_evidence_count: 0,
+                        semantic_support_rank: 0,
                         call_position_rank: 0,
                         lexical_tiebreak: "lib/helper.rb".to_string(),
                     },
@@ -3510,6 +3532,7 @@ fn foo() { bar(); }
                 primary_evidence_count: 1,
                 secondary_evidence_count: 0,
                 negative_evidence_count: 0,
+                semantic_support_rank: 0,
                 call_position_rank: 3,
                 lexical_tiebreak: "leaf.rs".to_string(),
             },
@@ -3556,6 +3579,7 @@ fn foo() { bar(); }
                 primary_evidence_count: 4,
                 secondary_evidence_count: 1,
                 negative_evidence_count: 1,
+                semantic_support_rank: 2,
                 call_position_rank: 0,
                 lexical_tiebreak: "demo/helper.rb".to_string(),
             },
