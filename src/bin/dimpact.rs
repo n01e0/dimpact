@@ -1011,12 +1011,24 @@ impl Tier2SemanticEvidence {
 struct RubyNarrowFallbackBoundaryEvidence {
     explicit_require_relative_loads: std::collections::BTreeSet<String>,
     literal_dynamic_targets: std::collections::BTreeMap<String, u32>,
+    literal_dynamic_target_hints: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
 struct RubyNarrowFallbackCandidateEvidence {
     matched_call_line: u32,
     edge_certainty: dimpact::ImpactSliceSupportEdgeCertainty,
+}
+
+fn ruby_dynamic_target_hints(target: &str) -> std::collections::BTreeSet<String> {
+    let mut hints = std::collections::BTreeSet::new();
+    hints.insert(target.to_string());
+    for (idx, ch) in target.char_indices() {
+        if ch == '_' && idx > 0 {
+            hints.insert(target[..=idx].to_string());
+        }
+    }
+    hints
 }
 
 fn symbol_id_node_name(node_id: &str) -> Option<&str> {
@@ -1213,16 +1225,22 @@ fn collect_ruby_narrow_fallback_boundary_evidence(
                 acc
             },
         );
+    let literal_dynamic_target_hints = literal_dynamic_targets
+        .keys()
+        .flat_map(|target| ruby_dynamic_target_hints(target))
+        .collect();
 
     RubyNarrowFallbackBoundaryEvidence {
         explicit_require_relative_loads,
         literal_dynamic_targets,
+        literal_dynamic_target_hints,
     }
 }
 
 fn collect_ruby_narrow_fallback_candidate_evidence(
     candidate_file: &str,
     literal_dynamic_targets: &std::collections::BTreeMap<String, u32>,
+    literal_dynamic_target_hints: &std::collections::BTreeSet<String>,
 ) -> Option<RubyNarrowFallbackCandidateEvidence> {
     if literal_dynamic_targets.is_empty() || !candidate_file.ends_with(".rb") {
         return None;
@@ -1249,7 +1267,13 @@ fn collect_ruby_narrow_fallback_candidate_evidence(
     let has_dynamic_runtime = src.contains("def method_missing")
         || src.contains("def respond_to_missing?")
         || src.contains("define_method");
+    let has_related_dynamic_target_hint = literal_dynamic_target_hints
+        .iter()
+        .any(|hint| !hint.is_empty() && src.contains(hint));
     if !has_exact_target_match && !has_dynamic_runtime {
+        return None;
+    }
+    if !has_exact_target_match && !has_related_dynamic_target_hint {
         return None;
     }
 
@@ -1327,6 +1351,7 @@ fn collect_ruby_narrow_fallback_candidates(
             let candidate_evidence = collect_ruby_narrow_fallback_candidate_evidence(
                 candidate_file.as_str(),
                 &boundary_evidence.literal_dynamic_targets,
+                &boundary_evidence.literal_dynamic_target_hints,
             )?;
             Some(Tier2Candidate {
                 path: candidate_file.clone(),
@@ -4316,6 +4341,102 @@ fn caller() -> i32 {
     }
 
     #[test]
+    fn ruby_narrow_fallback_filters_generic_dynamic_runtime_without_target_family_hint() {
+        let dir = TempDir::new().expect("tempdir");
+        let app_dir = dir.path().join("app");
+        let lib_dir = dir.path().join("lib");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
+
+        let main = app_dir.join("main.rb");
+        let router = lib_dir.join("router.rb");
+        let generic_runtime = lib_dir.join("aaa_runtime.rb");
+        let route_runtime = lib_dir.join("route_runtime.rb");
+        fs::write(
+            &main,
+            "require_relative \"../lib/router\"\n\nclass Main\n  def run\n    Router.new.run_created(\"alpha\")\n  end\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &router,
+            "require_relative \"aaa_runtime\"\nrequire_relative \"route_runtime\"\n\nclass Router\n  def initialize\n    @runtime = RouteRuntime.new\n  end\n\n  def run_created(payload)\n    @runtime.public_send(\"route_created\", payload)\n  end\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &generic_runtime,
+            "class GenericRuntime\n  def method_missing(name, *args)\n    return args.first if args.any?\n    super\n  end\n\n  def respond_to_missing?(name, include_private = false)\n    true\n  end\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            &route_runtime,
+            "class RouteRuntime\n  def method_missing(name, *args)\n    return args.first if name.to_s.start_with?(\"route_\")\n    super\n  end\n\n  def respond_to_missing?(name, include_private = false)\n    name.to_s.start_with?(\"route_\") || super\n  end\nend\n",
+        )
+        .unwrap();
+
+        let main_file = main.to_string_lossy().to_string();
+        let router_file = router.to_string_lossy().to_string();
+        let generic_runtime_file = generic_runtime.to_string_lossy().to_string();
+        let route_runtime_file = route_runtime.to_string_lossy().to_string();
+
+        let boundary = dimpact::Symbol {
+            id: SymbolId("ruby:lib/router.rb:method:run_created:9".to_string()),
+            name: "run_created".to_string(),
+            kind: dimpact::SymbolKind::Method,
+            file: router_file.clone(),
+            range: dimpact::TextRange {
+                start_line: 9,
+                end_line: 11,
+            },
+            language: "ruby".to_string(),
+        };
+        let boundary_evidence = collect_ruby_narrow_fallback_boundary_evidence(&boundary);
+        assert_eq!(
+            boundary_evidence.explicit_require_relative_loads,
+            std::collections::BTreeSet::from([
+                generic_runtime_file.clone(),
+                route_runtime_file.clone(),
+            ])
+        );
+        assert_eq!(
+            boundary_evidence.literal_dynamic_target_hints,
+            std::collections::BTreeSet::from(["route_".to_string(), "route_created".to_string(),])
+        );
+        assert!(
+            collect_ruby_narrow_fallback_candidate_evidence(
+                &generic_runtime_file,
+                &boundary_evidence.literal_dynamic_targets,
+                &boundary_evidence.literal_dynamic_target_hints,
+            )
+            .is_none()
+        );
+        let route_runtime_evidence = collect_ruby_narrow_fallback_candidate_evidence(
+            &route_runtime_file,
+            &boundary_evidence.literal_dynamic_targets,
+            &boundary_evidence.literal_dynamic_target_hints,
+        )
+        .expect("route runtime fallback evidence");
+        assert_eq!(route_runtime_evidence.matched_call_line, 10);
+        assert_eq!(
+            route_runtime_evidence.edge_certainty,
+            dimpact::ImpactSliceSupportEdgeCertainty::DynamicFallback
+        );
+
+        let candidates = collect_ruby_narrow_fallback_candidates(
+            &main_file,
+            &std::collections::BTreeSet::new(),
+            &boundary,
+            &router_file,
+        );
+        assert_eq!(
+            candidates
+                .into_iter()
+                .map(|candidate| candidate.path)
+                .collect::<Vec<_>>(),
+            vec![route_runtime_file]
+        );
+    }
+
+    #[test]
     fn bounded_slice_plan_selects_ruby_method_missing_companion_as_narrow_fallback() {
         let dir = TempDir::new().expect("tempdir");
         let app_dir = dir.path().join("app");
@@ -4370,6 +4491,7 @@ fn caller() -> i32 {
         let candidate_evidence = collect_ruby_narrow_fallback_candidate_evidence(
             &runtime_file,
             &boundary_evidence.literal_dynamic_targets,
+            &boundary_evidence.literal_dynamic_target_hints,
         )
         .expect("runtime fallback evidence");
         assert_eq!(candidate_evidence.matched_call_line, 9);
