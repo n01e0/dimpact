@@ -1689,7 +1689,8 @@ fn pdg_slice_selection_penalizes_returnish_helper_noise_after_later_callsite() {
             "prune_reason": "ranked_out",
             "pruned_bridge_kind": "wrapper_return",
             "selected_better_by": "negative_evidence_count",
-            "summary": "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1)",
+            "losing_side_reason": "negative_evidence=noisy_return_hint",
+            "summary": "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1); losing side: negative_evidence=noisy_return_hint",
         }])
     );
 }
