@@ -1106,6 +1106,15 @@ fn witness_slice_file<'a>(witness: &'a serde_json::Value, path: &str) -> &'a ser
         .unwrap_or_else(|| panic!("missing witness slice_context file for {path}: {witness:#}"))
 }
 
+fn witness_slice_paths<'a>(witness: &'a serde_json::Value) -> Vec<&'a str> {
+    witness["slice_context"]["selected_files_on_path"]
+        .as_array()
+        .expect("witness slice_context.selected_files_on_path array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect()
+}
+
 fn run_impact_dot(repo: &std::path::Path, diff: &str, args: &[&str]) -> String {
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let assert = cmd
@@ -1693,6 +1702,14 @@ fn pdg_slice_selection_penalizes_returnish_helper_noise_after_later_callsite() {
             "summary": "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1); losing side: negative_evidence=noisy_return_hint",
         }])
     );
+
+    let helper_witness = &prop["impacted_witnesses"]["rust:zzz_final_helper.rs:fn:final_helper:1"];
+    let helper_paths = witness_slice_paths(helper_witness);
+    assert_eq!(
+        helper_paths,
+        vec!["main.rs", "wrapper.rs"],
+        "expected ranked-out helper witness to stay compact and exclude zzz_final_helper.rs from the explanation slice: {prop:#}"
+    );
 }
 
 #[test]
@@ -1822,12 +1839,7 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
     );
 
     let helper_witness = &prop["impacted_witnesses"]["rust:zzz_helper.rs:fn:noise:1"];
-    let helper_paths: Vec<&str> = helper_witness["slice_context"]["selected_files_on_path"]
-        .as_array()
-        .expect("helper witness slice_context.selected_files_on_path array")
-        .iter()
-        .filter_map(|file| file["path"].as_str())
-        .collect();
+    let helper_paths = witness_slice_paths(helper_witness);
     assert_eq!(
         helper_paths,
         vec!["main.rs", "adapter.rs"],
@@ -2104,6 +2116,14 @@ fn pdg_slice_selection_prefers_stronger_rust_semantic_support_over_later_callsit
             "summary": "selected over plain.rs because it had stronger semantic support (3 > 2)",
         }])
     );
+
+    let plain_witness = &prop["impacted_witnesses"]["rust:plain.rs:fn:carry:1"];
+    let plain_paths = witness_slice_paths(plain_witness);
+    assert_eq!(
+        plain_paths,
+        vec!["main.rs", "wrapper.rs"],
+        "expected ranked-out plain.rs witness to stay compact and exclude plain.rs from the explanation slice: {prop:#}"
+    );
 }
 
 #[test]
@@ -2245,12 +2265,7 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
     );
     let helper_witness =
         &prop["impacted_witnesses"]["ruby:lib/zzz_helper.rb:method:helper_noise:1"];
-    let helper_paths: Vec<&str> = helper_witness["slice_context"]["selected_files_on_path"]
-        .as_array()
-        .expect("helper witness slice_context.selected_files_on_path array")
-        .iter()
-        .filter_map(|file| file["path"].as_str())
-        .collect();
+    let helper_paths = witness_slice_paths(helper_witness);
     assert_eq!(
         helper_paths,
         vec!["app/runner.rb", "lib/service.rb"],
@@ -2328,6 +2343,27 @@ fn pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise() {
             .as_array()
             .is_some_and(|files| files.iter().any(|path| path == "lib/aaa_runtime.rb")),
         "unexpected generic dynamic runtime survived into impacted_files: {prop:#}"
+    );
+    let impacted_witnesses = prop["impacted_witnesses"]
+        .as_object()
+        .expect("impacted_witnesses object");
+    assert!(
+        !impacted_witnesses
+            .keys()
+            .any(|symbol_id| symbol_id.contains("aaa_runtime.rb")),
+        "unexpected generic dynamic runtime survived into impacted_witnesses: {prop:#}"
+    );
+    assert!(
+        !impacted_witnesses
+            .values()
+            .any(|witness| witness_slice_paths(witness).contains(&"lib/aaa_runtime.rb")),
+        "unexpected generic dynamic runtime entered witness slice_context.selected_files_on_path: {prop:#}"
+    );
+    assert!(
+        !serde_json::to_string(slice_selection)
+            .expect("serialize slice_selection")
+            .contains("lib/aaa_runtime.rb"),
+        "unexpected generic dynamic runtime leaked into slice_selection explanation context: {prop:#}"
     );
 }
 
