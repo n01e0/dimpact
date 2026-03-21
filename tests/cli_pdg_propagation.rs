@@ -1443,6 +1443,38 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
             })),
         "expected later helper noise to be preserved only as ranked-out metadata: {prop:#}"
     );
+
+    let witness = &prop["impacted_witnesses"]["rust:value.rs:fn:make:1"];
+    let value_context = witness_slice_file(witness, "value.rs");
+    assert_eq!(
+        value_context["selected_vs_pruned_reasons"],
+        serde_json::json!([{
+            "via_symbol_id": "rust:adapter.rs:fn:wrap:4",
+            "via_path": "adapter.rs",
+            "selected_bridge_kind": "boundary_alias_continuation",
+            "pruned_path": "zzz_helper.rs",
+            "prune_reason": "ranked_out",
+            "pruned_bridge_kind": "boundary_alias_continuation",
+            "selected_better_by": "primary_evidence_count",
+            "winning_primary_evidence_kinds": [
+                "alias_chain"
+            ],
+            "summary": "selected over zzz_helper.rs because it had more primary evidence (2 > 1); winning primary evidence: alias_chain",
+        }])
+    );
+
+    let helper_witness = &prop["impacted_witnesses"]["rust:zzz_helper.rs:fn:noise:1"];
+    let helper_paths: Vec<&str> = helper_witness["slice_context"]["selected_files_on_path"]
+        .as_array()
+        .expect("helper witness slice_context.selected_files_on_path array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(
+        helper_paths,
+        vec!["main.rs", "adapter.rs"],
+        "expected helper noise to stay outside the selected explanation slice even if it remains reachable: {prop:#}"
+    );
 }
 
 #[test]
