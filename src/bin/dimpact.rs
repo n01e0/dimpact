@@ -13,8 +13,9 @@ use dimpact::{ChangedOutput, LanguageMode};
 use dimpact::{DiffParseError, parse_unified_diff};
 use dimpact::{
     ImpactDirection, ImpactOptions, ImpactOutput, ImpactSliceBridgeKind, ImpactSliceCandidateLane,
-    ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind, ImpactSliceEvidenceKind,
-    ImpactSliceFileMetadata, ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSliceReasonKind,
+    ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind,
+    ImpactSliceCandidateSupportMetadata, ImpactSliceEvidenceKind, ImpactSliceFileMetadata,
+    ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSliceReasonKind,
     ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceScoreTuple,
     ImpactSliceSelectionSummary,
 };
@@ -990,6 +991,129 @@ struct PdgContext {
     per_seed_slice_selection: std::collections::BTreeMap<String, ImpactSliceSelectionSummary>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct Tier2SemanticEvidence {
+    param_to_return_flow: bool,
+}
+
+fn symbol_id_node_name(node_id: &str) -> Option<&str> {
+    let mut parts = node_id.split(':');
+    let _file = parts.next()?;
+    let _kind = parts.next()?;
+    parts.next()
+}
+
+fn rust_signature_param_names(source: &str, start_line: u32) -> std::collections::BTreeSet<String> {
+    let start_idx = usize::try_from(start_line.saturating_sub(1)).unwrap_or_default();
+    let header = source
+        .lines()
+        .skip(start_idx)
+        .take(8)
+        .scan(false, |done, line| {
+            if *done {
+                return None;
+            }
+            let chunk = line.trim();
+            if chunk.contains('{') {
+                *done = true;
+            }
+            Some(chunk.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let Some(open_paren) = header.find('(') else {
+        return std::collections::BTreeSet::new();
+    };
+    let Some(close_paren) = header[open_paren + 1..].find(')') else {
+        return std::collections::BTreeSet::new();
+    };
+    header[open_paren + 1..open_paren + 1 + close_paren]
+        .split(',')
+        .filter_map(|raw| {
+            let before_type = raw.split(':').next()?.trim();
+            if before_type.is_empty() {
+                return None;
+            }
+            let token = before_type
+                .split_whitespace()
+                .last()?
+                .trim_matches('&')
+                .trim_matches(|c: char| c == ',' || c == '(' || c == ')');
+            if token.is_empty() || token == "self" || token == "_" {
+                return None;
+            }
+            Some(token.to_string())
+        })
+        .collect()
+}
+
+fn collect_rust_tier2_semantic_evidence(
+    completion_symbol: &dimpact::Symbol,
+) -> Tier2SemanticEvidence {
+    if completion_symbol.language != "rust" || !completion_symbol.file.ends_with(".rs") {
+        return Tier2SemanticEvidence::default();
+    }
+    let Ok(src) = fs::read_to_string(&completion_symbol.file) else {
+        return Tier2SemanticEvidence::default();
+    };
+    let param_names = rust_signature_param_names(&src, completion_symbol.range.start_line);
+    if param_names.is_empty() {
+        return Tier2SemanticEvidence::default();
+    }
+
+    let dfg = RustDfgBuilder::build(&completion_symbol.file, &src);
+    let node_line_by_id: std::collections::HashMap<_, _> = dfg
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), node.line))
+        .collect();
+    let pdg = PdgBuilder::build(&dfg, &[]);
+    let index = SymbolIndex::build(vec![completion_symbol.clone()]);
+    let Some(summary) = PdgBuilder::build_function_summaries(&pdg, &index)
+        .into_iter()
+        .find(|summary| summary.function_id == completion_symbol.id.0)
+    else {
+        return Tier2SemanticEvidence::default();
+    };
+
+    let tail_line_floor = std::cmp::max(
+        summary.start_line,
+        summary
+            .end_line
+            .saturating_sub(if summary.end_line > summary.start_line {
+                1
+            } else {
+                0
+            }),
+    );
+    let param_input_ids: std::collections::BTreeSet<_> = summary
+        .inputs
+        .iter()
+        .filter(|input_id| {
+            symbol_id_node_name(input_id)
+                .map(|name| param_names.contains(name))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+    if param_input_ids.is_empty() {
+        return Tier2SemanticEvidence::default();
+    }
+
+    let param_to_return_flow = summary.flows.iter().any(|flow| {
+        param_input_ids.contains(&flow.input_node_id)
+            && flow.impacted_node_ids.iter().any(|node_id| {
+                node_line_by_id
+                    .get(node_id)
+                    .is_some_and(|line| *line >= tail_line_floor)
+            })
+    });
+
+    Tier2SemanticEvidence {
+        param_to_return_flow,
+    }
+}
+
 fn build_local_dfg_for_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> DataFlowGraph {
     let mut combined = DataFlowGraph {
         nodes: Vec::new(),
@@ -1305,6 +1429,7 @@ fn tier2_scoring_summary(
     completion_file: &str,
     call_line: u32,
     side_max_call_line: u32,
+    semantic_evidence: &Tier2SemanticEvidence,
 ) -> ImpactSliceCandidateScoringSummary {
     let is_ruby_chain_candidate =
         boundary_file.ends_with(".rb") || completion_file.ends_with(".rb");
@@ -1325,8 +1450,13 @@ fn tier2_scoring_summary(
         || completion_return_hint
         || completion_alias_hint
         || completion_noise_hint;
+    let has_param_to_return_flow = semantic_evidence.param_to_return_flow
+        && !completion_return_hint
+        && !completion_alias_hint
+        && !completion_noise_hint;
 
     let lane = if completion_return_hint
+        || has_param_to_return_flow
         || (boundary_wrapper_hint
             && !completion_alias_hint
             && !completion_noise_hint
@@ -1340,8 +1470,14 @@ fn tier2_scoring_summary(
     let mut primary_evidence_kinds = Vec::new();
     match lane {
         ImpactSliceCandidateLane::ReturnContinuation => {
-            if completion_return_hint || (!completion_alias_hint && !completion_noise_hint) {
+            if completion_return_hint
+                || has_param_to_return_flow
+                || (!completion_alias_hint && !completion_noise_hint)
+            {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::ReturnFlow);
+            }
+            if has_param_to_return_flow {
+                primary_evidence_kinds.push(ImpactSliceEvidenceKind::ParamToReturnFlow);
             }
             if boundary_wrapper_hint || call_line == side_max_call_line {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::AssignedResult);
@@ -1350,6 +1486,9 @@ fn tier2_scoring_summary(
         ImpactSliceCandidateLane::AliasContinuation => {
             if completion_alias_hint {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::AliasChain);
+            }
+            if has_param_to_return_flow {
+                primary_evidence_kinds.push(ImpactSliceEvidenceKind::ParamToReturnFlow);
             }
             if boundary_wrapper_hint || !completion_noise_hint {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::AssignedResult);
@@ -1383,6 +1522,15 @@ fn tier2_scoring_summary(
     secondary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
     secondary_evidence_kinds.dedup();
 
+    let support = if has_param_to_return_flow {
+        Some(ImpactSliceCandidateSupportMetadata {
+            local_dfg_support: true,
+            ..ImpactSliceCandidateSupportMetadata::default()
+        })
+    } else {
+        None
+    };
+
     ImpactSliceCandidateScoringSummary {
         source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
         lane,
@@ -1397,7 +1545,7 @@ fn tier2_scoring_summary(
         },
         primary_evidence_kinds,
         secondary_evidence_kinds,
-        support: None,
+        support,
     }
 }
 
@@ -1500,6 +1648,7 @@ fn plan_bounded_slice(
         .iter()
         .map(|symbol| (symbol.id.0.clone(), symbol))
         .collect();
+    let mut tier2_semantic_evidence_by_symbol_id = std::collections::HashMap::new();
     let mut per_seed_slice_selection = std::collections::BTreeMap::new();
 
     for seed in seeds {
@@ -1597,6 +1746,10 @@ fn plan_bounded_slice(
                 else {
                     continue;
                 };
+                let semantic_evidence = tier2_semantic_evidence_by_symbol_id
+                    .entry(completion_symbol_id.clone())
+                    .or_insert_with(|| collect_rust_tier2_semantic_evidence(completion_symbol))
+                    .clone();
                 let scoring = tier2_scoring_summary(
                     boundary_symbol,
                     boundary_file,
@@ -1604,6 +1757,7 @@ fn plan_bounded_slice(
                     completion_file,
                     call_line,
                     side_max_call_line,
+                    &semantic_evidence,
                 );
                 let candidate = Tier2Candidate {
                     path: completion_file.to_string(),
@@ -2911,6 +3065,32 @@ fn caller() -> i32 {
     }
 
     #[test]
+    fn collect_rust_tier2_semantic_evidence_detects_param_to_return_flow() {
+        let dir = TempDir::new().expect("tempdir");
+        let file = dir.path().join("step.rs");
+        fs::write(
+            &file,
+            "pub fn step(input: i32) -> i32 {\n    let forwarded = input;\n    forwarded\n}\n",
+        )
+        .unwrap();
+        let file_str = file.to_string_lossy().to_string();
+        let symbol = dimpact::Symbol {
+            id: SymbolId::new("rust", &file_str, &dimpact::SymbolKind::Function, "step", 1),
+            name: "step".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: file_str,
+            range: dimpact::TextRange {
+                start_line: 1,
+                end_line: 4,
+            },
+            language: "rust".to_string(),
+        };
+
+        let evidence = collect_rust_tier2_semantic_evidence(&symbol);
+        assert!(evidence.param_to_return_flow);
+    }
+
+    #[test]
     fn bounded_slice_plan_selects_direct_boundary_and_single_bridge_completion() {
         let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
         let wrapper = test_symbol("rust:wrapper.rs:fn:wrap:1", "wrap", "wrapper.rs", 1);
@@ -3229,6 +3409,162 @@ fn caller() -> i32 {
                         })
                 }),
             "expected later helper noise to lose to the stronger alias continuation candidate: {:#?}",
+            plan.slice_selection.pruned_candidates
+        );
+    }
+
+    #[test]
+    fn bounded_slice_plan_prefers_rust_param_passthrough_over_later_neutral_helper() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("step.rs"),
+            "pub fn step(input: i32) -> i32 {\n    let forwarded = input;\n    forwarded\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("later.rs"),
+            "pub fn later(drop: i32) -> i32 {\n    let shadow = drop;\n    41\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("wrapper.rs"),
+            "use crate::later;\nuse crate::step;\n\npub fn wrap(a: i32) -> i32 {\n    let keep = step::step(a);\n    let _side = later::later(a);\n    keep\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("main.rs"),
+            "mod later;\nmod step;\nmod wrapper;\n\nfn caller() {\n    let input = 7;\n    let out = wrapper::wrap(input);\n    println!(\"{}\", out);\n}\n",
+        )
+        .unwrap();
+
+        let seed = dimpact::Symbol {
+            id: SymbolId("rust:main.rs:fn:caller:5".to_string()),
+            name: "caller".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 5,
+                end_line: 9,
+            },
+            language: "rust".to_string(),
+        };
+        let wrapper = dimpact::Symbol {
+            id: SymbolId("rust:wrapper.rs:fn:wrap:4".to_string()),
+            name: "wrap".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "wrapper.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 4,
+                end_line: 8,
+            },
+            language: "rust".to_string(),
+        };
+        let step = dimpact::Symbol {
+            id: SymbolId("rust:step.rs:fn:step:1".to_string()),
+            name: "step".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "step.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 1,
+                end_line: 4,
+            },
+            language: "rust".to_string(),
+        };
+        let later = dimpact::Symbol {
+            id: SymbolId("rust:later.rs:fn:later:1".to_string()),
+            name: "later".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "later.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 1,
+                end_line: 4,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            wrapper.clone(),
+            step.clone(),
+            later.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), wrapper.id.0.as_str(), "main.rs", 7),
+            call_ref(wrapper.id.0.as_str(), step.id.0.as_str(), "wrapper.rs", 5),
+            call_ref(wrapper.id.0.as_str(), later.id.0.as_str(), "wrapper.rs", 6),
+        ];
+
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(root).expect("chdir temp repo");
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+        std::env::set_current_dir(cwd).expect("restore cwd");
+
+        let step_file = slice_selection_file(&plan.slice_selection, "step.rs");
+        assert_eq!(
+            step_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:4".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ParamToReturnFlow,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 3,
+                        secondary_evidence_count: 1,
+                        call_position_rank: 5,
+                        lexical_tiebreak: "step.rs".to_string(),
+                    },
+                    support: Some(ImpactSliceCandidateSupportMetadata {
+                        local_dfg_support: true,
+                        ..ImpactSliceCandidateSupportMetadata::default()
+                    }),
+                }),
+            }]
+        );
+        assert!(
+            plan.slice_selection
+                .pruned_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.path == "later.rs"
+                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+                        && candidate.via_symbol_id.as_deref() == Some("rust:wrapper.rs:fn:wrap:4")
+                        && candidate.scoring.as_ref().is_some_and(|scoring| {
+                            scoring.lane == ImpactSliceCandidateLane::ReturnContinuation
+                                && scoring.primary_evidence_kinds
+                                    == vec![
+                                        ImpactSliceEvidenceKind::AssignedResult,
+                                        ImpactSliceEvidenceKind::ReturnFlow,
+                                    ]
+                                && scoring.secondary_evidence_kinds
+                                    == vec![
+                                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                                        ImpactSliceEvidenceKind::NamePathHint,
+                                    ]
+                        })
+                }),
+            "expected later neutral helper to be ranked out once param-to-return evidence is available: {:#?}",
             plan.slice_selection.pruned_candidates
         );
     }
