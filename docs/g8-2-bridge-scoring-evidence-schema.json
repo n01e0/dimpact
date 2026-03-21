@@ -1,0 +1,112 @@
+{
+  "generated_by": "manual G8-2 scoring schema extension note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "backward-compatible public schema extension for bridge scoring evidence kinds and nested support metadata",
+  "extends": [
+    "docs/g7-2-bridge-scoring-schema.md",
+    "docs/g8-1-missing-evidence-inventory-and-design-memo.md"
+  ],
+  "applies_to": [
+    "summary.slice_selection.files[].reasons[].scoring",
+    "summary.slice_selection.pruned_candidates[].scoring"
+  ],
+  "goal": [
+    "add future-facing semantic evidence kinds without changing current runtime ranking behavior",
+    "separate support metadata from evidence kinds",
+    "preserve existing JSON output when support is absent or empty",
+    "provide schema hooks for G8-3 Rust evidence, G8-4 Ruby fallback, and G8-5 witness explanation"
+  ],
+  "non_goals": [
+    "runtime materialization of the new evidence kinds in G8-2",
+    "changing score tuple compare order",
+    "changing existing bridge candidate selection behavior",
+    "implementing witness wording in G8-2"
+  ],
+  "schema_changes": {
+    "impact_slice_candidate_scoring_summary": {
+      "adds": [
+        "support?: ImpactSliceCandidateSupportMetadata"
+      ],
+      "field_order": [
+        "source_kind",
+        "lane",
+        "primary_evidence_kinds",
+        "secondary_evidence_kinds",
+        "score_tuple",
+        "support"
+      ],
+      "support_omitted_when": [
+        "support is null",
+        "support exists but all boolean flags are false and edge_certainty is null"
+      ]
+    },
+    "impact_slice_evidence_kind": {
+      "adds": [
+        "param_to_return_flow",
+        "explicit_require_relative_load",
+        "companion_file_match",
+        "dynamic_dispatch_literal_target"
+      ],
+      "existing_values_retained": [
+        "return_flow",
+        "assigned_result",
+        "alias_chain",
+        "require_relative_edge",
+        "module_companion",
+        "callsite_position_hint",
+        "name_path_hint"
+      ]
+    },
+    "impact_slice_candidate_support_metadata": {
+      "fields": [
+        "call_graph_support?: bool",
+        "local_dfg_support?: bool",
+        "symbolic_propagation_support?: bool",
+        "edge_certainty?: ImpactSliceSupportEdgeCertainty"
+      ]
+    }
+  },
+  "support_metadata": {
+    "field_name": "support",
+    "role": "separate support/provenance/certainty from evidence kinds",
+    "fields": {
+      "call_graph_support": "call graph adjacency materially supported the candidate",
+      "local_dfg_support": "local DFG or def-use continuity materially supported the candidate",
+      "symbolic_propagation_support": "symbolic propagation materially supported the candidate",
+      "edge_certainty": [
+        "confirmed",
+        "inferred",
+        "dynamic_fallback"
+      ]
+    },
+    "design_rule": "support metadata must not replace primary evidence kinds"
+  },
+  "evidence_kind_meaning": {
+    "param_to_return_flow": "parameter-origin value flows through alias/assignment/return to the candidate output",
+    "explicit_require_relative_load": "an explicit require_relative load relation was observed",
+    "companion_file_match": "candidate matched a narrow companion-file rule",
+    "dynamic_dispatch_literal_target": "dynamic dispatch narrowed to a literal method target"
+  },
+  "stability": {
+    "existing_runtime_json_unchanged_when_new_fields_unset": true,
+    "scoring_support_is_optional": true,
+    "empty_support_omitted": true,
+    "selected_and_pruned_share_same_scoring_shape": true,
+    "snake_case_enum_serialization": true
+  },
+  "future_hooks": {
+    "g8_3": [
+      "populate param_to_return_flow for Rust wrapper/bridge cases",
+      "set local_dfg_support when local continuity is actually observed"
+    ],
+    "g8_4": [
+      "materialize explicit_require_relative_load for Ruby require_relative edges",
+      "materialize companion_file_match for true narrow fallback",
+      "materialize dynamic_dispatch_literal_target for literal send/public_send narrowing"
+    ],
+    "g8_5": [
+      "derive winning_primary_evidence from selected-vs-pruned evidence set difference",
+      "derive winning_support from selected-vs-pruned support metadata difference"
+    ]
+  }
+}

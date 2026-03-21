@@ -1256,6 +1256,7 @@ fn ruby_require_relative_scoring_summary(
             call_position_rank: call_line,
             lexical_tiebreak: completion_file.to_string(),
         },
+        support: None,
     }
 }
 
@@ -1264,8 +1265,12 @@ fn evidence_kind_key(kind: ImpactSliceEvidenceKind) -> &'static str {
         ImpactSliceEvidenceKind::AliasChain => "alias_chain",
         ImpactSliceEvidenceKind::AssignedResult => "assigned_result",
         ImpactSliceEvidenceKind::CallsitePositionHint => "callsite_position_hint",
+        ImpactSliceEvidenceKind::CompanionFileMatch => "companion_file_match",
+        ImpactSliceEvidenceKind::DynamicDispatchLiteralTarget => "dynamic_dispatch_literal_target",
+        ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad => "explicit_require_relative_load",
         ImpactSliceEvidenceKind::ModuleCompanion => "module_companion",
         ImpactSliceEvidenceKind::NamePathHint => "name_path_hint",
+        ImpactSliceEvidenceKind::ParamToReturnFlow => "param_to_return_flow",
         ImpactSliceEvidenceKind::RequireRelativeEdge => "require_relative_edge",
         ImpactSliceEvidenceKind::ReturnFlow => "return_flow",
     }
@@ -1392,6 +1397,7 @@ fn tier2_scoring_summary(
         },
         primary_evidence_kinds,
         secondary_evidence_kinds,
+        support: None,
     }
 }
 
@@ -2900,6 +2906,7 @@ fn caller() -> i32 {
             },
             primary_evidence_kinds,
             secondary_evidence_kinds,
+            support: None,
         }
     }
 
@@ -3552,5 +3559,27 @@ fn caller() -> i32 {
         );
         assert!(matches!(min_c, Some(ConfidenceOpt::DynamicFallback)));
         assert!(excl_c);
+    }
+
+    #[test]
+    fn evidence_kind_key_sorts_new_g8_2_evidence_names_lexically() {
+        let mut kinds = vec![
+            ImpactSliceEvidenceKind::ParamToReturnFlow,
+            ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad,
+            ImpactSliceEvidenceKind::CompanionFileMatch,
+            ImpactSliceEvidenceKind::DynamicDispatchLiteralTarget,
+        ];
+
+        kinds.sort_by_key(|kind| evidence_kind_key(*kind));
+
+        assert_eq!(
+            kinds,
+            vec![
+                ImpactSliceEvidenceKind::CompanionFileMatch,
+                ImpactSliceEvidenceKind::DynamicDispatchLiteralTarget,
+                ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad,
+                ImpactSliceEvidenceKind::ParamToReturnFlow,
+            ]
+        );
     }
 }
