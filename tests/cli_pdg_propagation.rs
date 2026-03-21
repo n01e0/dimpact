@@ -983,12 +983,12 @@ fn setup_ruby_dynamic_send_runtime_noise_repo() -> (TempDir, std::path::PathBuf)
         path.join("lib/aaa_runtime.rb"),
         r#"class GenericRuntime
   def method_missing(name, *args)
-    return args.first if args.any?
+    return args.first if name.to_s.start_with?("route_")
     super
   end
 
   def respond_to_missing?(name, include_private = false)
-    true
+    name.to_s.start_with?("route_") || super
   end
 end
 "#,
