@@ -970,6 +970,88 @@ end
     (dir, path)
 }
 
+fn setup_ruby_dynamic_send_runtime_noise_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::create_dir_all(path.join("app")).unwrap();
+    fs::write(
+        path.join("lib/aaa_runtime.rb"),
+        r#"class GenericRuntime
+  def method_missing(name, *args)
+    return args.first if args.any?
+    super
+  end
+
+  def respond_to_missing?(name, include_private = false)
+    true
+  end
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/route_runtime.rb"),
+        r#"class RuntimeProxy
+  def method_missing(name, *args)
+    return args.first if name.to_s.start_with?("route_")
+    super
+  end
+
+  def respond_to_missing?(name, include_private = false)
+    name.to_s.start_with?("route_") || super
+  end
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"require_relative 'aaa_runtime'
+require_relative 'route_runtime'
+
+def bounce(payload)
+  runtime = Object.const_get("RuntimeProxy").new
+  runtime.public_send("route_created", payload)
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("app/runner.rb"),
+        r##"require_relative '../lib/service'
+
+def entry(seed)
+  prepared = "#{seed}-v1"
+  reply = bounce(prepared)
+  return reply
+end
+"##,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("app/runner.rb"),
+        r##"require_relative '../lib/service'
+
+def entry(seed)
+  prepared = "#{seed}-v2"
+  reply = bounce(prepared)
+  return reply
+end
+"##,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn diff_text(repo: &std::path::Path) -> String {
     let diff_out = git(repo, &["diff", "--no-ext-diff", "--unified=0"]);
     String::from_utf8(diff_out.stdout).unwrap()
@@ -2191,6 +2273,60 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
         prop_dot.contains("\"app/runner.rb:use:prepared:5\" -> \"app/runner.rb:def:reply:5\""),
         "expected propagation to recover the Ruby leaf-backed summary bridge, got:\n{}",
         prop_dot
+    );
+}
+
+#[test]
+fn pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise() {
+    let (_tmp, repo) = setup_ruby_dynamic_send_runtime_noise_repo();
+    let diff = diff_text(&repo);
+
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["app/runner.rb", "lib/route_runtime.rb", "lib/service.rb"]
+    );
+    assert_eq!(
+        slice_selection["pruned_candidates"],
+        serde_json::json!([]),
+        "expected unrelated generic dynamic runtime to be filtered before tier-2 ranking: {prop:#}"
+    );
+
+    let route_runtime = slice_selection_file(slice_selection, "lib/route_runtime.rb");
+    assert!(
+        route_runtime["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["via_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && reason["via_path"] == "lib/service.rb"
+            })),
+        "expected family-specific runtime to remain selected through lib/service.rb after filtering generic runtime noise: {prop:#}"
+    );
+    assert!(
+        !prop["impacted_files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|path| path == "lib/aaa_runtime.rb")),
+        "unexpected generic dynamic runtime survived into impacted_files: {prop:#}"
     );
 }
 
