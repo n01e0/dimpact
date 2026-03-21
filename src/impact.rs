@@ -129,6 +129,8 @@ pub struct ImpactSliceCandidateScoringSummary {
     pub lane: ImpactSliceCandidateLane,
     pub primary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
     pub secondary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub negative_evidence_kinds: Vec<ImpactSliceNegativeEvidenceKind>,
     pub score_tuple: ImpactSliceScoreTuple,
     #[serde(
         default,
@@ -169,6 +171,12 @@ pub enum ImpactSliceEvidenceKind {
     NamePathHint,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSliceNegativeEvidenceKind {
+    NoisyReturnHint,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ImpactSliceCandidateSupportMetadata {
     #[serde(default, skip_serializing_if = "impact_slice_bool_is_false")]
@@ -194,6 +202,10 @@ fn impact_slice_bool_is_false(value: &bool) -> bool {
     !*value
 }
 
+fn impact_slice_u8_is_zero(value: &u8) -> bool {
+    *value == 0
+}
+
 fn impact_slice_candidate_support_is_absent(
     support: &Option<ImpactSliceCandidateSupportMetadata>,
 ) -> bool {
@@ -217,6 +229,8 @@ pub struct ImpactSliceScoreTuple {
     pub lane_rank: u8,
     pub primary_evidence_count: u8,
     pub secondary_evidence_count: u8,
+    #[serde(default, skip_serializing_if = "impact_slice_u8_is_zero")]
+    pub negative_evidence_count: u8,
     pub call_position_rank: u32,
     pub lexical_tiebreak: String,
 }
@@ -308,6 +322,7 @@ pub enum ImpactWitnessSliceRankingBasis {
     SourceKind,
     Lane,
     PrimaryEvidenceCount,
+    NegativeEvidenceCount,
     SecondaryEvidenceCount,
     CallsitePosition,
     LexicalTiebreak,
@@ -859,6 +874,11 @@ fn selected_vs_pruned_summary(
             "it had more primary evidence ({} > {})",
             selected.score_tuple.primary_evidence_count, pruned.score_tuple.primary_evidence_count
         ),
+        ImpactWitnessSliceRankingBasis::NegativeEvidenceCount => format!(
+            "it had less negative evidence ({} < {})",
+            selected.score_tuple.negative_evidence_count,
+            pruned.score_tuple.negative_evidence_count
+        ),
         ImpactWitnessSliceRankingBasis::SecondaryEvidenceCount => format!(
             "it had more secondary evidence ({} > {})",
             selected.score_tuple.secondary_evidence_count,
@@ -936,6 +956,17 @@ fn selected_reason_ranking_basis(
             return Some(ImpactWitnessSliceRankingBasis::PrimaryEvidenceCount);
         }
         std::cmp::Ordering::Less => return None,
+        std::cmp::Ordering::Equal => {}
+    }
+    match selected
+        .score_tuple
+        .negative_evidence_count
+        .cmp(&pruned.score_tuple.negative_evidence_count)
+    {
+        std::cmp::Ordering::Less => {
+            return Some(ImpactWitnessSliceRankingBasis::NegativeEvidenceCount);
+        }
+        std::cmp::Ordering::Greater => return None,
         std::cmp::Ordering::Equal => {}
     }
     match selected
@@ -2751,11 +2782,13 @@ fn foo() { bar(); }
                     ImpactSliceEvidenceKind::ReturnFlow,
                 ],
                 secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::CallsitePositionHint],
+                negative_evidence_kinds: vec![],
                 score_tuple: ImpactSliceScoreTuple {
                     source_rank: 0,
                     lane_rank: 0,
                     primary_evidence_count: 2,
                     secondary_evidence_count: 1,
+                    negative_evidence_count: 0,
                     call_position_rank: 8,
                     lexical_tiebreak: "leaf.rs".to_string(),
                 },
@@ -2823,11 +2856,13 @@ fn foo() { bar(); }
                     lane: ImpactSliceCandidateLane::AliasContinuation,
                     primary_evidence_kinds: vec![ImpactSliceEvidenceKind::AssignedResult],
                     secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
                     score_tuple: ImpactSliceScoreTuple {
                         source_rank: 0,
                         lane_rank: 1,
                         primary_evidence_count: 1,
                         secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
                         call_position_rank: 7,
                         lexical_tiebreak: "aaa_helper.rs".to_string(),
                     },
@@ -2906,11 +2941,13 @@ fn foo() { bar(); }
                         ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad,
                     ],
                     secondary_evidence_kinds: vec![],
+                    negative_evidence_kinds: vec![],
                     score_tuple: ImpactSliceScoreTuple {
                         source_rank: 0,
                         lane_rank: 3,
                         primary_evidence_count: 2,
                         secondary_evidence_count: 0,
+                        negative_evidence_count: 0,
                         call_position_rank: 0,
                         lexical_tiebreak: "lib/leaf.rb".to_string(),
                     },
@@ -2935,11 +2972,13 @@ fn foo() { bar(); }
                     lane: ImpactSliceCandidateLane::ModuleCompanionFallback,
                     primary_evidence_kinds: vec![ImpactSliceEvidenceKind::CompanionFileMatch],
                     secondary_evidence_kinds: vec![],
+                    negative_evidence_kinds: vec![],
                     score_tuple: ImpactSliceScoreTuple {
                         source_rank: 1,
                         lane_rank: 3,
                         primary_evidence_count: 1,
                         secondary_evidence_count: 0,
+                        negative_evidence_count: 0,
                         call_position_rank: 0,
                         lexical_tiebreak: "lib/helper.rb".to_string(),
                     },
@@ -3464,11 +3503,13 @@ fn foo() { bar(); }
             lane: ImpactSliceCandidateLane::ReturnContinuation,
             primary_evidence_kinds: vec![ImpactSliceEvidenceKind::ReturnFlow],
             secondary_evidence_kinds: vec![],
+            negative_evidence_kinds: vec![],
             score_tuple: ImpactSliceScoreTuple {
                 source_rank: 0,
                 lane_rank: 0,
                 primary_evidence_count: 1,
                 secondary_evidence_count: 0,
+                negative_evidence_count: 0,
                 call_position_rank: 3,
                 lexical_tiebreak: "leaf.rs".to_string(),
             },
@@ -3508,11 +3549,13 @@ fn foo() { bar(); }
                 ImpactSliceEvidenceKind::ParamToReturnFlow,
             ],
             secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+            negative_evidence_kinds: vec![ImpactSliceNegativeEvidenceKind::NoisyReturnHint],
             score_tuple: ImpactSliceScoreTuple {
                 source_rank: 1,
                 lane_rank: 3,
                 primary_evidence_count: 4,
                 secondary_evidence_count: 1,
+                negative_evidence_count: 1,
                 call_position_rank: 0,
                 lexical_tiebreak: "demo/helper.rb".to_string(),
             },
@@ -3543,6 +3586,11 @@ fn foo() { bar(); }
                 "edge_certainty": "dynamic_fallback"
             })
         );
+        assert_eq!(
+            value["negative_evidence_kinds"],
+            serde_json::json!(["noisy_return_hint"])
+        );
+        assert_eq!(value["score_tuple"]["negative_evidence_count"], 1);
 
         let round_tripped: ImpactSliceCandidateScoringSummary =
             serde_json::from_value(value).expect("deserialize scoring summary");

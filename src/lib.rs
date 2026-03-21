@@ -18,12 +18,13 @@ pub use impact::{
     ImpactRiskLevel, ImpactRiskSummary, ImpactSliceBridgeKind, ImpactSliceCandidateLane,
     ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind,
     ImpactSliceCandidateSupportMetadata, ImpactSliceEvidenceKind, ImpactSliceFileMetadata,
-    ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSlicePrunedCandidate,
-    ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceScoreTuple,
-    ImpactSliceSelectionSummary, ImpactSliceSupportEdgeCertainty, ImpactSummary, ImpactWitness,
-    ImpactWitnessHop, ImpactWitnessSliceContext, ImpactWitnessSliceFileContext,
-    ImpactWitnessSliceRankingBasis, ImpactWitnessSliceSelectedVsPrunedReason,
-    attach_slice_selection_summary, build_project_graph, compute_impact, path_is_ignored,
+    ImpactSliceNegativeEvidenceKind, ImpactSlicePlannerKind, ImpactSlicePruneReason,
+    ImpactSlicePrunedCandidate, ImpactSliceReasonKind, ImpactSliceReasonMetadata,
+    ImpactSliceScopes, ImpactSliceScoreTuple, ImpactSliceSelectionSummary,
+    ImpactSliceSupportEdgeCertainty, ImpactSummary, ImpactWitness, ImpactWitnessHop,
+    ImpactWitnessSliceContext, ImpactWitnessSliceFileContext, ImpactWitnessSliceRankingBasis,
+    ImpactWitnessSliceSelectedVsPrunedReason, attach_slice_selection_summary, build_project_graph,
+    compute_impact, path_is_ignored,
 };
 pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
 pub use languages::LanguageKind;

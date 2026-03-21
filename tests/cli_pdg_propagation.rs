@@ -320,6 +320,79 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_returnish_helper_noise_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("leaf.rs"),
+        r#"pub fn source(v: i32) -> i32 {
+    v + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("zzz_final_helper.rs"),
+        r#"pub fn final_helper(v: i32) -> i32 {
+    v - 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("wrapper.rs"),
+        r#"use crate::leaf;
+use crate::zzz_final_helper;
+
+pub fn wrap(left: i32, right: i32) -> i32 {
+    let mid = leaf::source(right);
+    let _side = zzz_final_helper::final_helper(left);
+    mid
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod wrapper;
+mod zzz_final_helper;
+
+fn caller() {
+    let x = 1;
+    let y = 2;
+    let out = wrapper::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod wrapper;
+mod zzz_final_helper;
+
+fn caller() {
+    let x = 3;
+    let y = 2;
+    let out = wrapper::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_cross_file_dual_wrapper_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -1334,6 +1407,135 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
         prop_dot.contains("\"main.rs:use:y:8\" -> \"main.rs:def:out:8\""),
         "expected propagation to recover the leaf-backed wrapper-return bridge, got:\n{}",
         prop_dot
+    );
+}
+
+#[test]
+fn pdg_slice_selection_penalizes_returnish_helper_noise_after_later_callsite() {
+    let (_tmp, repo) = setup_cross_file_returnish_helper_noise_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"leaf.rs:def:v:1\""),
+        "expected bounded slice scope to keep the real leaf return nodes, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"zzz_final_helper.rs:def:v:1\""),
+        "unexpected return-ish helper noise entered the bounded slice scope, got:\n{}",
+        pdg
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(paths, vec!["leaf.rs", "main.rs", "wrapper.rs"]);
+
+    let leaf = slice_selection_file(slice_selection, "leaf.rs");
+    assert!(
+        leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
+                    && reason["via_path"] == "wrapper.rs"
+                    && reason["bridge_kind"] == "wrapper_return"
+                    && reason["scoring"]
+                        == serde_json::json!({
+                            "source_kind": "graph_second_hop",
+                            "lane": "return_continuation",
+                            "primary_evidence_kinds": [
+                                "assigned_result",
+                                "return_flow"
+                            ],
+                            "secondary_evidence_kinds": [
+                                "name_path_hint"
+                            ],
+                            "score_tuple": {
+                                "source_rank": 0,
+                                "lane_rank": 0,
+                                "primary_evidence_count": 2,
+                                "secondary_evidence_count": 1,
+                                "call_position_rank": 5,
+                                "lexical_tiebreak": "leaf.rs"
+                            }
+                        })
+            })),
+        "expected leaf to keep the clean wrapper-return score: {prop:#}"
+    );
+    assert!(
+        slice_selection["pruned_candidates"]
+            .as_array()
+            .is_some_and(|candidates| candidates.iter().any(|candidate| {
+                candidate["path"] == "zzz_final_helper.rs"
+                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
+                    && candidate["bridge_kind"] == "wrapper_return"
+                    && candidate["scoring"]
+                        == serde_json::json!({
+                            "source_kind": "graph_second_hop",
+                            "lane": "return_continuation",
+                            "primary_evidence_kinds": [
+                                "assigned_result",
+                                "return_flow"
+                            ],
+                            "secondary_evidence_kinds": [
+                                "callsite_position_hint",
+                                "name_path_hint"
+                            ],
+                            "negative_evidence_kinds": [
+                                "noisy_return_hint"
+                            ],
+                            "score_tuple": {
+                                "source_rank": 0,
+                                "lane_rank": 0,
+                                "primary_evidence_count": 2,
+                                "secondary_evidence_count": 2,
+                                "negative_evidence_count": 1,
+                                "call_position_rank": 6,
+                                "lexical_tiebreak": "zzz_final_helper.rs"
+                            }
+                        })
+            })),
+        "expected return-ish helper noise to remain only as ranked-out negative evidence metadata: {prop:#}"
+    );
+
+    let witness = &prop["impacted_witnesses"]["rust:leaf.rs:fn:source:1"];
+    let leaf_context = witness_slice_file(witness, "leaf.rs");
+    assert_eq!(
+        leaf_context["selected_vs_pruned_reasons"],
+        serde_json::json!([{
+            "via_symbol_id": "rust:wrapper.rs:fn:wrap:4",
+            "via_path": "wrapper.rs",
+            "selected_bridge_kind": "wrapper_return",
+            "pruned_path": "zzz_final_helper.rs",
+            "prune_reason": "ranked_out",
+            "pruned_bridge_kind": "wrapper_return",
+            "selected_better_by": "negative_evidence_count",
+            "summary": "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1)",
+        }])
     );
 }
 
