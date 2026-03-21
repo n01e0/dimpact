@@ -351,6 +351,8 @@ pub struct ImpactWitnessSliceSelectedVsPrunedReason {
         skip_serializing_if = "impact_slice_candidate_support_is_absent"
     )]
     pub winning_support: Option<ImpactSliceCandidateSupportMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub losing_side_reason: Option<String>,
     pub summary: String,
 }
 
@@ -758,6 +760,12 @@ fn witness_evidence_kind_label(kind: ImpactSliceEvidenceKind) -> &'static str {
     }
 }
 
+fn witness_negative_evidence_kind_label(kind: ImpactSliceNegativeEvidenceKind) -> &'static str {
+    match kind {
+        ImpactSliceNegativeEvidenceKind::NoisyReturnHint => "noisy_return_hint",
+    }
+}
+
 fn witness_support_edge_certainty_label(
     certainty: ImpactSliceSupportEdgeCertainty,
 ) -> &'static str {
@@ -861,6 +869,7 @@ fn selected_vs_pruned_summary(
     pruned: &ImpactSliceCandidateScoringSummary,
     winning_primary_evidence_kinds: Option<&[ImpactSliceEvidenceKind]>,
     winning_support: Option<&ImpactSliceCandidateSupportMetadata>,
+    losing_side_reason: Option<&str>,
 ) -> String {
     let reason = match basis {
         ImpactWitnessSliceRankingBasis::SourceKind => format!(
@@ -919,6 +928,9 @@ fn selected_vs_pruned_summary(
                 selected_vs_pruned_summary_labels(&winning_support_labels)
             ));
         }
+    }
+    if let Some(losing_side_reason) = losing_side_reason {
+        details.push(format!("losing side: {losing_side_reason}"));
     }
     if details.is_empty() {
         format!("selected over {} because {}", pruned_path, reason)
@@ -1020,6 +1032,50 @@ fn selected_reason_ranking_basis(
     }
 }
 
+fn selected_vs_pruned_losing_side_reason(
+    selected: &ImpactSliceCandidateScoringSummary,
+    pruned: &ImpactSliceCandidateScoringSummary,
+) -> Option<String> {
+    let mut labels = Vec::new();
+    let mut seen_negative_evidence = HashSet::new();
+    for kind in pruned.negative_evidence_kinds.iter().copied() {
+        if seen_negative_evidence.insert(kind) {
+            labels.push(format!(
+                "negative_evidence={}",
+                witness_negative_evidence_kind_label(kind)
+            ));
+        }
+    }
+    if pruned.source_kind == ImpactSliceCandidateSourceKind::NarrowFallback
+        && selected.source_kind != pruned.source_kind
+    {
+        labels.push(format!(
+            "fallback_only={}",
+            witness_source_kind_label(pruned.source_kind)
+        ));
+    } else if pruned.lane == ImpactSliceCandidateLane::ModuleCompanionFallback
+        && selected.lane != pruned.lane
+    {
+        labels.push(format!("fallback_only={}", witness_lane_label(pruned.lane)));
+    }
+    let pruned_edge_certainty = pruned
+        .support
+        .as_ref()
+        .and_then(|support| support.edge_certainty);
+    let selected_edge_certainty = selected
+        .support
+        .as_ref()
+        .and_then(|support| support.edge_certainty);
+    if pruned_edge_certainty == Some(ImpactSliceSupportEdgeCertainty::DynamicFallback)
+        && witness_support_edge_certainty_rank(selected_edge_certainty)
+            > witness_support_edge_certainty_rank(pruned_edge_certainty)
+    {
+        labels.push("edge_certainty=dynamic_fallback".to_string());
+    }
+
+    (!labels.is_empty()).then(|| selected_vs_pruned_summary_labels(&labels))
+}
+
 fn selected_reason_matches_pruned_candidate(
     reason: &ImpactSliceReasonMetadata,
     candidate: &ImpactSlicePrunedCandidate,
@@ -1061,6 +1117,8 @@ fn build_selected_vs_pruned_reasons(
                 selected_vs_pruned_winning_primary_evidence_kinds(selected_scoring, pruned_scoring);
             let winning_support =
                 selected_vs_pruned_winning_support(selected_scoring, pruned_scoring);
+            let losing_side_reason =
+                selected_vs_pruned_losing_side_reason(selected_scoring, pruned_scoring);
             reasons.push(ImpactWitnessSliceSelectedVsPrunedReason {
                 via_symbol_id: reason.via_symbol_id.clone(),
                 via_path: reason.via_path.clone(),
@@ -1071,6 +1129,7 @@ fn build_selected_vs_pruned_reasons(
                 selected_better_by,
                 winning_primary_evidence_kinds: winning_primary_evidence_kinds.clone(),
                 winning_support: winning_support.clone(),
+                losing_side_reason: losing_side_reason.clone(),
                 summary: selected_vs_pruned_summary(
                     selected_path,
                     &candidate.path,
@@ -1079,6 +1138,7 @@ fn build_selected_vs_pruned_reasons(
                     pruned_scoring,
                     winning_primary_evidence_kinds.as_deref(),
                     winning_support.as_ref(),
+                    losing_side_reason.as_deref(),
                 ),
             });
         }
@@ -2920,6 +2980,7 @@ fn foo() { bar(); }
                 selected_better_by: ImpactWitnessSliceRankingBasis::Lane,
                 winning_primary_evidence_kinds: Some(vec![ImpactSliceEvidenceKind::ReturnFlow]),
                 winning_support: None,
+                losing_side_reason: None,
                 summary: "selected over aaa_helper.rs because return_continuation outranked alias_continuation; winning primary evidence: return_flow".to_string(),
             }]
         );
@@ -3030,7 +3091,100 @@ fn foo() { bar(); }
                     edge_certainty: Some(ImpactSliceSupportEdgeCertainty::Confirmed),
                     ..ImpactSliceCandidateSupportMetadata::default()
                 }),
-                summary: "selected over lib/helper.rb because graph_second_hop outranked narrow_fallback; winning primary evidence: explicit_require_relative_load; winning support: symbolic_propagation_support + edge_certainty=confirmed".to_string(),
+                losing_side_reason: Some(
+                    "fallback_only=narrow_fallback + edge_certainty=dynamic_fallback"
+                        .to_string()
+                ),
+                summary: "selected over lib/helper.rb because graph_second_hop outranked narrow_fallback; winning primary evidence: explicit_require_relative_load; winning support: symbolic_propagation_support + edge_certainty=confirmed; losing side: fallback_only=narrow_fallback + edge_certainty=dynamic_fallback".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn selected_vs_pruned_reason_derives_losing_side_reason_from_negative_evidence() {
+        let seed_symbol_id = "rust:main.rs:fn:caller:1".to_string();
+        let via_symbol_id = "rust:wrapper.rs:fn:wrap:4".to_string();
+        let reasons = build_selected_vs_pruned_reasons(
+            "leaf.rs",
+            &[ImpactSliceReasonMetadata {
+                seed_symbol_id: seed_symbol_id.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(via_symbol_id.clone()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 2,
+                        secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 0,
+                        call_position_rank: 5,
+                        lexical_tiebreak: "leaf.rs".to_string(),
+                    },
+                    support: None,
+                }),
+            }],
+            &[ImpactSlicePrunedCandidate {
+                seed_symbol_id,
+                path: "zzz_final_helper.rs".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(via_symbol_id),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    negative_evidence_kinds: vec![ImpactSliceNegativeEvidenceKind::NoisyReturnHint],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 2,
+                        secondary_evidence_count: 2,
+                        negative_evidence_count: 1,
+                        semantic_support_rank: 0,
+                        call_position_rank: 6,
+                        lexical_tiebreak: "zzz_final_helper.rs".to_string(),
+                    },
+                    support: None,
+                }),
+            }],
+        );
+
+        assert_eq!(
+            reasons,
+            vec![ImpactWitnessSliceSelectedVsPrunedReason {
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:4".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                selected_bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                pruned_path: "zzz_final_helper.rs".to_string(),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                pruned_bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                selected_better_by: ImpactWitnessSliceRankingBasis::NegativeEvidenceCount,
+                winning_primary_evidence_kinds: None,
+                winning_support: None,
+                losing_side_reason: Some("negative_evidence=noisy_return_hint".to_string()),
+                summary: "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1); losing side: negative_evidence=noisy_return_hint".to_string(),
             }]
         );
     }
@@ -3047,6 +3201,7 @@ fn foo() { bar(); }
             selected_better_by: ImpactWitnessSliceRankingBasis::Lane,
             winning_primary_evidence_kinds: None,
             winning_support: None,
+            losing_side_reason: None,
             summary:
                 "selected over helper.rs because return_continuation outranked alias_continuation"
                     .to_string(),
@@ -3055,6 +3210,7 @@ fn foo() { bar(); }
         let value = serde_json::to_value(&reason).expect("serialize witness reason");
         assert!(value.get("winning_primary_evidence_kinds").is_none());
         assert!(value.get("winning_support").is_none());
+        assert!(value.get("losing_side_reason").is_none());
     }
 
     #[test]
