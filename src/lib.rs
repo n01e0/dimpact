@@ -16,11 +16,12 @@ pub use engine::{AnalysisEngine, EngineKind};
 pub use impact::{
     ImpactAffectedModule, ImpactDepthBucket, ImpactDirection, ImpactOptions, ImpactOutput,
     ImpactRiskLevel, ImpactRiskSummary, ImpactSliceBridgeKind, ImpactSliceCandidateLane,
-    ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind, ImpactSliceEvidenceKind,
-    ImpactSliceFileMetadata, ImpactSlicePlannerKind, ImpactSlicePruneReason,
-    ImpactSlicePrunedCandidate, ImpactSliceReasonKind, ImpactSliceReasonMetadata,
-    ImpactSliceScopes, ImpactSliceScoreTuple, ImpactSliceSelectionSummary, ImpactSummary,
-    ImpactWitness, ImpactWitnessHop, ImpactWitnessSliceContext, ImpactWitnessSliceFileContext,
+    ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind,
+    ImpactSliceCandidateSupportMetadata, ImpactSliceEvidenceKind, ImpactSliceFileMetadata,
+    ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSlicePrunedCandidate,
+    ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceScoreTuple,
+    ImpactSliceSelectionSummary, ImpactSliceSupportEdgeCertainty, ImpactSummary, ImpactWitness,
+    ImpactWitnessHop, ImpactWitnessSliceContext, ImpactWitnessSliceFileContext,
     ImpactWitnessSliceRankingBasis, ImpactWitnessSliceSelectedVsPrunedReason,
     attach_slice_selection_summary, build_project_graph, compute_impact, path_is_ignored,
 };

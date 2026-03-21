@@ -130,6 +130,11 @@ pub struct ImpactSliceCandidateScoringSummary {
     pub primary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
     pub secondary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
     pub score_tuple: ImpactSliceScoreTuple,
+    #[serde(
+        default,
+        skip_serializing_if = "impact_slice_candidate_support_is_absent"
+    )]
+    pub support: Option<ImpactSliceCandidateSupportMetadata>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -154,10 +159,56 @@ pub enum ImpactSliceEvidenceKind {
     ReturnFlow,
     AssignedResult,
     AliasChain,
+    ParamToReturnFlow,
     RequireRelativeEdge,
+    ExplicitRequireRelativeLoad,
     ModuleCompanion,
+    CompanionFileMatch,
+    DynamicDispatchLiteralTarget,
     CallsitePositionHint,
     NamePathHint,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ImpactSliceCandidateSupportMetadata {
+    #[serde(default, skip_serializing_if = "impact_slice_bool_is_false")]
+    pub call_graph_support: bool,
+    #[serde(default, skip_serializing_if = "impact_slice_bool_is_false")]
+    pub local_dfg_support: bool,
+    #[serde(default, skip_serializing_if = "impact_slice_bool_is_false")]
+    pub symbolic_propagation_support: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_certainty: Option<ImpactSliceSupportEdgeCertainty>,
+}
+
+impl ImpactSliceCandidateSupportMetadata {
+    fn is_empty(&self) -> bool {
+        !self.call_graph_support
+            && !self.local_dfg_support
+            && !self.symbolic_propagation_support
+            && self.edge_certainty.is_none()
+    }
+}
+
+fn impact_slice_bool_is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn impact_slice_candidate_support_is_absent(
+    support: &Option<ImpactSliceCandidateSupportMetadata>,
+) -> bool {
+    match support {
+        None => true,
+        Some(support) => support.is_empty(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactSliceSupportEdgeCertainty {
+    Confirmed,
+    Inferred,
+    DynamicFallback,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -2520,6 +2571,7 @@ fn foo() { bar(); }
                     call_position_rank: 8,
                     lexical_tiebreak: "leaf.rs".to_string(),
                 },
+                support: None,
             }),
         };
         let slice_selection = ImpactSliceSelectionSummary {
@@ -2591,6 +2643,7 @@ fn foo() { bar(); }
                         call_position_rank: 7,
                         lexical_tiebreak: "aaa_helper.rs".to_string(),
                     },
+                    support: None,
                 }),
             }],
         };
@@ -3086,5 +3139,97 @@ fn foo() { bar(); }
         assert_eq!(risk.level, ImpactRiskLevel::High);
         assert_eq!(risk.direct_hits, 2);
         assert_eq!(risk.transitive_hits, 2);
+    }
+
+    #[test]
+    fn scoring_summary_omits_empty_support_metadata_from_json() {
+        let scoring = ImpactSliceCandidateScoringSummary {
+            source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+            lane: ImpactSliceCandidateLane::ReturnContinuation,
+            primary_evidence_kinds: vec![ImpactSliceEvidenceKind::ReturnFlow],
+            secondary_evidence_kinds: vec![],
+            score_tuple: ImpactSliceScoreTuple {
+                source_rank: 0,
+                lane_rank: 0,
+                primary_evidence_count: 1,
+                secondary_evidence_count: 0,
+                call_position_rank: 3,
+                lexical_tiebreak: "leaf.rs".to_string(),
+            },
+            support: Some(ImpactSliceCandidateSupportMetadata::default()),
+        };
+
+        let value = serde_json::to_value(&scoring).expect("serialize scoring summary");
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "source_kind": "graph_second_hop",
+                "lane": "return_continuation",
+                "primary_evidence_kinds": ["return_flow"],
+                "secondary_evidence_kinds": [],
+                "score_tuple": {
+                    "source_rank": 0,
+                    "lane_rank": 0,
+                    "primary_evidence_count": 1,
+                    "secondary_evidence_count": 0,
+                    "call_position_rank": 3,
+                    "lexical_tiebreak": "leaf.rs"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn scoring_summary_round_trips_new_evidence_kinds_and_support_metadata() {
+        let scoring = ImpactSliceCandidateScoringSummary {
+            source_kind: ImpactSliceCandidateSourceKind::NarrowFallback,
+            lane: ImpactSliceCandidateLane::ModuleCompanionFallback,
+            primary_evidence_kinds: vec![
+                ImpactSliceEvidenceKind::CompanionFileMatch,
+                ImpactSliceEvidenceKind::DynamicDispatchLiteralTarget,
+                ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad,
+                ImpactSliceEvidenceKind::ParamToReturnFlow,
+            ],
+            secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+            score_tuple: ImpactSliceScoreTuple {
+                source_rank: 1,
+                lane_rank: 3,
+                primary_evidence_count: 4,
+                secondary_evidence_count: 1,
+                call_position_rank: 0,
+                lexical_tiebreak: "demo/helper.rb".to_string(),
+            },
+            support: Some(ImpactSliceCandidateSupportMetadata {
+                call_graph_support: true,
+                local_dfg_support: true,
+                symbolic_propagation_support: true,
+                edge_certainty: Some(ImpactSliceSupportEdgeCertainty::DynamicFallback),
+            }),
+        };
+
+        let value = serde_json::to_value(&scoring).expect("serialize scoring summary");
+        assert_eq!(
+            value["primary_evidence_kinds"],
+            serde_json::json!([
+                "companion_file_match",
+                "dynamic_dispatch_literal_target",
+                "explicit_require_relative_load",
+                "param_to_return_flow"
+            ])
+        );
+        assert_eq!(
+            value["support"],
+            serde_json::json!({
+                "call_graph_support": true,
+                "local_dfg_support": true,
+                "symbolic_propagation_support": true,
+                "edge_certainty": "dynamic_fallback"
+            })
+        );
+
+        let round_tripped: ImpactSliceCandidateScoringSummary =
+            serde_json::from_value(value).expect("deserialize scoring summary");
+        assert_eq!(round_tripped, scoring);
     }
 }
