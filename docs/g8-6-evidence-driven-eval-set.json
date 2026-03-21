@@ -1,7 +1,7 @@
 {
-  "generated_by": "manual G8-6 design note",
+  "generated_by": "manual G8-6/G9 eval-set extension note",
   "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
-  "purpose": "fixed evidence-driven evaluation set for semantic scoring, true narrow fallback, and winning-evidence witness explanation on current HEAD",
+  "purpose": "fixed evidence-driven evaluation set covering G8 baseline plus G9 evidence-conflict regressions for negative evidence, semantic tie-breaks, dynamic fallback filtering, and losing-side witness reasons",
   "defaults": {
     "engine": "ts",
     "cli_lanes": [
@@ -9,6 +9,11 @@
       "propagation"
     ],
     "note": "treat current HEAD planner/unit tests as first-class lanes when the evidence surface is locked there more directly than in CLI output"
+  },
+  "totals": {
+    "cases": 7,
+    "rust": 3,
+    "ruby": 4
   },
   "cases": [
     {
@@ -63,20 +68,6 @@
           "--exact"
         ]
       },
-      "repro": {
-        "layout": [
-          "step.rs",
-          "later.rs",
-          "wrapper.rs",
-          "main.rs"
-        ],
-        "shape": [
-          "step.rs keeps input -> forwarded -> return continuity",
-          "later.rs is a neutral helper reached from the same wrapper",
-          "wrapper.rs calls both step::step(a) and later::later(a)",
-          "main.rs mutates input from 1 to 2"
-        ]
-      },
       "expected_outcome": {
         "selected_paths": [
           "main.rs",
@@ -91,15 +82,7 @@
         ],
         "selected_via_symbol_id": "rust:wrapper.rs:fn:wrap:4",
         "selected_better_by": "primary_evidence_count",
-        "witness_symbol_id": "rust:step.rs:fn:step:1",
-        "dot_assertions": {
-          "contains": [
-            "\"step.rs:def:forwarded:2\""
-          ],
-          "excludes": [
-            "\"later.rs:def:shadow:2\""
-          ]
-        }
+        "witness_symbol_id": "rust:step.rs:fn:step:1"
       },
       "expected_fields": {
         "selected_scoring": {
@@ -146,6 +129,230 @@
       ]
     },
     {
+      "case_id": "rust-returnish-helper-negative-evidence",
+      "lang": "rust",
+      "source_kind": "integration_fixture_plus_unit_guard",
+      "source": [
+        "src/bin/dimpact.rs::bounded_slice_plan_penalizes_returnish_helper_noise_against_real_return_completion",
+        "tests/cli_pdg_propagation.rs::setup_cross_file_returnish_helper_noise_repo",
+        "tests/cli_pdg_propagation.rs::pdg_slice_selection_penalizes_returnish_helper_noise_after_later_callsite",
+        "src/impact.rs::selected_vs_pruned_reason_derives_losing_side_reason_from_negative_evidence"
+      ],
+      "failure_kind": "suppressing_regression",
+      "primary_view": "dot+json+unit_test",
+      "focus": "return-ish helper noise stays ranked out once noisy_return_hint is introduced as negative evidence",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json"
+        ]
+      },
+      "test_lanes": {
+        "integration": [
+          "cargo",
+          "test",
+          "--test",
+          "cli_pdg_propagation",
+          "pdg_slice_selection_penalizes_returnish_helper_noise_after_later_callsite",
+          "--",
+          "--exact"
+        ],
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "bounded_slice_plan_penalizes_returnish_helper_noise_against_real_return_completion",
+          "--",
+          "--exact"
+        ]
+      },
+      "expected_outcome": {
+        "selected_paths": [
+          "leaf.rs",
+          "main.rs",
+          "wrapper.rs"
+        ],
+        "pruned_candidates": [
+          {
+            "path": "zzz_final_helper.rs",
+            "prune_reason": "ranked_out"
+          }
+        ],
+        "selected_better_by": "negative_evidence_count",
+        "witness_symbol_id": "rust:leaf.rs:fn:source:1"
+      },
+      "expected_fields": {
+        "selected_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "return_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result",
+            "return_flow"
+          ],
+          "secondary_evidence_kinds": [
+            "name_path_hint"
+          ]
+        },
+        "pruned_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "return_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result",
+            "return_flow"
+          ],
+          "secondary_evidence_kinds": [
+            "callsite_position_hint",
+            "name_path_hint"
+          ],
+          "negative_evidence_kinds": [
+            "noisy_return_hint"
+          ],
+          "score_tuple": {
+            "negative_evidence_count": 1
+          }
+        },
+        "witness_reason": {
+          "selected_better_by": "negative_evidence_count",
+          "losing_side_reason": "negative_evidence=noisy_return_hint",
+          "summary": "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1); losing side: negative_evidence=noisy_return_hint"
+        }
+      },
+      "regression_catch": [
+        "later return-ish helper wins again despite negative evidence",
+        "negative_evidence_kinds disappears from ranked-out metadata",
+        "losing-side negative evidence stops appearing in witness output"
+      ]
+    },
+    {
+      "case_id": "rust-semantic-support-tiebreak",
+      "lang": "rust",
+      "source_kind": "integration_fixture_plus_unit_guard",
+      "source": [
+        "src/bin/dimpact.rs::bounded_slice_plan_prefers_stronger_rust_semantic_support_over_later_callsite_hint",
+        "tests/cli_pdg_propagation.rs::setup_cross_file_semantic_support_competition_repo",
+        "tests/cli_pdg_propagation.rs::pdg_slice_selection_prefers_stronger_rust_semantic_support_over_later_callsite_hint"
+      ],
+      "failure_kind": "tiebreak_regression",
+      "primary_view": "dot+json+unit_test",
+      "focus": "same-kind Rust return candidates are decided by semantic_support_rank before later callsite hints",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json"
+        ]
+      },
+      "test_lanes": {
+        "integration": [
+          "cargo",
+          "test",
+          "--test",
+          "cli_pdg_propagation",
+          "pdg_slice_selection_prefers_stronger_rust_semantic_support_over_later_callsite_hint",
+          "--",
+          "--exact"
+        ],
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "bounded_slice_plan_prefers_stronger_rust_semantic_support_over_later_callsite_hint",
+          "--",
+          "--exact"
+        ]
+      },
+      "expected_outcome": {
+        "selected_paths": [
+          "main.rs",
+          "steady.rs",
+          "wrapper.rs"
+        ],
+        "pruned_candidates": [
+          {
+            "path": "plain.rs",
+            "prune_reason": "ranked_out"
+          }
+        ],
+        "selected_better_by": "semantic_support_rank",
+        "witness_symbol_id": "rust:steady.rs:fn:carry:1"
+      },
+      "expected_fields": {
+        "selected_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "return_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result",
+            "param_to_return_flow",
+            "return_flow"
+          ],
+          "secondary_evidence_kinds": [
+            "name_path_hint"
+          ],
+          "score_tuple": {
+            "semantic_support_rank": 3
+          },
+          "support": {
+            "local_dfg_support": true
+          }
+        },
+        "pruned_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "return_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result",
+            "param_to_return_flow",
+            "return_flow"
+          ],
+          "secondary_evidence_kinds": [
+            "callsite_position_hint",
+            "name_path_hint"
+          ],
+          "score_tuple": {
+            "semantic_support_rank": 2
+          },
+          "support": {
+            "local_dfg_support": true
+          }
+        },
+        "witness_reason": {
+          "selected_better_by": "semantic_support_rank",
+          "summary": "selected over plain.rs because it had stronger semantic support (3 > 2)"
+        }
+      },
+      "regression_catch": [
+        "same-kind candidates are decided by later callsite hint again",
+        "semantic_support_rank disappears from scoring metadata",
+        "the stronger semantic leaf loses to plain.rs"
+      ]
+    },
+    {
       "case_id": "ruby-method-missing-companion-narrow-fallback",
       "lang": "ruby",
       "source_kind": "planner_unit_fixture",
@@ -170,24 +377,7 @@
           "--exact"
         ]
       },
-      "repro": {
-        "layout": [
-          "app/main.rb",
-          "lib/router.rb",
-          "lib/runtime.rb"
-        ],
-        "shape": [
-          "app/main.rb calls Router#run_created",
-          "lib/router.rb require_relative loads runtime.rb and uses public_send(\"route_created\", payload)",
-          "lib/runtime.rb implements RuntimeProxy#method_missing and respond_to_missing?"
-        ]
-      },
       "expected_outcome": {
-        "cache_update_path_suffixes": [
-          "app/main.rb",
-          "lib/router.rb",
-          "lib/runtime.rb"
-        ],
         "selected_reason": {
           "tier": 3,
           "kind": "module_companion_file",
@@ -220,16 +410,101 @@
           "support": {
             "edge_certainty": "dynamic_fallback"
           }
-        },
-        "explanation_surface": {
-          "selected_vs_pruned_reasons": "absent",
-          "pruned_candidates": []
         }
       },
       "regression_catch": [
         "runtime companion is no longer selected as bounded narrow fallback",
         "one of companion_file_match, dynamic_dispatch_literal_target, or explicit_require_relative_load drops from scoring",
         "narrow fallback gets mixed into graph-first selected reasons"
+      ]
+    },
+    {
+      "case_id": "ruby-dynamic-runtime-target-family-filter",
+      "lang": "ruby",
+      "source_kind": "planner_unit_plus_integration_fixture",
+      "source": [
+        "src/bin/dimpact.rs::ruby_narrow_fallback_filters_generic_dynamic_runtime_without_target_family_hint",
+        "tests/cli_pdg_propagation.rs::setup_ruby_dynamic_send_runtime_noise_repo",
+        "tests/cli_pdg_propagation.rs::pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise"
+      ],
+      "failure_kind": "fallback_noise_filter_regression",
+      "primary_view": "json+unit_test",
+      "focus": "generic dynamic runtime noise is filtered before candidate materialization unless it matches the literal target family",
+      "direction": "callees",
+      "lanes": {
+        "propagation": [
+          "impact",
+          "--direction",
+          "callees",
+          "--lang",
+          "ruby",
+          "--with-propagation",
+          "--format",
+          "json"
+        ]
+      },
+      "test_lanes": {
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "ruby_narrow_fallback_filters_generic_dynamic_runtime_without_target_family_hint",
+          "--",
+          "--exact"
+        ],
+        "integration": [
+          "cargo",
+          "test",
+          "--test",
+          "cli_pdg_propagation",
+          "pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise",
+          "--",
+          "--exact"
+        ]
+      },
+      "expected_outcome": {
+        "selected_paths": [
+          "app/runner.rb",
+          "lib/route_runtime.rb",
+          "lib/service.rb"
+        ],
+        "pruned_candidates": [],
+        "filtered_before_materialization": [
+          "lib/aaa_runtime.rb"
+        ]
+      },
+      "expected_fields": {
+        "boundary_evidence": {
+          "explicit_require_relative_load_suffixes": [
+            "lib/aaa_runtime.rb",
+            "lib/route_runtime.rb"
+          ],
+          "literal_dynamic_target_hints": [
+            "route_",
+            "route_created"
+          ]
+        },
+        "candidate_filtering": {
+          "generic_runtime": "none",
+          "route_runtime": {
+            "matched_call_line": 10,
+            "edge_certainty": "dynamic_fallback"
+          }
+        },
+        "cli_assertions": {
+          "impacted_files_excludes": [
+            "lib/aaa_runtime.rb"
+          ],
+          "selected_files_contains": [
+            "lib/route_runtime.rb"
+          ]
+        }
+      },
+      "regression_catch": [
+        "generic dynamic runtime noise survives into fallback candidates",
+        "literal target family hints disappear from boundary evidence",
+        "the intended route runtime is filtered out together with the noise"
       ]
     },
     {
@@ -243,7 +518,7 @@
       ],
       "failure_kind": "explanation_regression",
       "primary_view": "unit_test",
-      "focus": "selected-vs-pruned witness surface exposes winning evidence and winning support for a source_kind competition",
+      "focus": "selected-vs-pruned witness surface exposes winning evidence, winning support, and losing-side reason for a source_kind competition",
       "test_lanes": {
         "lib_unit": [
           "cargo",
@@ -252,14 +527,6 @@
           "selected_vs_pruned_reason_derives_winning_metadata_for_source_kind_explanations",
           "--",
           "--exact"
-        ]
-      },
-      "repro": {
-        "shape": [
-          "selected path lib/leaf.rb is graph_second_hop",
-          "pruned path lib/helper.rb is narrow_fallback",
-          "both compete through via_path lib/service.rb",
-          "selected has explicit_require_relative_load and stronger support metadata"
         ]
       },
       "expected_outcome": {
@@ -298,13 +565,15 @@
             "symbolic_propagation_support": true,
             "edge_certainty": "confirmed"
           },
-          "summary": "selected over lib/helper.rb because graph_second_hop outranked narrow_fallback; winning primary evidence: explicit_require_relative_load; winning support: symbolic_propagation_support + edge_certainty=confirmed"
+          "losing_side_reason": "fallback_only=narrow_fallback + edge_certainty=dynamic_fallback",
+          "summary": "selected over lib/helper.rb because graph_second_hop outranked narrow_fallback; winning primary evidence: explicit_require_relative_load; winning support: symbolic_propagation_support + edge_certainty=confirmed; losing side: fallback_only=narrow_fallback + edge_certainty=dynamic_fallback"
         }
       },
       "regression_catch": [
         "winning_primary_evidence_kinds stops reflecting selected-minus-pruned evidence",
         "winning_support drops support deltas such as symbolic_propagation_support or confirmed certainty",
-        "source-kind explanation degrades back to a bare ranking result without evidence/support detail"
+        "losing_side_reason drops fallback-only or dynamic_fallback metadata",
+        "source-kind explanation degrades back to a bare ranking result without evidence/support/losing-side detail"
       ]
     },
     {
@@ -362,19 +631,6 @@
           "--exact"
         ]
       },
-      "repro": {
-        "layout": [
-          "lib/leaf.rb",
-          "lib/zzz_helper.rb",
-          "lib/service.rb",
-          "app/runner.rb"
-        ],
-        "shape": [
-          "lib/service.rb require_relative loads both leaf.rb and zzz_helper.rb",
-          "bounce(value) calls finish(alias_value) and helper_noise(value)",
-          "app/runner.rb mutates prepared from seed + 1 to seed + 2"
-        ]
-      },
       "expected_outcome": {
         "selected_paths": [
           "app/runner.rb",
@@ -388,16 +644,7 @@
           }
         ],
         "selected_better_by": "lane",
-        "helper_excluded_from_explanation_slice": true,
-        "dot_assertions": {
-          "contains": [
-            "\"lib/leaf.rb:def:alias_value:2\"",
-            "\"app/runner.rb:use:prepared:5\" -> \"app/runner.rb:def:reply:5\""
-          ],
-          "excludes": [
-            "\"lib/zzz_helper.rb:def:debug_value:2\""
-          ]
-        }
+        "helper_excluded_from_explanation_slice": true
       },
       "expected_fields": {
         "selected_scoring": {
