@@ -261,6 +261,8 @@ pub enum ImpactSlicePruneReason {
     BridgeBudgetExhausted,
     CacheUpdateBudgetExhausted,
     LocalDfgBudgetExhausted,
+    SuppressedBeforeAdmit,
+    WeakerSamePathDuplicate,
     RankedOut,
 }
 
@@ -1077,11 +1079,16 @@ fn selected_vs_pruned_losing_side_reason(
 }
 
 fn selected_reason_matches_pruned_candidate(
+    selected_path: &str,
     reason: &ImpactSliceReasonMetadata,
     candidate: &ImpactSlicePrunedCandidate,
 ) -> bool {
     reason.kind == ImpactSliceReasonKind::BridgeCompletionFile
-        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+        && matches!(
+            candidate.prune_reason,
+            ImpactSlicePruneReason::RankedOut | ImpactSlicePruneReason::SuppressedBeforeAdmit
+        )
+        && candidate.path != selected_path
         && reason.seed_symbol_id == candidate.seed_symbol_id
         && reason.tier == candidate.tier
         && reason.kind == candidate.kind
@@ -1101,10 +1108,9 @@ fn build_selected_vs_pruned_reasons(
             continue;
         };
 
-        for candidate in pruned_candidates
-            .iter()
-            .filter(|candidate| selected_reason_matches_pruned_candidate(reason, candidate))
-        {
+        for candidate in pruned_candidates.iter().filter(|candidate| {
+            selected_reason_matches_pruned_candidate(selected_path, reason, candidate)
+        }) {
             let Some(pruned_scoring) = candidate.scoring.as_ref() else {
                 continue;
             };

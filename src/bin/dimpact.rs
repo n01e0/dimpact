@@ -1879,6 +1879,61 @@ fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp:
         .then_with(|| a.via_symbol_id.cmp(&b.via_symbol_id))
 }
 
+fn candidate_has_semantic_ready_continuity(candidate: &Tier2Candidate) -> bool {
+    has_strong_semantic_tier2_evidence(&candidate.scoring.primary_evidence_kinds)
+        || candidate.scoring.score_tuple.semantic_support_rank > 0
+}
+
+fn candidate_is_lexical_or_callsite_only(candidate: &Tier2Candidate) -> bool {
+    if candidate_has_semantic_ready_continuity(candidate) {
+        return false;
+    }
+
+    candidate.scoring.primary_evidence_kinds.iter().all(|kind| {
+        matches!(
+            kind,
+            ImpactSliceEvidenceKind::AssignedResult | ImpactSliceEvidenceKind::RequireRelativeEdge
+        )
+    }) && candidate
+        .scoring
+        .secondary_evidence_kinds
+        .iter()
+        .any(|kind| {
+            matches!(
+                kind,
+                ImpactSliceEvidenceKind::CallsitePositionHint
+                    | ImpactSliceEvidenceKind::NamePathHint
+            )
+        })
+}
+
+fn candidate_has_helper_noise_signal(candidate: &Tier2Candidate) -> bool {
+    let path = candidate.path.to_ascii_lowercase();
+    noise_keyword_hint(path.as_str())
+        || candidate
+            .scoring
+            .negative_evidence_kinds
+            .contains(&ImpactSliceNegativeEvidenceKind::NoisyReturnHint)
+}
+
+fn candidate_is_weak_ruby_require_relative(candidate: &Tier2Candidate) -> bool {
+    candidate.scoring.lane == ImpactSliceCandidateLane::RequireRelativeContinuation
+        && !candidate_has_semantic_ready_continuity(candidate)
+}
+
+fn should_suppress_before_admit(
+    candidate: &Tier2Candidate,
+    side_has_semantic_ready_candidate: bool,
+) -> bool {
+    if !side_has_semantic_ready_candidate {
+        return false;
+    }
+
+    (candidate_has_helper_noise_signal(candidate)
+        && candidate_is_lexical_or_callsite_only(candidate))
+        || candidate_is_weak_ruby_require_relative(candidate)
+}
+
 fn candidate_reason_kind(candidate: &Tier2Candidate) -> ImpactSliceReasonKind {
     match candidate.scoring.source_kind {
         ImpactSliceCandidateSourceKind::GraphSecondHop => {
@@ -1930,6 +1985,61 @@ fn make_tier2_pruned_candidate(
         prune_reason,
         scoring: Some(candidate.scoring.clone()),
     }
+}
+
+fn record_same_path_candidate(
+    side_candidates: &mut std::collections::BTreeMap<String, Tier2Candidate>,
+    seed_selection: &mut SliceSelectionAccumulator,
+    seed_symbol_id: &str,
+    candidate: Tier2Candidate,
+) {
+    match side_candidates.entry(candidate.path.clone()) {
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(candidate);
+        }
+        std::collections::btree_map::Entry::Occupied(mut entry) => {
+            let existing = entry.get().clone();
+            if compare_tier2_candidates(&candidate, &existing).is_lt() {
+                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                    seed_symbol_id,
+                    &existing,
+                    ImpactSlicePruneReason::WeakerSamePathDuplicate,
+                ));
+                entry.insert(candidate);
+            } else {
+                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                    seed_symbol_id,
+                    &candidate,
+                    ImpactSlicePruneReason::WeakerSamePathDuplicate,
+                ));
+            }
+        }
+    }
+}
+
+fn suppress_before_admit(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    side_candidates: Vec<Tier2Candidate>,
+) -> Vec<Tier2Candidate> {
+    let side_has_semantic_ready_candidate = side_candidates
+        .iter()
+        .any(candidate_has_semantic_ready_continuity);
+    let mut admitted = Vec::new();
+
+    for candidate in side_candidates {
+        if should_suppress_before_admit(&candidate, side_has_semantic_ready_candidate) {
+            seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                seed_symbol_id,
+                &candidate,
+                ImpactSlicePruneReason::SuppressedBeforeAdmit,
+            ));
+            continue;
+        }
+        admitted.push(candidate);
+    }
+
+    admitted
 }
 
 fn plan_bounded_slice(
@@ -2077,14 +2187,12 @@ fn plan_bounded_slice(
                     bridge_kind: tier2_bridge_kind_for_lane(scoring.lane),
                     scoring,
                 };
-                side_candidates
-                    .entry(completion_file.to_string())
-                    .and_modify(|existing: &mut Tier2Candidate| {
-                        if compare_tier2_candidates(&candidate, existing).is_lt() {
-                            *existing = candidate.clone();
-                        }
-                    })
-                    .or_insert(candidate);
+                record_same_path_candidate(
+                    &mut side_candidates,
+                    &mut seed_selection,
+                    seed.id.0.as_str(),
+                    candidate,
+                );
             }
             for candidate in collect_ruby_narrow_fallback_candidates(
                 root_file,
@@ -2092,17 +2200,19 @@ fn plan_bounded_slice(
                 boundary_symbol,
                 boundary_file,
             ) {
-                side_candidates
-                    .entry(candidate.path.clone())
-                    .and_modify(|existing: &mut Tier2Candidate| {
-                        if compare_tier2_candidates(&candidate, existing).is_lt() {
-                            *existing = candidate.clone();
-                        }
-                    })
-                    .or_insert(candidate);
+                record_same_path_candidate(
+                    &mut side_candidates,
+                    &mut seed_selection,
+                    seed.id.0.as_str(),
+                    candidate,
+                );
             }
 
-            let mut side_candidates: Vec<_> = side_candidates.into_values().collect();
+            let mut side_candidates = suppress_before_admit(
+                seed.id.0.as_str(),
+                &mut seed_selection,
+                side_candidates.into_values().collect(),
+            );
             side_candidates.sort_by(compare_tier2_candidates);
             for candidate in side_candidates
                 .iter()
@@ -3673,7 +3783,7 @@ fn caller() -> i32 {
                 .iter()
                 .any(|candidate| {
                     candidate.path == "aaa_helper.rs"
-                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.prune_reason == ImpactSlicePruneReason::SuppressedBeforeAdmit
                         && candidate.bridge_kind
                             == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
                         && candidate.via_symbol_id.as_deref() == Some("rust:wrapper.rs:fn:wrap:3")
@@ -3856,7 +3966,7 @@ fn caller() -> i32 {
                 .iter()
                 .any(|candidate| {
                     candidate.path == "zzz_helper.rs"
-                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.prune_reason == ImpactSlicePruneReason::SuppressedBeforeAdmit
                         && candidate.bridge_kind
                             == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
                         && candidate.via_symbol_id.as_deref() == Some("rust:adapter.rs:fn:wrap:3")
@@ -4326,7 +4436,7 @@ fn caller() -> i32 {
                 via_symbol_id: Some("ruby:lib/service.rb:method:bounce:4".to_string()),
                 via_path: Some("lib/service.rb".to_string()),
                 bridge_kind: Some(ImpactSliceBridgeKind::RequireRelativeChain),
-                prune_reason: ImpactSlicePruneReason::RankedOut,
+                prune_reason: ImpactSlicePruneReason::SuppressedBeforeAdmit,
                 scoring: Some(test_tier2_scoring(
                     ImpactSliceCandidateLane::RequireRelativeContinuation,
                     vec![ImpactSliceEvidenceKind::RequireRelativeEdge],
@@ -4335,8 +4445,192 @@ fn caller() -> i32 {
                     "lib/zzz_helper.rb",
                 )),
             }],
-            "expected later Ruby helper noise to stay a single ranked-out require_relative fallback: {:#?}",
+            "expected later Ruby helper noise to be suppressed before side ranking: {:#?}",
             plan.slice_selection.pruned_candidates
+        );
+    }
+
+    #[test]
+    fn bounded_slice_plan_records_weaker_same_path_duplicate_before_side_ranking() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let wrapper = test_symbol("rust:wrapper.rs:fn:wrap:3", "wrap", "wrapper.rs", 3);
+        let leaf = test_symbol("rust:shared.rs:fn:source:1", "source", "shared.rs", 1);
+        let leaf_noise = test_symbol("rust:shared.rs:fn:noise:5", "noise", "shared.rs", 5);
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            wrapper.clone(),
+            leaf.clone(),
+            leaf_noise.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), wrapper.id.0.as_str(), "main.rs", 5),
+            call_ref(wrapper.id.0.as_str(), leaf.id.0.as_str(), "wrapper.rs", 5),
+            call_ref(
+                wrapper.id.0.as_str(),
+                leaf_noise.id.0.as_str(),
+                "wrapper.rs",
+                6,
+            ),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        let leaf_file = slice_selection_file(&plan.slice_selection, "shared.rs");
+        assert_eq!(
+            leaf_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:3".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    vec![ImpactSliceEvidenceKind::NamePathHint],
+                    5,
+                    "shared.rs",
+                )),
+            }]
+        );
+        assert_eq!(
+            plan.slice_selection.pruned_candidates,
+            vec![dimpact::ImpactSlicePrunedCandidate {
+                seed_symbol_id: seed.id.0.clone(),
+                path: "shared.rs".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:3".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                prune_reason: ImpactSlicePruneReason::WeakerSamePathDuplicate,
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![ImpactSliceEvidenceKind::AssignedResult],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    6,
+                    "shared.rs",
+                )),
+            }]
+        );
+    }
+
+    #[test]
+    fn bounded_slice_plan_suppresses_weak_ruby_require_relative_with_stronger_same_side_leaf() {
+        let seed = test_symbol(
+            "ruby:app/runner.rb:method:entry:3",
+            "entry",
+            "app/runner.rb",
+            3,
+        );
+        let service = test_symbol(
+            "ruby:lib/router.rb:method:bounce:4",
+            "bounce",
+            "lib/router.rb",
+            4,
+        );
+        let leaf = test_symbol(
+            "ruby:lib/leaf.rb:method:finish:1",
+            "finish",
+            "lib/leaf.rb",
+            1,
+        );
+        let runtime = test_symbol(
+            "ruby:lib/runtime.rb:method:dispatch:1",
+            "dispatch",
+            "lib/runtime.rb",
+            1,
+        );
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            service.clone(),
+            leaf.clone(),
+            runtime.clone(),
+        ]);
+        let refs = vec![
+            call_ref(
+                seed.id.0.as_str(),
+                service.id.0.as_str(),
+                "app/runner.rb",
+                5,
+            ),
+            call_ref(
+                service.id.0.as_str(),
+                leaf.id.0.as_str(),
+                "lib/router.rb",
+                6,
+            ),
+            call_ref(
+                service.id.0.as_str(),
+                runtime.id.0.as_str(),
+                "lib/router.rb",
+                7,
+            ),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        let leaf_file = slice_selection_file(&plan.slice_selection, "lib/leaf.rb");
+        assert_eq!(
+            leaf_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("ruby:lib/router.rb:method:bounce:4".to_string()),
+                via_path: Some("lib/router.rb".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![ImpactSliceEvidenceKind::ReturnFlow],
+                    vec![ImpactSliceEvidenceKind::NamePathHint],
+                    6,
+                    "lib/leaf.rb",
+                )),
+            }]
+        );
+        assert_eq!(
+            plan.slice_selection.pruned_candidates,
+            vec![dimpact::ImpactSlicePrunedCandidate {
+                seed_symbol_id: seed.id.0.clone(),
+                path: "lib/runtime.rb".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("ruby:lib/router.rb:method:bounce:4".to_string()),
+                via_path: Some("lib/router.rb".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::RequireRelativeChain),
+                prune_reason: ImpactSlicePruneReason::SuppressedBeforeAdmit,
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::RequireRelativeContinuation,
+                    vec![ImpactSliceEvidenceKind::RequireRelativeEdge],
+                    vec![ImpactSliceEvidenceKind::CallsitePositionHint],
+                    7,
+                    "lib/runtime.rb",
+                )),
+            }]
         );
     }
 
@@ -4615,7 +4909,7 @@ fn caller() -> i32 {
                 .iter()
                 .any(|candidate| {
                     candidate.path == "z_alt.rs"
-                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.prune_reason == ImpactSlicePruneReason::SuppressedBeforeAdmit
                         && candidate.bridge_kind
                             == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
                         && candidate.via_symbol_id.as_deref()
