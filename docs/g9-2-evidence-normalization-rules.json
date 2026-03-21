@@ -1,0 +1,183 @@
+{
+  "generated_by": "manual G9-2 evidence normalization note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "define normalized evidence categories shared by planner, fallback runtime, and witness explanation",
+  "extends": [
+    "docs/g8-2-bridge-scoring-evidence-schema.md",
+    "docs/g9-1-g8-evidence-usage-inventory-and-gap-memo.md"
+  ],
+  "categories": {
+    "primary": {
+      "role": "direct continuity or semantic fact that explains why a candidate should win in its lane",
+      "rules": [
+        "must be candidate-local and directly observed",
+        "must not be created from lexical naming/path hint alone",
+        "can be shared across planner and witness without changing meaning",
+        "must stay separate from fallback admission reasons"
+      ],
+      "examples": [
+        "param_to_return_flow",
+        "observed_return_passthrough",
+        "observed_result_assignment_continuity",
+        "observed_local_alias_flow"
+      ]
+    },
+    "support": {
+      "role": "strength, provenance, certainty, or tie-break signal that strengthens a candidate without justifying it alone",
+      "rules": [
+        "must not replace primary evidence",
+        "may be shared or diffed in witness output",
+        "may include weak positive structural hints",
+        "must remain positive reinforcement, not suppression"
+      ],
+      "examples": [
+        "call_graph_support",
+        "local_dfg_support",
+        "symbolic_propagation_support",
+        "edge_certainty",
+        "callsite_position_hint"
+      ]
+    },
+    "fallback": {
+      "role": "bounded admission provenance for candidates that are not justified by graph-first continuity alone",
+      "rules": [
+        "explains why a fallback candidate is allowed to exist",
+        "must not be treated as primary continuity by default",
+        "must remain visible in witness output for winning and losing fallback choices",
+        "may coexist with primary evidence when fallback candidates later gain semantic continuity"
+      ],
+      "examples": [
+        "explicit_require_relative_load",
+        "companion_file_match",
+        "dynamic_dispatch_literal_target",
+        "require_relative_edge"
+      ]
+    },
+    "negative": {
+      "role": "suppressing or demoting signal used to cap promotion, explain ranked-out losers, or keep noise out of primary/support",
+      "rules": [
+        "must be represented explicitly rather than implied only by absence",
+        "must stay separate from positive categories",
+        "may drive suppress-gates or late compare penalties",
+        "must be renderable as a losing-side reason in witness output"
+      ],
+      "examples": [
+        "helper_noise_hint",
+        "fallback_only_without_semantic_continuity",
+        "late_call_only_without_continuity",
+        "weaker_certainty_than_competitor"
+      ]
+    }
+  },
+  "non_evidence_dimensions": {
+    "source_kind": "candidate collection route, not evidence",
+    "lane": "continuity/completion family, not evidence"
+  },
+  "normalization_rules": [
+    "lexical proxy must not populate primary directly",
+    "graph-first candidates are justified mainly by primary plus support",
+    "fallback candidates must carry fallback provenance when they are materialized",
+    "negative evidence must be preserved so witness can explain losing-side reasons",
+    "shared evidence may be omitted from compact summaries but must remain available to comparison logic"
+  ],
+  "conceptual_compare_order": [
+    "source_kind",
+    "lane",
+    "primary",
+    "support",
+    "fallback",
+    "negative",
+    "deterministic_lexical_tiebreak"
+  ],
+  "g8_mapping": {
+    "keep_as_primary": [
+      "param_to_return_flow"
+    ],
+    "split": {
+      "return_flow": {
+        "primary": [
+          "observed_return_passthrough"
+        ],
+        "support_or_negative": [
+          "return-ish naming/path hint"
+        ]
+      },
+      "assigned_result": {
+        "primary": [
+          "observed_result_assignment_continuity"
+        ],
+        "support": [
+          "wrapper-ish naming/path proxy"
+        ]
+      },
+      "alias_chain": {
+        "primary": [
+          "observed_local_alias_flow"
+        ],
+        "support": [
+          "alias/value/result naming hint"
+        ]
+      },
+      "name_path_hint": {
+        "support": [
+          "weak_positive_structural_hint"
+        ],
+        "negative": [
+          "helper_noise_debug_tmp_suppressor"
+        ]
+      }
+    },
+    "move_to_fallback": [
+      "require_relative_edge",
+      "explicit_require_relative_load",
+      "companion_file_match",
+      "dynamic_dispatch_literal_target"
+    ],
+    "keep_as_support": [
+      "call_graph_support",
+      "local_dfg_support",
+      "symbolic_propagation_support",
+      "edge_certainty",
+      "callsite_position_hint"
+    ],
+    "compat_alias": {
+      "module_companion": "fallback.companion_file_match"
+    }
+  },
+  "cross_surface_contract": {
+    "planner": [
+      "must not inflate primary counts with lexical proxy only",
+      "must keep negative evidence separate from support",
+      "must preserve fallback provenance for fallback candidates"
+    ],
+    "fallback_runtime": [
+      "collect raw observations first",
+      "map observations into fallback/support and optionally primary",
+      "do not bypass normalized categories when materializing narrow fallback candidates"
+    ],
+    "witness": [
+      "must be able to emit winning_primary",
+      "must be able to emit winning_support",
+      "must be able to emit winning_fallback",
+      "must be able to emit losing_negative"
+    ]
+  },
+  "follow_up_tasks": {
+    "g9_3": [
+      "add negative or suppressing evidence to planner scoring",
+      "stop counting helper/noise lexical proxy as positive primary evidence"
+    ],
+    "g9_4": [
+      "reclassify Rust return_flow, assigned_result, and alias_chain toward observed facts",
+      "split lexical proxy into support or negative"
+    ],
+    "g9_5": [
+      "normalize weak Ruby require-relative continuation and true narrow fallback into the same table",
+      "treat require_relative_edge as fallback provenance"
+    ],
+    "g9_6": [
+      "add winning_fallback and losing_negative witness surfaces",
+      "ensure ModuleCompanionFile competitions participate in selected-vs-pruned explanation"
+    ]
+  }
+}
