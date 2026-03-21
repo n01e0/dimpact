@@ -17,8 +17,8 @@ use dimpact::{
     ImpactDirection, ImpactOptions, ImpactOutput, ImpactSliceBridgeKind, ImpactSliceCandidateLane,
     ImpactSliceCandidateScoringSummary, ImpactSliceCandidateSourceKind,
     ImpactSliceCandidateSupportMetadata, ImpactSliceEvidenceKind, ImpactSliceFileMetadata,
-    ImpactSlicePlannerKind, ImpactSlicePruneReason, ImpactSliceReasonKind,
-    ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceScoreTuple,
+    ImpactSliceNegativeEvidenceKind, ImpactSlicePlannerKind, ImpactSlicePruneReason,
+    ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceScoreTuple,
     ImpactSliceSelectionSummary,
 };
 use env_logger::Env;
@@ -1262,11 +1262,13 @@ fn ruby_narrow_fallback_scoring_summary(
             lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::ModuleCompanionFallback),
             primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap_or(u8::MAX),
             secondary_evidence_count: 0,
+            negative_evidence_count: 0,
             call_position_rank: matched_call_line,
             lexical_tiebreak: completion_file.to_string(),
         },
         primary_evidence_kinds,
         secondary_evidence_kinds: Vec::new(),
+        negative_evidence_kinds: Vec::new(),
         support: Some(ImpactSliceCandidateSupportMetadata {
             edge_certainty: Some(edge_certainty),
             ..ImpactSliceCandidateSupportMetadata::default()
@@ -1575,11 +1577,13 @@ fn ruby_require_relative_scoring_summary(
         lane: ImpactSliceCandidateLane::RequireRelativeContinuation,
         primary_evidence_kinds,
         secondary_evidence_kinds,
+        negative_evidence_kinds: Vec::new(),
         score_tuple: ImpactSliceScoreTuple {
             source_rank: 0,
             lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::RequireRelativeContinuation),
             primary_evidence_count: 1,
             secondary_evidence_count,
+            negative_evidence_count: 0,
             call_position_rank: call_line,
             lexical_tiebreak: completion_file.to_string(),
         },
@@ -1600,6 +1604,12 @@ fn evidence_kind_key(kind: ImpactSliceEvidenceKind) -> &'static str {
         ImpactSliceEvidenceKind::ParamToReturnFlow => "param_to_return_flow",
         ImpactSliceEvidenceKind::RequireRelativeEdge => "require_relative_edge",
         ImpactSliceEvidenceKind::ReturnFlow => "return_flow",
+    }
+}
+
+fn negative_evidence_kind_key(kind: ImpactSliceNegativeEvidenceKind) -> &'static str {
+    match kind {
+        ImpactSliceNegativeEvidenceKind::NoisyReturnHint => "noisy_return_hint",
     }
 }
 
@@ -1657,6 +1667,10 @@ fn tier2_scoring_summary(
         && !completion_return_hint
         && !completion_alias_hint
         && !completion_noise_hint;
+    let mut negative_evidence_kinds = Vec::new();
+    if completion_return_hint && completion_noise_hint {
+        negative_evidence_kinds.push(ImpactSliceNegativeEvidenceKind::NoisyReturnHint);
+    }
 
     let lane = if completion_return_hint
         || has_param_to_return_flow
@@ -1724,6 +1738,8 @@ fn tier2_scoring_summary(
     primary_evidence_kinds.dedup();
     secondary_evidence_kinds.sort_by_key(|kind| evidence_kind_key(*kind));
     secondary_evidence_kinds.dedup();
+    negative_evidence_kinds.sort_by_key(|kind| negative_evidence_kind_key(*kind));
+    negative_evidence_kinds.dedup();
 
     let support = if has_param_to_return_flow {
         Some(ImpactSliceCandidateSupportMetadata {
@@ -1743,11 +1759,13 @@ fn tier2_scoring_summary(
             primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap_or(u8::MAX),
             secondary_evidence_count: u8::try_from(secondary_evidence_kinds.len())
                 .unwrap_or(u8::MAX),
+            negative_evidence_count: u8::try_from(negative_evidence_kinds.len()).unwrap_or(u8::MAX),
             call_position_rank: call_line,
             lexical_tiebreak: completion_file.to_string(),
         },
         primary_evidence_kinds,
         secondary_evidence_kinds,
+        negative_evidence_kinds,
         support,
     }
 }
@@ -1768,6 +1786,12 @@ fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp:
                 .score_tuple
                 .primary_evidence_count
                 .cmp(&a.scoring.score_tuple.primary_evidence_count)
+        })
+        .then_with(|| {
+            a.scoring
+                .score_tuple
+                .negative_evidence_count
+                .cmp(&b.scoring.score_tuple.negative_evidence_count)
         })
         .then_with(|| {
             b.scoring
@@ -3293,11 +3317,13 @@ fn caller() -> i32 {
                 lane_rank: tier2_lane_rank(lane),
                 primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap(),
                 secondary_evidence_count: u8::try_from(secondary_evidence_kinds.len()).unwrap(),
+                negative_evidence_count: 0,
                 call_position_rank,
                 lexical_tiebreak: lexical_tiebreak.to_string(),
             },
             primary_evidence_kinds,
             secondary_evidence_kinds,
+            negative_evidence_kinds: vec![],
             support: None,
         }
     }
@@ -3315,6 +3341,7 @@ fn caller() -> i32 {
                 lane_rank: tier2_lane_rank(ImpactSliceCandidateLane::ModuleCompanionFallback),
                 primary_evidence_count: 3,
                 secondary_evidence_count: 0,
+                negative_evidence_count: 0,
                 call_position_rank,
                 lexical_tiebreak: lexical_tiebreak.to_string(),
             },
@@ -3324,6 +3351,7 @@ fn caller() -> i32 {
                 ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad,
             ],
             secondary_evidence_kinds: vec![],
+            negative_evidence_kinds: vec![],
             support: Some(ImpactSliceCandidateSupportMetadata {
                 edge_certainty: Some(edge_certainty),
                 ..ImpactSliceCandidateSupportMetadata::default()
@@ -3595,6 +3623,108 @@ fn caller() -> i32 {
     }
 
     #[test]
+    fn bounded_slice_plan_penalizes_returnish_helper_noise_against_real_return_completion() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let wrapper = test_symbol("rust:wrapper.rs:fn:wrap:3", "wrap", "wrapper.rs", 3);
+        let leaf = test_symbol("rust:leaf.rs:fn:source:1", "source", "leaf.rs", 1);
+        let helper = test_symbol(
+            "rust:zzz_final_helper.rs:fn:final_helper:1",
+            "final_helper",
+            "zzz_final_helper.rs",
+            1,
+        );
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            wrapper.clone(),
+            leaf.clone(),
+            helper.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), wrapper.id.0.as_str(), "main.rs", 5),
+            call_ref(wrapper.id.0.as_str(), leaf.id.0.as_str(), "wrapper.rs", 5),
+            call_ref(wrapper.id.0.as_str(), helper.id.0.as_str(), "wrapper.rs", 6),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "leaf.rs".to_string(),
+                "main.rs".to_string(),
+                "wrapper.rs".to_string(),
+            ]
+        );
+
+        let leaf_file = slice_selection_file(&plan.slice_selection, "leaf.rs");
+        assert_eq!(
+            leaf_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:3".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    vec![ImpactSliceEvidenceKind::NamePathHint],
+                    5,
+                    "leaf.rs",
+                )),
+            }]
+        );
+        assert_eq!(
+            plan.slice_selection.pruned_candidates,
+            vec![dimpact::ImpactSlicePrunedCandidate {
+                seed_symbol_id: seed.id.0.clone(),
+                path: "zzz_final_helper.rs".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:3".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    negative_evidence_kinds: vec![ImpactSliceNegativeEvidenceKind::NoisyReturnHint,],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 2,
+                        secondary_evidence_count: 2,
+                        negative_evidence_count: 1,
+                        call_position_rank: 6,
+                        lexical_tiebreak: "zzz_final_helper.rs".to_string(),
+                    },
+                    support: None,
+                }),
+            }]
+        );
+    }
+
+    #[test]
     fn bounded_slice_plan_prefers_alias_continuation_over_later_adapter_helper_noise() {
         let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
         let adapter = test_symbol("rust:adapter.rs:fn:wrap:3", "wrap", "adapter.rs", 3);
@@ -3794,11 +3924,13 @@ fn caller() -> i32 {
                         ImpactSliceEvidenceKind::ReturnFlow,
                     ],
                     secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
                     score_tuple: ImpactSliceScoreTuple {
                         source_rank: 0,
                         lane_rank: 0,
                         primary_evidence_count: 3,
                         secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
                         call_position_rank: 5,
                         lexical_tiebreak: "step.rs".to_string(),
                     },
