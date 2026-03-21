@@ -146,14 +146,24 @@ dimpact id --name foo -f json
 ### evidence-driven selection の見方
 - PDG / propagation planner は、到達可能な helper file を全部 scope に入れることを目指していません。
   - 目的は bounded な explanation slice を保ったまま、boundary side ごとに最も筋の良い continuation を選ぶことです
-- 実際の bridge / fallback 選択は、だいたい次の 4 層で見ると分かりやすいです:
-  1. `source_kind`: まず graph-backed な continuation を優先し、bounded な runtime companion evidence が十分強いときだけ narrow fallback を使う
-  2. `lane`: 両方候補があるなら、`return_continuation` / `alias_continuation` のような semantic に強い continuation を、弱い helper continuation より優先する
-  3. `primary_evidence_kinds` / `secondary_evidence_kinds`: `param_to_return_flow` / `return_flow` / `explicit_require_relative_load` / `companion_file_match` / `dynamic_dispatch_literal_target` のような観測 fact を比べる
-  4. `support`: `local_dfg_support` / `symbolic_propagation_support` / `edge_certainty` などで、その勝ち筋がどれくらい信頼できるかを補足する
+- G9 では mental model をもう 1 段はっきりさせています:
+  - `source_kind` と `lane` は重要な ranking dimension ですが、それ自体は evidence ではありません
+  - evidence は、次の 4 category に分けて読むと追いやすいです:
+    1. `primary`: `param_to_return_flow` / `return_flow` / `assigned_result` / `alias_chain` のような、選ばれた continuation を直接支える continuity fact
+    2. `support`: `local_dfg_support` / `symbolic_propagation_support` / `edge_certainty` / position hint のような、単独では勝ち筋を作らない strength / provenance signal
+    3. `fallback`: `explicit_require_relative_load` / `companion_file_match` / `dynamic_dispatch_literal_target` / 弱い `require_relative` continuation のような、narrow runtime candidate を bounded に出してよい理由
+    4. `negative`: helper-style な return noise や、弱い certainty の fallback loser のような、noisy candidate を suppress する signal
+- 実際の planner 比較は引き続き `summary.slice_selection.files[*].reasons[*].scoring` と `summary.slice_selection.pruned_candidates[*].scoring` に出ますが、読み順としては:
+  - まず `primary` で continuity の筋が強いかを見る
+  - 次に `support` でその continuity がどれくらい信頼できるかを見る
+  - 次に `fallback` で narrow runtime candidate がそもそも出現してよい理由を見る
+  - 最後に `negative` で、なぜ loser が ranked-out のまま slice を広げなかったかを見る
 - 運用上の大事な考え方は、**良い evidence は scope を広げずに precision を上げるべき**、という点です。
   - 強い候補だけが selected explanation file になる
   - 弱い候補は `pruned_candidates[*]` や `slice_context.selected_vs_pruned_reasons` に残して、黙って slice を広げない
+- witness 出力も同じ考え方で圧縮されています:
+  - `winning_primary_evidence_kinds` と `winning_support` が selected side を説明する
+  - `losing_side_reason` は、helper noise / fallback-only / 弱い `dynamic_fallback` certainty など、loser 側に明確な suppressing reason があるときに短く説明する
 - Rust/Ruby の PDG 出力が意外だったときは、次の順で読むと追いやすいです:
   1. `summary.slice_selection.files[*].reasons[*].scoring` を見る
   2. `summary.slice_selection.pruned_candidates[*].scoring` と見比べる
@@ -250,6 +260,9 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - Ruby は short multi-file case が前進した一方で、限界もまだあります
   - `require_relative` / alias / wrapper-return の短い chain や no-paren wrapper parameter flow は以前より拾いやすくなりました
   - bridge scoring は、semantic に強い alias / return-flow completion を単純な `require_relative` helper noise より優先しつつ、弱い fallback は scope を広げず ranked-out candidate として残す方針です
+  - true narrow fallback の考え方は、**広く拾うことではなく bounded に admission すること** です:
+    - runtime companion は concrete な target family や bounded runtime fact に結びつくときだけ残る想定です
+    - generic な dynamic runtime file は「一応関係ありそう」では残さず、filter される方が正しいです
   - fallback discovery 自体はまだ意図的に narrow で、広い companion expansion を目指してはいません
   - ただし、長い `require_relative` ladder、dynamic-send が強い flow、広い companion discovery はまだ意図的に弱く抑えています
   - Ruby の PDG / propagation は、完全な inter-procedural proof system ではなく、bounded な explainability aid として見るのが安全です
