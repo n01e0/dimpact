@@ -130,14 +130,24 @@ CLI Overview
 ### Evidence-driven selection: how to think about it
 - The PDG / propagation planner is intentionally **not** trying to include every reachable helper file.
   - the goal is to keep a small bounded explanation slice and choose the strongest local continuation for each boundary side
-- In practice, bridge / fallback selection is evidence-driven in four layers:
-  1. `source_kind`: prefer graph-backed continuations first; use narrow fallback when the bounded runtime companion evidence is strong enough
-  2. `lane`: prefer semantically stronger continuations such as `return_continuation` / `alias_continuation` over weaker helper-style continuations when both are available
-  3. `primary_evidence_kinds` / `secondary_evidence_kinds`: compare the concrete observed facts, such as `param_to_return_flow`, `return_flow`, `explicit_require_relative_load`, `companion_file_match`, or `dynamic_dispatch_literal_target`
-  4. `support`: use flags like `local_dfg_support`, `symbolic_propagation_support`, and `edge_certainty` to explain why a selected candidate was trustworthy
-- The important operational idea is: **better evidence should improve precision without widening scope**.
+- G9 sharpens the mental model a bit:
+  - `source_kind` and `lane` are still important ranking dimensions, but they are **not** themselves evidence
+  - the evidence vocabulary is easiest to read as four normalized categories:
+    1. `primary`: direct continuity facts such as `param_to_return_flow`, `return_flow`, `assigned_result`, or `alias_chain` when they represent the actual selected continuation
+    2. `support`: strength/provenance signals such as `local_dfg_support`, `symbolic_propagation_support`, `edge_certainty`, or positional hints that help explain trust without justifying selection by themselves
+    3. `fallback`: bounded admission reasons for candidates that are intentionally narrow runtime recoveries, such as `explicit_require_relative_load`, `companion_file_match`, `dynamic_dispatch_literal_target`, or weaker `require_relative` continuation facts
+    4. `negative`: suppressing signals that keep noisy candidates from winning, such as helper-style return noise or fallback-only losers with weaker certainty
+- In practice, the planner still compares selected vs pruned candidates through `summary.slice_selection.files[*].reasons[*].scoring` and `summary.slice_selection.pruned_candidates[*].scoring`, but the intended reading is now:
+  - first ask which candidate had the stronger `primary` continuity
+  - then use `support` to explain why that continuation was more trustworthy
+  - then use `fallback` to explain why a narrow runtime candidate was allowed to exist at all
+  - finally use `negative` to explain why a loser stayed ranked out instead of widening the slice
+- The important operational idea is still: **better evidence should improve precision without widening scope**.
   - a stronger winner becomes the selected explanation file
   - weaker alternatives stay visible in `pruned_candidates[*]` or `slice_context.selected_vs_pruned_reasons` instead of silently expanding the slice
+- Witness output follows the same shape in a compact way:
+  - `winning_primary_evidence_kinds` and `winning_support` explain the selected side
+  - `losing_side_reason` explains the loser when there is an obvious suppressing reason (for example helper noise, fallback-only status, or weaker `dynamic_fallback` certainty)
 - A good reading order for surprising Rust/Ruby PDG output is:
   1. inspect `summary.slice_selection.files[*].reasons[*].scoring`
   2. compare against `summary.slice_selection.pruned_candidates[*].scoring`
@@ -234,6 +244,9 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - Ruby has improved short multi-file coverage, but still has clear boundaries:
   - short `require_relative` / alias / wrapper-return chains are better than before, including no-paren wrapper parameter flow
   - bridge scoring now tries to keep semantic alias / return-flow completions ahead of plain `require_relative` helper noise, while leaving weaker fallback paths visible as ranked-out candidates instead of silently broadening scope
+  - true narrow fallback is intentionally about **bounded admission**, not broad rescue:
+    - a runtime companion should usually survive because it matches a concrete target family or bounded runtime fact
+    - generic dynamic runtime files are expected to stay filtered out instead of being kept "just in case"
   - fallback discovery is still intentionally narrow: the goal is bounded explanation, not broad Ruby companion expansion
   - longer `require_relative` ladders, dynamic-send-heavy flows, and broader companion discovery are still intentionally under-modeled
   - treat Ruby PDG / propagation as a bounded explanation aid, not as a complete inter-procedural proof system
