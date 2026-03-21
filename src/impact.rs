@@ -252,6 +252,8 @@ pub struct ImpactSlicePrunedCandidate {
     pub prune_reason: ImpactSlicePruneReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scoring: Option<ImpactSliceCandidateScoringSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_explanation: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -356,6 +358,8 @@ pub struct ImpactWitnessSliceSelectedVsPrunedReason {
     pub winning_support: Option<ImpactSliceCandidateSupportMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub losing_side_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_explanation: Option<String>,
     pub summary: String,
 }
 
@@ -809,9 +813,7 @@ fn selected_vs_pruned_winning_support(
     selected: &ImpactSliceCandidateScoringSummary,
     pruned: &ImpactSliceCandidateScoringSummary,
 ) -> Option<ImpactSliceCandidateSupportMetadata> {
-    let Some(selected_support) = selected.support.as_ref() else {
-        return None;
-    };
+    let selected_support = selected.support.as_ref()?;
     let pruned_support = pruned.support.as_ref();
     let winning_support = ImpactSliceCandidateSupportMetadata {
         call_graph_support: selected_support.call_graph_support
@@ -864,6 +866,7 @@ fn selected_vs_pruned_summary_support_labels(
     labels
 }
 
+#[allow(clippy::too_many_arguments)]
 fn selected_vs_pruned_summary(
     selected_path: &str,
     pruned_path: &str,
@@ -1139,6 +1142,7 @@ fn build_selected_vs_pruned_reasons(
                 winning_primary_evidence_kinds: winning_primary_evidence_kinds.clone(),
                 winning_support: winning_support.clone(),
                 losing_side_reason: losing_side_reason.clone(),
+                compact_explanation: candidate.compact_explanation.clone(),
                 summary: selected_vs_pruned_summary(
                     selected_path,
                     &candidate.path,
@@ -2957,6 +2961,7 @@ fn foo() { bar(); }
                     },
                     support: None,
                 }),
+                compact_explanation: None,
             }],
         };
 
@@ -2990,6 +2995,7 @@ fn foo() { bar(); }
                 winning_primary_evidence_kinds: Some(vec![ImpactSliceEvidenceKind::ReturnFlow]),
                 winning_support: None,
                 losing_side_reason: None,
+                compact_explanation: None,
                 summary: "selected over aaa_helper.rs because return_continuation outranked alias_continuation; winning primary evidence: return_flow".to_string(),
             }]
         );
@@ -3079,6 +3085,7 @@ fn foo() { bar(); }
                         ..ImpactSliceCandidateSupportMetadata::default()
                     }),
                 }),
+                compact_explanation: None,
             }],
         );
 
@@ -3104,7 +3111,97 @@ fn foo() { bar(); }
                     "fallback_only=narrow_fallback + edge_certainty=dynamic_fallback"
                         .to_string()
                 ),
+                compact_explanation: None,
                 summary: "selected over lib/helper.rb because graph_second_hop outranked narrow_fallback; winning primary evidence: explicit_require_relative_load; winning support: symbolic_propagation_support + edge_certainty=confirmed; losing side: fallback_only=narrow_fallback + edge_certainty=dynamic_fallback".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn selected_vs_pruned_reason_carries_compact_explanation_for_suppressed_before_admit() {
+        let seed_symbol_id = "rust:main.rs:fn:caller:1".to_string();
+        let via_symbol_id = "rust:wrapper.rs:fn:wrap:4".to_string();
+        let reasons = build_selected_vs_pruned_reasons(
+            "leaf.rs",
+            &[ImpactSliceReasonMetadata {
+                seed_symbol_id: seed_symbol_id.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(via_symbol_id.clone()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 2,
+                        secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 0,
+                        call_position_rank: 5,
+                        lexical_tiebreak: "leaf.rs".to_string(),
+                    },
+                    support: None,
+                }),
+            }],
+            &[ImpactSlicePrunedCandidate {
+                seed_symbol_id,
+                path: "aaa_helper.rs".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(via_symbol_id),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                prune_reason: ImpactSlicePruneReason::SuppressedBeforeAdmit,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::AliasContinuation,
+                    primary_evidence_kinds: vec![ImpactSliceEvidenceKind::AssignedResult],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 1,
+                        primary_evidence_count: 1,
+                        secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 0,
+                        call_position_rank: 4,
+                        lexical_tiebreak: "aaa_helper.rs".to_string(),
+                    },
+                    support: None,
+                }),
+                compact_explanation: Some(
+                    "suppressed_before_admit=helper_noise_suppressor".to_string(),
+                ),
+            }],
+        );
+
+        assert_eq!(
+            reasons,
+            vec![ImpactWitnessSliceSelectedVsPrunedReason {
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:4".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                selected_bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                pruned_path: "aaa_helper.rs".to_string(),
+                prune_reason: ImpactSlicePruneReason::SuppressedBeforeAdmit,
+                pruned_bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                selected_better_by: ImpactWitnessSliceRankingBasis::Lane,
+                winning_primary_evidence_kinds: Some(vec![ImpactSliceEvidenceKind::ReturnFlow]),
+                winning_support: None,
+                losing_side_reason: None,
+                compact_explanation: Some(
+                    "suppressed_before_admit=helper_noise_suppressor".to_string(),
+                ),
+                summary: "selected over aaa_helper.rs because return_continuation outranked alias_continuation; winning primary evidence: return_flow".to_string(),
             }]
         );
     }
@@ -3177,6 +3274,7 @@ fn foo() { bar(); }
                     },
                     support: None,
                 }),
+                compact_explanation: None,
             }],
         );
 
@@ -3193,6 +3291,7 @@ fn foo() { bar(); }
                 winning_primary_evidence_kinds: None,
                 winning_support: None,
                 losing_side_reason: Some("negative_evidence=noisy_return_hint".to_string()),
+                compact_explanation: None,
                 summary: "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1); losing side: negative_evidence=noisy_return_hint".to_string(),
             }]
         );
@@ -3270,6 +3369,7 @@ fn foo() { bar(); }
                     },
                     support: None,
                 }),
+                compact_explanation: None,
             }],
         );
 
@@ -3291,6 +3391,7 @@ fn foo() { bar(); }
                     ..ImpactSliceCandidateSupportMetadata::default()
                 }),
                 losing_side_reason: None,
+                compact_explanation: None,
                 summary: "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support".to_string(),
             }]
         );
@@ -3309,6 +3410,7 @@ fn foo() { bar(); }
             winning_primary_evidence_kinds: None,
             winning_support: None,
             losing_side_reason: None,
+            compact_explanation: None,
             summary:
                 "selected over helper.rs because return_continuation outranked alias_continuation"
                     .to_string(),
@@ -3318,6 +3420,7 @@ fn foo() { bar(); }
         assert!(value.get("winning_primary_evidence_kinds").is_none());
         assert!(value.get("winning_support").is_none());
         assert!(value.get("losing_side_reason").is_none());
+        assert!(value.get("compact_explanation").is_none());
     }
 
     #[test]

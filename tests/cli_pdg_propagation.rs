@@ -1513,6 +1513,8 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
             .is_some_and(|candidates| candidates.iter().any(|candidate| {
                 candidate["path"] == "aaa_helper.rs"
                     && candidate["prune_reason"] == "suppressed_before_admit"
+                    && candidate["compact_explanation"]
+                        == "suppressed_before_admit=helper_noise_suppressor"
                     && candidate["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
                     && candidate["bridge_kind"] == "boundary_alias_continuation"
                     && candidate["scoring"]
@@ -1552,6 +1554,7 @@ fn pdg_slice_selection_prefers_wrapper_return_leaf_over_earlier_noise_candidate(
             "winning_primary_evidence_kinds": [
                 "return_flow"
             ],
+            "compact_explanation": "suppressed_before_admit=helper_noise_suppressor",
             "summary": "selected over aaa_helper.rs because return_continuation outranked alias_continuation; winning primary evidence: return_flow",
         }])
     );
@@ -1793,6 +1796,8 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
             .is_some_and(|candidates| candidates.iter().any(|candidate| {
                 candidate["path"] == "zzz_helper.rs"
                     && candidate["prune_reason"] == "suppressed_before_admit"
+                    && candidate["compact_explanation"]
+                        == "suppressed_before_admit=helper_noise_suppressor"
                     && candidate["via_symbol_id"] == "rust:adapter.rs:fn:wrap:4"
                     && candidate["bridge_kind"] == "boundary_alias_continuation"
                     && candidate["scoring"]
@@ -1834,6 +1839,7 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
             "winning_primary_evidence_kinds": [
                 "alias_chain"
             ],
+            "compact_explanation": "suppressed_before_admit=helper_noise_suppressor",
             "summary": "selected over zzz_helper.rs because it had more primary evidence (2 > 1); winning primary evidence: alias_chain",
         }])
     );
@@ -2220,6 +2226,8 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
             .is_some_and(|candidates| candidates.iter().any(|candidate| {
                 candidate["path"] == "lib/zzz_helper.rb"
                     && candidate["prune_reason"] == "suppressed_before_admit"
+                    && candidate["compact_explanation"]
+                        == "suppressed_before_admit=fallback_only_suppressor"
                     && candidate["via_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
                     && candidate["bridge_kind"] == "require_relative_chain"
                     && candidate["scoring"]
@@ -2260,6 +2268,7 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
                 "assigned_result",
                 "return_flow"
             ],
+            "compact_explanation": "suppressed_before_admit=fallback_only_suppressor",
             "summary": "selected over lib/zzz_helper.rb because return_continuation outranked require_relative_continuation; winning primary evidence: assigned_result + return_flow",
         }])
     );
@@ -2330,6 +2339,8 @@ fn pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise() {
                     && candidates.iter().all(|candidate| {
                         candidate["path"] == "lib/route_runtime.rb"
                             && candidate["prune_reason"] == "weaker_same_path_duplicate"
+                            && candidate["compact_explanation"]
+                                == "suppressed_before_admit=weaker_same_path_duplicate"
                     })
             }),
         "expected generic runtime noise to stay filtered while same-path route_runtime losers are recorded explicitly: {prop:#}"
@@ -2679,21 +2690,15 @@ fn ruby_chain_fixture_only_gains_symbolic_edges_with_propagation() {
         "expected fixed pair of symbolic edges: {prop:#}"
     );
     assert!(prop_edges.iter().all(|e| e["kind"] == "data"));
-    assert!(
-        prop_edges
-            .iter()
-            .all(|e| e["provenance"] == "symbolic_propagation")
-    );
-    assert!(
-        prop_edges
-            .iter()
-            .any(|e| e["to"] == "demo/test.rb:def:v:14")
-    );
-    assert!(
-        prop_edges
-            .iter()
-            .any(|e| e["to"] == "demo/test.rb:use:v:16")
-    );
+    assert!(prop_edges
+        .iter()
+        .all(|e| e["provenance"] == "symbolic_propagation"));
+    assert!(prop_edges
+        .iter()
+        .any(|e| e["to"] == "demo/test.rb:def:v:14"));
+    assert!(prop_edges
+        .iter()
+        .any(|e| e["to"] == "demo/test.rb:use:v:16"));
 }
 
 #[test]
@@ -2914,11 +2919,9 @@ fn ruby_alias_define_fixture_keeps_defined_sym_without_leaking_defined_only() {
     );
     let edges = prop["edges"].as_array().expect("edges array");
 
-    assert!(
-        edges
-            .iter()
-            .any(|e| e["to"] == "ruby:demo/test.rb:method:defined_sym:9")
-    );
+    assert!(edges
+        .iter()
+        .any(|e| e["to"] == "ruby:demo/test.rb:method:defined_sym:9"));
     assert!(
         !edges
             .iter()
