@@ -1,0 +1,439 @@
+{
+  "generated_by": "manual G8-6 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "fixed evidence-driven evaluation set for semantic scoring, true narrow fallback, and winning-evidence witness explanation on current HEAD",
+  "defaults": {
+    "engine": "ts",
+    "cli_lanes": [
+      "pdg",
+      "propagation"
+    ],
+    "note": "treat current HEAD planner/unit tests as first-class lanes when the evidence surface is locked there more directly than in CLI output"
+  },
+  "cases": [
+    {
+      "case_id": "rust-param-to-return-flow-competition",
+      "lang": "rust",
+      "source_kind": "integration_fixture_plus_unit_guard",
+      "source": [
+        "docs/g8-3-rust-param-to-return-evidence.md",
+        "tests/cli_pdg_propagation.rs::setup_cross_file_param_passthrough_competition_repo",
+        "tests/cli_pdg_propagation.rs::pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper",
+        "src/bin/dimpact.rs::collect_rust_tier2_semantic_evidence_detects_param_to_return_flow"
+      ],
+      "failure_kind": "rank_regression",
+      "primary_view": "dot+json+unit_test",
+      "focus": "Rust Tier 2 competition where semantic param continuity must beat later neutral helper noise",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json"
+        ]
+      },
+      "test_lanes": {
+        "integration": [
+          "cargo",
+          "test",
+          "--test",
+          "cli_pdg_propagation",
+          "pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper",
+          "--",
+          "--exact"
+        ],
+        "unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "collect_rust_tier2_semantic_evidence_detects_param_to_return_flow",
+          "--",
+          "--exact"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "step.rs",
+          "later.rs",
+          "wrapper.rs",
+          "main.rs"
+        ],
+        "shape": [
+          "step.rs keeps input -> forwarded -> return continuity",
+          "later.rs is a neutral helper reached from the same wrapper",
+          "wrapper.rs calls both step::step(a) and later::later(a)",
+          "main.rs mutates input from 1 to 2"
+        ]
+      },
+      "expected_outcome": {
+        "selected_paths": [
+          "main.rs",
+          "step.rs",
+          "wrapper.rs"
+        ],
+        "pruned_candidates": [
+          {
+            "path": "later.rs",
+            "prune_reason": "ranked_out"
+          }
+        ],
+        "selected_via_symbol_id": "rust:wrapper.rs:fn:wrap:4",
+        "selected_better_by": "primary_evidence_count",
+        "witness_symbol_id": "rust:step.rs:fn:step:1",
+        "dot_assertions": {
+          "contains": [
+            "\"step.rs:def:forwarded:2\""
+          ],
+          "excludes": [
+            "\"later.rs:def:shadow:2\""
+          ]
+        }
+      },
+      "expected_fields": {
+        "selected_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "return_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result",
+            "param_to_return_flow",
+            "return_flow"
+          ],
+          "secondary_evidence_kinds": [
+            "name_path_hint"
+          ],
+          "support": {
+            "local_dfg_support": true
+          }
+        },
+        "pruned_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "return_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result",
+            "return_flow"
+          ],
+          "secondary_evidence_kinds": [
+            "callsite_position_hint",
+            "name_path_hint"
+          ]
+        },
+        "witness_reason": {
+          "winning_primary_evidence_kinds": [
+            "param_to_return_flow"
+          ],
+          "winning_support": {
+            "local_dfg_support": true
+          },
+          "summary": "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support"
+        }
+      },
+      "regression_catch": [
+        "later helper noise wins again because call position outweighs semantic param continuity",
+        "param_to_return_flow disappears from selected scoring",
+        "winning_support.local_dfg_support drops from witness explanation"
+      ]
+    },
+    {
+      "case_id": "ruby-method-missing-companion-narrow-fallback",
+      "lang": "ruby",
+      "source_kind": "planner_unit_fixture",
+      "source": [
+        "docs/g8-1-missing-evidence-inventory-and-design-memo.md",
+        "docs/g8-2-bridge-scoring-evidence-schema.json",
+        "src/bin/dimpact.rs::bounded_slice_plan_selects_ruby_method_missing_companion_as_narrow_fallback",
+        "tests/fixtures/ruby/analyzer_hard_cases_dynamic_dsl_method_missing_chain_v4.rb"
+      ],
+      "failure_kind": "narrow_fallback_fn",
+      "primary_view": "unit_test",
+      "focus": "true narrow fallback runtime for a Ruby method_missing companion selected from explicit require_relative plus literal public_send evidence",
+      "direction": "callees",
+      "test_lanes": {
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "bounded_slice_plan_selects_ruby_method_missing_companion_as_narrow_fallback",
+          "--",
+          "--exact"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "app/main.rb",
+          "lib/router.rb",
+          "lib/runtime.rb"
+        ],
+        "shape": [
+          "app/main.rb calls Router#run_created",
+          "lib/router.rb require_relative loads runtime.rb and uses public_send(\"route_created\", payload)",
+          "lib/runtime.rb implements RuntimeProxy#method_missing and respond_to_missing?"
+        ]
+      },
+      "expected_outcome": {
+        "cache_update_path_suffixes": [
+          "app/main.rb",
+          "lib/router.rb",
+          "lib/runtime.rb"
+        ],
+        "selected_reason": {
+          "tier": 3,
+          "kind": "module_companion_file",
+          "via_path_suffix": "lib/router.rb"
+        },
+        "pruned_candidates": []
+      },
+      "expected_fields": {
+        "boundary_evidence": {
+          "explicit_require_relative_load_suffixes": [
+            "lib/runtime.rb"
+          ],
+          "literal_dynamic_targets": {
+            "route_created": 9
+          }
+        },
+        "candidate_evidence": {
+          "matched_call_line": 9,
+          "edge_certainty": "dynamic_fallback"
+        },
+        "selected_scoring": {
+          "source_kind": "narrow_fallback",
+          "lane": "module_companion_fallback",
+          "primary_evidence_kinds": [
+            "companion_file_match",
+            "dynamic_dispatch_literal_target",
+            "explicit_require_relative_load"
+          ],
+          "secondary_evidence_kinds": [],
+          "support": {
+            "edge_certainty": "dynamic_fallback"
+          }
+        },
+        "explanation_surface": {
+          "selected_vs_pruned_reasons": "absent",
+          "pruned_candidates": []
+        }
+      },
+      "regression_catch": [
+        "runtime companion is no longer selected as bounded narrow fallback",
+        "one of companion_file_match, dynamic_dispatch_literal_target, or explicit_require_relative_load drops from scoring",
+        "narrow fallback gets mixed into graph-first selected reasons"
+      ]
+    },
+    {
+      "case_id": "ruby-winning-evidence-source-kind-explanation",
+      "lang": "ruby",
+      "source_kind": "witness_unit_case",
+      "source": [
+        "docs/g8-1-missing-evidence-inventory-and-design-memo.md",
+        "docs/g8-2-bridge-scoring-evidence-schema.json",
+        "src/impact.rs::selected_vs_pruned_reason_derives_winning_metadata_for_source_kind_explanations"
+      ],
+      "failure_kind": "explanation_regression",
+      "primary_view": "unit_test",
+      "focus": "selected-vs-pruned witness surface exposes winning evidence and winning support for a source_kind competition",
+      "test_lanes": {
+        "lib_unit": [
+          "cargo",
+          "test",
+          "--lib",
+          "selected_vs_pruned_reason_derives_winning_metadata_for_source_kind_explanations",
+          "--",
+          "--exact"
+        ]
+      },
+      "repro": {
+        "shape": [
+          "selected path lib/leaf.rb is graph_second_hop",
+          "pruned path lib/helper.rb is narrow_fallback",
+          "both compete through via_path lib/service.rb",
+          "selected has explicit_require_relative_load and stronger support metadata"
+        ]
+      },
+      "expected_outcome": {
+        "selected_path": "lib/leaf.rb",
+        "pruned_path": "lib/helper.rb",
+        "selected_better_by": "source_kind"
+      },
+      "expected_fields": {
+        "selected_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "module_companion_fallback",
+          "primary_evidence_kinds": [
+            "companion_file_match",
+            "explicit_require_relative_load"
+          ],
+          "support": {
+            "symbolic_propagation_support": true,
+            "edge_certainty": "confirmed"
+          }
+        },
+        "pruned_scoring": {
+          "source_kind": "narrow_fallback",
+          "lane": "module_companion_fallback",
+          "primary_evidence_kinds": [
+            "companion_file_match"
+          ],
+          "support": {
+            "edge_certainty": "dynamic_fallback"
+          }
+        },
+        "witness_reason": {
+          "winning_primary_evidence_kinds": [
+            "explicit_require_relative_load"
+          ],
+          "winning_support": {
+            "symbolic_propagation_support": true,
+            "edge_certainty": "confirmed"
+          },
+          "summary": "selected over lib/helper.rb because graph_second_hop outranked narrow_fallback; winning primary evidence: explicit_require_relative_load; winning support: symbolic_propagation_support + edge_certainty=confirmed"
+        }
+      },
+      "regression_catch": [
+        "winning_primary_evidence_kinds stops reflecting selected-minus-pruned evidence",
+        "winning_support drops support deltas such as symbolic_propagation_support or confirmed certainty",
+        "source-kind explanation degrades back to a bare ranking result without evidence/support detail"
+      ]
+    },
+    {
+      "case_id": "ruby-require-relative-leaf-competition",
+      "lang": "ruby",
+      "source_kind": "integration_fixture",
+      "source": [
+        "tests/cli_pdg_propagation.rs::setup_ruby_require_relative_competing_leaf_repo",
+        "tests/cli_pdg_propagation.rs::pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_noise"
+      ],
+      "failure_kind": "rank_regression",
+      "primary_view": "dot+json",
+      "focus": "CLI Ruby competition where selected/pruned witness output must keep the semantic leaf and exclude ranked-out helper noise",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--direction",
+          "callees",
+          "--lang",
+          "ruby",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation_json": [
+          "impact",
+          "--direction",
+          "callees",
+          "--lang",
+          "ruby",
+          "--with-propagation",
+          "--format",
+          "json"
+        ],
+        "propagation_dot": [
+          "impact",
+          "--direction",
+          "callees",
+          "--lang",
+          "ruby",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "test_lanes": {
+        "integration": [
+          "cargo",
+          "test",
+          "--test",
+          "cli_pdg_propagation",
+          "pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_noise",
+          "--",
+          "--exact"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "lib/leaf.rb",
+          "lib/zzz_helper.rb",
+          "lib/service.rb",
+          "app/runner.rb"
+        ],
+        "shape": [
+          "lib/service.rb require_relative loads both leaf.rb and zzz_helper.rb",
+          "bounce(value) calls finish(alias_value) and helper_noise(value)",
+          "app/runner.rb mutates prepared from seed + 1 to seed + 2"
+        ]
+      },
+      "expected_outcome": {
+        "selected_paths": [
+          "app/runner.rb",
+          "lib/leaf.rb",
+          "lib/service.rb"
+        ],
+        "pruned_candidates": [
+          {
+            "path": "lib/zzz_helper.rb",
+            "prune_reason": "ranked_out"
+          }
+        ],
+        "selected_better_by": "lane",
+        "helper_excluded_from_explanation_slice": true,
+        "dot_assertions": {
+          "contains": [
+            "\"lib/leaf.rb:def:alias_value:2\"",
+            "\"app/runner.rb:use:prepared:5\" -> \"app/runner.rb:def:reply:5\""
+          ],
+          "excludes": [
+            "\"lib/zzz_helper.rb:def:debug_value:2\""
+          ]
+        }
+      },
+      "expected_fields": {
+        "selected_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "return_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result",
+            "return_flow"
+          ],
+          "secondary_evidence_kinds": [
+            "name_path_hint"
+          ]
+        },
+        "pruned_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "require_relative_continuation",
+          "primary_evidence_kinds": [
+            "require_relative_edge"
+          ],
+          "secondary_evidence_kinds": [
+            "callsite_position_hint"
+          ]
+        },
+        "witness_reason": {
+          "winning_primary_evidence_kinds": [
+            "assigned_result",
+            "return_flow"
+          ],
+          "summary": "selected over lib/zzz_helper.rb because return_continuation outranked require_relative_continuation; winning primary evidence: assigned_result + return_flow"
+        }
+      },
+      "regression_catch": [
+        "later helper noise outranks the semantic leaf",
+        "ranked-out helper leaks into selected_files_on_path explanation context",
+        "Ruby CLI witness summary loses the winning evidence surface"
+      ]
+    }
+  ]
+}
