@@ -689,6 +689,79 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_semantic_support_competition_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("steady.rs"),
+        r#"pub fn carry(input: i32) -> i32 {
+    let forwarded = input;
+    let settled = forwarded;
+    settled + forwarded
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("plain.rs"),
+        r#"pub fn carry(input: i32) -> i32 {
+    input
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("wrapper.rs"),
+        r#"use crate::plain;
+use crate::steady;
+
+pub fn wrap(a: i32) -> i32 {
+    let keep = steady::carry(a);
+    let _later = plain::carry(a);
+    keep
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod plain;
+mod steady;
+mod wrapper;
+
+fn caller() {
+    let input = 1;
+    let out = wrapper::wrap(input);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod plain;
+mod steady;
+mod wrapper;
+
+fn caller() {
+    let input = 2;
+    let out = wrapper::wrap(input);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_two_seed_shared_callee_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -1748,6 +1821,7 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
                                 "lane_rank": 0,
                                 "primary_evidence_count": 3,
                                 "secondary_evidence_count": 1,
+                                "semantic_support_rank": 2,
                                 "call_position_rank": 5,
                                 "lexical_tiebreak": "step.rs"
                             },
@@ -1810,6 +1884,141 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
                 "local_dfg_support": true
             },
             "summary": "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support",
+        }])
+    );
+}
+
+#[test]
+fn pdg_slice_selection_prefers_stronger_rust_semantic_support_over_later_callsite_hint() {
+    let (_tmp, repo) = setup_cross_file_semantic_support_competition_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"steady.rs:use:settled:4\""),
+        "expected bounded slice scope to keep the stronger semantic Rust leaf nodes, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"plain.rs:use:input:2\""),
+        "unexpected later plain passthrough helper entered the bounded slice scope, got:\n{}",
+        pdg
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(paths, vec!["main.rs", "steady.rs", "wrapper.rs"]);
+
+    let steady = slice_selection_file(slice_selection, "steady.rs");
+    assert!(
+        steady["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
+                    && reason["via_path"] == "wrapper.rs"
+                    && reason["bridge_kind"] == "wrapper_return"
+                    && reason["scoring"]
+                        == serde_json::json!({
+                            "source_kind": "graph_second_hop",
+                            "lane": "return_continuation",
+                            "primary_evidence_kinds": [
+                                "assigned_result",
+                                "param_to_return_flow",
+                                "return_flow"
+                            ],
+                            "secondary_evidence_kinds": [
+                                "name_path_hint"
+                            ],
+                            "score_tuple": {
+                                "source_rank": 0,
+                                "lane_rank": 0,
+                                "primary_evidence_count": 3,
+                                "secondary_evidence_count": 1,
+                                "semantic_support_rank": 3,
+                                "call_position_rank": 5,
+                                "lexical_tiebreak": "steady.rs"
+                            },
+                            "support": {
+                                "local_dfg_support": true
+                            }
+                        })
+            })),
+        "expected steady.rs to win on stronger Rust semantic support: {prop:#}"
+    );
+    assert!(
+        slice_selection["pruned_candidates"]
+            .as_array()
+            .is_some_and(|candidates| candidates.iter().any(|candidate| {
+                candidate["path"] == "plain.rs"
+                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["via_symbol_id"] == "rust:wrapper.rs:fn:wrap:4"
+                    && candidate["bridge_kind"] == "wrapper_return"
+                    && candidate["scoring"]
+                        == serde_json::json!({
+                            "source_kind": "graph_second_hop",
+                            "lane": "return_continuation",
+                            "primary_evidence_kinds": [
+                                "assigned_result",
+                                "param_to_return_flow",
+                                "return_flow"
+                            ],
+                            "secondary_evidence_kinds": [
+                                "callsite_position_hint",
+                                "name_path_hint"
+                            ],
+                            "score_tuple": {
+                                "source_rank": 0,
+                                "lane_rank": 0,
+                                "primary_evidence_count": 3,
+                                "secondary_evidence_count": 2,
+                                "semantic_support_rank": 2,
+                                "call_position_rank": 6,
+                                "lexical_tiebreak": "plain.rs"
+                            },
+                            "support": {
+                                "local_dfg_support": true
+                            }
+                        })
+            })),
+        "expected plain.rs to remain only as ranked-out metadata despite the later callsite hint: {prop:#}"
+    );
+
+    let witness = &prop["impacted_witnesses"]["rust:steady.rs:fn:carry:1"];
+    let steady_context = witness_slice_file(witness, "steady.rs");
+    assert_eq!(
+        steady_context["selected_vs_pruned_reasons"],
+        serde_json::json!([{
+            "via_symbol_id": "rust:wrapper.rs:fn:wrap:4",
+            "via_path": "wrapper.rs",
+            "selected_bridge_kind": "wrapper_return",
+            "pruned_path": "plain.rs",
+            "prune_reason": "ranked_out",
+            "pruned_bridge_kind": "wrapper_return",
+            "selected_better_by": "semantic_support_rank",
+            "summary": "selected over plain.rs because it had stronger semantic support (3 > 2)",
         }])
     );
 }

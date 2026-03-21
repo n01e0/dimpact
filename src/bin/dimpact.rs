@@ -996,6 +996,15 @@ struct PdgContext {
 #[derive(Debug, Clone, Default)]
 struct Tier2SemanticEvidence {
     param_to_return_flow: bool,
+    param_to_return_flow_count: u8,
+    tail_param_impact_count: u8,
+}
+
+impl Tier2SemanticEvidence {
+    fn semantic_support_rank(&self) -> u8 {
+        self.param_to_return_flow_count
+            .saturating_add(self.tail_param_impact_count)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1114,17 +1123,33 @@ fn collect_rust_tier2_semantic_evidence(
         return Tier2SemanticEvidence::default();
     }
 
-    let param_to_return_flow = summary.flows.iter().any(|flow| {
-        param_input_ids.contains(&flow.input_node_id)
-            && flow.impacted_node_ids.iter().any(|node_id| {
-                node_line_by_id
-                    .get(node_id)
-                    .is_some_and(|line| *line >= tail_line_floor)
-            })
-    });
+    let mut param_to_return_flow_count = 0usize;
+    let mut tail_param_impact_ids = std::collections::BTreeSet::new();
+    for flow in summary
+        .flows
+        .iter()
+        .filter(|flow| param_input_ids.contains(&flow.input_node_id))
+    {
+        let mut reaches_tail = false;
+        for node_id in &flow.impacted_node_ids {
+            if node_line_by_id
+                .get(node_id)
+                .is_some_and(|line| *line >= tail_line_floor)
+            {
+                reaches_tail = true;
+                tail_param_impact_ids.insert(node_id.clone());
+            }
+        }
+        if reaches_tail {
+            param_to_return_flow_count += 1;
+        }
+    }
+    let param_to_return_flow = param_to_return_flow_count > 0;
 
     Tier2SemanticEvidence {
         param_to_return_flow,
+        param_to_return_flow_count: u8::try_from(param_to_return_flow_count).unwrap_or(u8::MAX),
+        tail_param_impact_count: u8::try_from(tail_param_impact_ids.len()).unwrap_or(u8::MAX),
     }
 }
 
@@ -1263,6 +1288,7 @@ fn ruby_narrow_fallback_scoring_summary(
             primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap_or(u8::MAX),
             secondary_evidence_count: 0,
             negative_evidence_count: 0,
+            semantic_support_rank: 0,
             call_position_rank: matched_call_line,
             lexical_tiebreak: completion_file.to_string(),
         },
@@ -1584,6 +1610,7 @@ fn ruby_require_relative_scoring_summary(
             primary_evidence_count: 1,
             secondary_evidence_count,
             negative_evidence_count: 0,
+            semantic_support_rank: 0,
             call_position_rank: call_line,
             lexical_tiebreak: completion_file.to_string(),
         },
@@ -1749,6 +1776,11 @@ fn tier2_scoring_summary(
     } else {
         None
     };
+    let semantic_support_rank = if has_param_to_return_flow {
+        semantic_evidence.semantic_support_rank()
+    } else {
+        0
+    };
 
     ImpactSliceCandidateScoringSummary {
         source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
@@ -1760,6 +1792,7 @@ fn tier2_scoring_summary(
             secondary_evidence_count: u8::try_from(secondary_evidence_kinds.len())
                 .unwrap_or(u8::MAX),
             negative_evidence_count: u8::try_from(negative_evidence_kinds.len()).unwrap_or(u8::MAX),
+            semantic_support_rank,
             call_position_rank: call_line,
             lexical_tiebreak: completion_file.to_string(),
         },
@@ -1792,6 +1825,12 @@ fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp:
                 .score_tuple
                 .negative_evidence_count
                 .cmp(&b.scoring.score_tuple.negative_evidence_count)
+        })
+        .then_with(|| {
+            b.scoring
+                .score_tuple
+                .semantic_support_rank
+                .cmp(&a.scoring.score_tuple.semantic_support_rank)
         })
         .then_with(|| {
             b.scoring
@@ -3318,6 +3357,7 @@ fn caller() -> i32 {
                 primary_evidence_count: u8::try_from(primary_evidence_kinds.len()).unwrap(),
                 secondary_evidence_count: u8::try_from(secondary_evidence_kinds.len()).unwrap(),
                 negative_evidence_count: 0,
+                semantic_support_rank: 0,
                 call_position_rank,
                 lexical_tiebreak: lexical_tiebreak.to_string(),
             },
@@ -3342,6 +3382,7 @@ fn caller() -> i32 {
                 primary_evidence_count: 3,
                 secondary_evidence_count: 0,
                 negative_evidence_count: 0,
+                semantic_support_rank: 0,
                 call_position_rank,
                 lexical_tiebreak: lexical_tiebreak.to_string(),
             },
@@ -3715,6 +3756,7 @@ fn caller() -> i32 {
                         primary_evidence_count: 2,
                         secondary_evidence_count: 2,
                         negative_evidence_count: 1,
+                        semantic_support_rank: 0,
                         call_position_rank: 6,
                         lexical_tiebreak: "zzz_final_helper.rs".to_string(),
                     },
@@ -3931,6 +3973,7 @@ fn caller() -> i32 {
                         primary_evidence_count: 3,
                         secondary_evidence_count: 1,
                         negative_evidence_count: 0,
+                        semantic_support_rank: 2,
                         call_position_rank: 5,
                         lexical_tiebreak: "step.rs".to_string(),
                     },
@@ -3966,6 +4009,190 @@ fn caller() -> i32 {
                 }),
             "expected later neutral helper to be ranked out once param-to-return evidence is available: {:#?}",
             plan.slice_selection.pruned_candidates
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn bounded_slice_plan_prefers_stronger_rust_semantic_support_over_later_callsite_hint() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("steady.rs"),
+            "pub fn carry(input: i32) -> i32 {\n    let forwarded = input;\n    let settled = forwarded;\n    settled + forwarded\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("plain.rs"),
+            "pub fn carry(input: i32) -> i32 {\n    input\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("wrapper.rs"),
+            "use crate::plain;\nuse crate::steady;\n\npub fn wrap(a: i32) -> i32 {\n    let keep = steady::carry(a);\n    let _later = plain::carry(a);\n    keep\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("main.rs"),
+            "mod plain;\nmod steady;\nmod wrapper;\n\nfn caller() {\n    let input = 7;\n    let out = wrapper::wrap(input);\n    println!(\"{}\", out);\n}\n",
+        )
+        .unwrap();
+
+        let seed = dimpact::Symbol {
+            id: SymbolId("rust:main.rs:fn:caller:5".to_string()),
+            name: "caller".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 5,
+                end_line: 9,
+            },
+            language: "rust".to_string(),
+        };
+        let wrapper = dimpact::Symbol {
+            id: SymbolId("rust:wrapper.rs:fn:wrap:4".to_string()),
+            name: "wrap".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "wrapper.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 4,
+                end_line: 8,
+            },
+            language: "rust".to_string(),
+        };
+        let steady = dimpact::Symbol {
+            id: SymbolId("rust:steady.rs:fn:carry:1".to_string()),
+            name: "carry".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "steady.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 1,
+                end_line: 5,
+            },
+            language: "rust".to_string(),
+        };
+        let plain = dimpact::Symbol {
+            id: SymbolId("rust:plain.rs:fn:carry:1".to_string()),
+            name: "carry".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "plain.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 1,
+                end_line: 3,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            wrapper.clone(),
+            steady.clone(),
+            plain.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), wrapper.id.0.as_str(), "main.rs", 7),
+            call_ref(wrapper.id.0.as_str(), steady.id.0.as_str(), "wrapper.rs", 5),
+            call_ref(wrapper.id.0.as_str(), plain.id.0.as_str(), "wrapper.rs", 6),
+        ];
+
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(root).expect("chdir temp repo");
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+        std::env::set_current_dir(cwd).expect("restore cwd");
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "main.rs".to_string(),
+                "steady.rs".to_string(),
+                "wrapper.rs".to_string(),
+            ]
+        );
+
+        let steady_file = slice_selection_file(&plan.slice_selection, "steady.rs");
+        assert_eq!(
+            steady_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:4".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ParamToReturnFlow,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 3,
+                        secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 3,
+                        call_position_rank: 5,
+                        lexical_tiebreak: "steady.rs".to_string(),
+                    },
+                    support: Some(ImpactSliceCandidateSupportMetadata {
+                        local_dfg_support: true,
+                        ..ImpactSliceCandidateSupportMetadata::default()
+                    }),
+                }),
+            }]
+        );
+        assert_eq!(
+            plan.slice_selection.pruned_candidates,
+            vec![dimpact::ImpactSlicePrunedCandidate {
+                seed_symbol_id: seed.id.0.clone(),
+                path: "plain.rs".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:wrapper.rs:fn:wrap:4".to_string()),
+                via_path: Some("wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ParamToReturnFlow,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 3,
+                        secondary_evidence_count: 2,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 2,
+                        call_position_rank: 6,
+                        lexical_tiebreak: "plain.rs".to_string(),
+                    },
+                    support: Some(ImpactSliceCandidateSupportMetadata {
+                        local_dfg_support: true,
+                        ..ImpactSliceCandidateSupportMetadata::default()
+                    }),
+                }),
+            }]
         );
     }
 
