@@ -1415,6 +1415,7 @@ fn collect_ruby_narrow_fallback_candidates(
                 path: candidate_file.clone(),
                 via_symbol_id: boundary_symbol.id.0.clone(),
                 via_path: boundary_file.to_string(),
+                completion_symbol_id: boundary_symbol.id.0.clone(),
                 bridge_kind: None,
                 scoring: ruby_narrow_fallback_scoring_summary(
                     candidate_file.as_str(),
@@ -1454,17 +1455,20 @@ enum SliceSelectionTier {
     Root,
     DirectBoundary,
     BridgeCompletion,
+    BridgeContinuation,
     ModuleCompanionFallback,
 }
 
 const PER_BOUNDARY_SIDE_TIER2_FILES_MAX: usize = 1;
 const PER_SEED_TIER2_FILES_MAX: usize = 2;
+const PER_SEED_TIER3_FILES_MAX: usize = 1;
 
 fn slice_selection_tier_value(tier: SliceSelectionTier) -> u8 {
     match tier {
         SliceSelectionTier::Root => 0,
         SliceSelectionTier::DirectBoundary => 1,
         SliceSelectionTier::BridgeCompletion => 2,
+        SliceSelectionTier::BridgeContinuation => 3,
         SliceSelectionTier::ModuleCompanionFallback => 3,
     }
 }
@@ -1488,6 +1492,7 @@ struct Tier2Candidate {
     path: String,
     via_symbol_id: String,
     via_path: String,
+    completion_symbol_id: String,
     bridge_kind: Option<ImpactSliceBridgeKind>,
     scoring: ImpactSliceCandidateScoringSummary,
 }
@@ -2012,19 +2017,38 @@ fn candidate_tier(candidate: &Tier2Candidate) -> SliceSelectionTier {
     }
 }
 
-fn make_tier2_reason(
+fn make_candidate_reason_with_tier(
     seed_symbol_id: &str,
     candidate: &Tier2Candidate,
+    tier: SliceSelectionTier,
 ) -> ImpactSliceReasonMetadata {
     ImpactSliceReasonMetadata {
         seed_symbol_id: seed_symbol_id.to_string(),
-        tier: slice_selection_tier_value(candidate_tier(candidate)),
+        tier: slice_selection_tier_value(tier),
         kind: candidate_reason_kind(candidate),
         via_symbol_id: Some(candidate.via_symbol_id.clone()),
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
         scoring: Some(candidate.scoring.clone()),
     }
+}
+
+fn make_tier2_reason(
+    seed_symbol_id: &str,
+    candidate: &Tier2Candidate,
+) -> ImpactSliceReasonMetadata {
+    make_candidate_reason_with_tier(seed_symbol_id, candidate, candidate_tier(candidate))
+}
+
+fn make_continuation_reason(
+    seed_symbol_id: &str,
+    candidate: &Tier2Candidate,
+) -> ImpactSliceReasonMetadata {
+    make_candidate_reason_with_tier(
+        seed_symbol_id,
+        candidate,
+        SliceSelectionTier::BridgeContinuation,
+    )
 }
 
 fn make_tier2_pruned_candidate(
@@ -2194,6 +2218,132 @@ fn suppress_weaker_same_family_rust_siblings(
     admitted
 }
 
+fn continuation_ready_rust_wrapper_return_anchor(candidate: &Tier2Candidate) -> bool {
+    candidate.scoring.source_kind == ImpactSliceCandidateSourceKind::GraphSecondHop
+        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+        && candidate.path.ends_with(".rs")
+}
+
+fn collect_bridge_continuation_candidates<'a>(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    root_file: &str,
+    direct_boundary_paths: &std::collections::BTreeSet<String>,
+    selected_tier2_paths: &std::collections::BTreeSet<String>,
+    anchors: &[Tier2Candidate],
+    symbol_file_by_id: &std::collections::HashMap<String, &'a str>,
+    symbol_by_id: &std::collections::HashMap<String, &'a dimpact::Symbol>,
+    refs: &[Reference],
+    direction: ImpactDirection,
+    tier2_semantic_evidence_by_symbol_id: &mut std::collections::HashMap<
+        String,
+        Tier2SemanticEvidence,
+    >,
+) -> Vec<Tier2Candidate> {
+    let mut continuation_candidates = Vec::new();
+
+    for anchor in anchors
+        .iter()
+        .filter(|candidate| continuation_ready_rust_wrapper_return_anchor(candidate))
+    {
+        let Some(anchor_symbol) = symbol_by_id.get(&anchor.completion_symbol_id).copied() else {
+            continue;
+        };
+        let anchor_file = anchor.path.as_str();
+        let side_refs: Vec<_> = refs
+            .iter()
+            .filter(|r| is_call_graph_ref(r))
+            .filter_map(|reference| {
+                let continuation_symbol_id = match direction {
+                    ImpactDirection::Callers if reference.to.0 == anchor.completion_symbol_id => {
+                        Some(reference.from.0.as_str())
+                    }
+                    ImpactDirection::Callees if reference.from.0 == anchor.completion_symbol_id => {
+                        Some(reference.to.0.as_str())
+                    }
+                    ImpactDirection::Both => {
+                        if reference.to.0 == anchor.completion_symbol_id {
+                            Some(reference.from.0.as_str())
+                        } else if reference.from.0 == anchor.completion_symbol_id {
+                            Some(reference.to.0.as_str())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }?;
+                let continuation_file = symbol_file_by_id.get(continuation_symbol_id).copied()?;
+                if continuation_file == root_file
+                    || continuation_file == anchor_file
+                    || continuation_file == anchor.via_path
+                {
+                    return None;
+                }
+                if direct_boundary_paths.contains(continuation_file)
+                    || selected_tier2_paths.contains(continuation_file)
+                {
+                    return None;
+                }
+                Some((
+                    continuation_symbol_id.to_string(),
+                    continuation_file,
+                    reference.line,
+                ))
+            })
+            .collect();
+        let side_max_call_line = side_refs
+            .iter()
+            .map(|(_, _, line)| *line)
+            .max()
+            .unwrap_or_default();
+
+        let mut per_anchor = std::collections::BTreeMap::new();
+        for (continuation_symbol_id, continuation_file, call_line) in side_refs {
+            let Some(continuation_symbol) = symbol_by_id.get(&continuation_symbol_id).copied()
+            else {
+                continue;
+            };
+            let semantic_evidence = tier2_semantic_evidence_by_symbol_id
+                .entry(continuation_symbol_id.clone())
+                .or_insert_with(|| collect_rust_tier2_semantic_evidence(continuation_symbol))
+                .clone();
+            let scoring = tier2_scoring_summary(
+                anchor_symbol,
+                anchor_file,
+                continuation_symbol,
+                continuation_file,
+                call_line,
+                side_max_call_line,
+                &semantic_evidence,
+            );
+            let bridge_kind = tier2_bridge_kind_for_lane(scoring.lane);
+            if bridge_kind != anchor.bridge_kind {
+                continue;
+            }
+            let candidate = Tier2Candidate {
+                path: continuation_file.to_string(),
+                via_symbol_id: anchor.completion_symbol_id.clone(),
+                via_path: anchor.path.clone(),
+                completion_symbol_id: continuation_symbol_id,
+                bridge_kind,
+                scoring,
+            };
+            record_same_path_candidate(&mut per_anchor, seed_selection, seed_symbol_id, candidate);
+        }
+
+        let mut per_anchor = suppress_before_admit(
+            seed_symbol_id,
+            seed_selection,
+            per_anchor.into_values().collect(),
+        );
+        per_anchor.sort_by(compare_tier2_candidates);
+        continuation_candidates.extend(per_anchor.into_iter().take(1));
+    }
+
+    continuation_candidates.sort_by(compare_tier2_candidates);
+    continuation_candidates
+}
+
 fn plan_bounded_slice(
     cache_update_roots: &[String],
     local_dfg_roots: &[String],
@@ -2336,6 +2486,7 @@ fn plan_bounded_slice(
                     path: completion_file.to_string(),
                     via_symbol_id: boundary.symbol_id.clone(),
                     via_path: boundary_file.to_string(),
+                    completion_symbol_id: completion_symbol_id.clone(),
                     bridge_kind: tier2_bridge_kind_for_lane(scoring.lane),
                     scoring,
                 };
@@ -2390,6 +2541,7 @@ fn plan_bounded_slice(
 
         tier2_candidates.sort_by(compare_tier2_candidates);
         let mut selected_tier2_paths = std::collections::BTreeSet::new();
+        let mut admitted_tier2_candidates = Vec::new();
         for candidate in tier2_candidates {
             if selected_tier2_paths.contains(&candidate.path) {
                 seed_selection.add_reason(
@@ -2410,7 +2562,45 @@ fn plan_bounded_slice(
                 candidate.path.as_str(),
                 make_tier2_reason(seed.id.0.as_str(), &candidate),
             );
-            selected_tier2_paths.insert(candidate.path);
+            selected_tier2_paths.insert(candidate.path.clone());
+            admitted_tier2_candidates.push(candidate);
+        }
+
+        let continuation_candidates = collect_bridge_continuation_candidates(
+            seed.id.0.as_str(),
+            &mut seed_selection,
+            root_file,
+            &direct_boundary_paths,
+            &selected_tier2_paths,
+            &admitted_tier2_candidates,
+            &symbol_file_by_id,
+            &symbol_by_id,
+            refs,
+            direction,
+            &mut tier2_semantic_evidence_by_symbol_id,
+        );
+        let mut selected_continuation_paths = std::collections::BTreeSet::new();
+        for candidate in continuation_candidates {
+            if selected_continuation_paths.contains(&candidate.path) {
+                seed_selection.add_reason(
+                    candidate.path.as_str(),
+                    make_continuation_reason(seed.id.0.as_str(), &candidate),
+                );
+                continue;
+            }
+            if selected_continuation_paths.len() >= PER_SEED_TIER3_FILES_MAX {
+                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                    seed.id.0.as_str(),
+                    &candidate,
+                    ImpactSlicePruneReason::BridgeBudgetExhausted,
+                ));
+                continue;
+            }
+            seed_selection.add_reason(
+                candidate.path.as_str(),
+                make_continuation_reason(seed.id.0.as_str(), &candidate),
+            );
+            selected_continuation_paths.insert(candidate.path);
         }
 
         overall.merge(&seed_selection);

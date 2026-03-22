@@ -689,6 +689,77 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_two_hop_wrapper_return_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("leaf.rs"),
+        r#"pub fn leaf(a: i32) -> i32 {
+    a + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("step.rs"),
+        r#"use crate::leaf;
+
+pub fn step(a: i32) -> i32 {
+    let v = leaf::leaf(a);
+    v + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("wrap.rs"),
+        r#"use crate::step;
+
+pub fn wrap(a: i32) -> i32 {
+    step::step(a)
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod step;
+mod wrap;
+
+fn caller() {
+    let x = 1;
+    let y = wrap::wrap(x);
+    println!("{}", y);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod step;
+mod wrap;
+
+fn caller() {
+    let x = 2;
+    let y = wrap::wrap(x);
+    println!("{}", y);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_cross_file_semantic_support_competition_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -1428,6 +1499,84 @@ fn pdg_propagation_maps_multi_file_wrapper_return_without_leaking_irrelevant_arg
         !prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:7\""),
         "unexpected irrelevant arg bridge leaked through wrapper summary, got:\n{}",
         prop
+    );
+}
+
+#[test]
+fn pdg_propagation_extends_two_hop_wrapper_return_through_rust_bridge_continuation_scope() {
+    let (_tmp, repo) = setup_cross_file_two_hop_wrapper_return_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+    let prop_json = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"leaf.rs:def:a:1\""),
+        "expected bounded slice scope to include continuation leaf DFG nodes in plain PDG, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"main.rs:use:x:7\" -> \"main.rs:def:y:7\""),
+        "plain PDG should still avoid synthesizing the two-hop wrapper return bridge without propagation, got:\n{}",
+        pdg
+    );
+    assert!(
+        prop.contains("\"leaf.rs:use:a:2\" -> \"main.rs:def:y:7\""),
+        "expected propagation to carry the nested leaf return back into the caller result, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:y:7\""),
+        "expected propagation to recover the caller-side two-hop wrapper return bridge, got:\n{}",
+        prop
+    );
+
+    let slice_selection = &prop_json["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(paths, vec!["leaf.rs", "main.rs", "step.rs", "wrap.rs"]);
+
+    let leaf = slice_selection_file(slice_selection, "leaf.rs");
+    assert!(
+        leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 3
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:step.rs:fn:step:3"
+                    && reason["via_path"] == "step.rs"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected continuation leaf to be explained from the selected step bridge-completion anchor: {prop_json:#}"
     );
 }
 
@@ -2738,15 +2887,21 @@ fn ruby_chain_fixture_only_gains_symbolic_edges_with_propagation() {
         "expected fixed pair of symbolic edges: {prop:#}"
     );
     assert!(prop_edges.iter().all(|e| e["kind"] == "data"));
-    assert!(prop_edges
-        .iter()
-        .all(|e| e["provenance"] == "symbolic_propagation"));
-    assert!(prop_edges
-        .iter()
-        .any(|e| e["to"] == "demo/test.rb:def:v:14"));
-    assert!(prop_edges
-        .iter()
-        .any(|e| e["to"] == "demo/test.rb:use:v:16"));
+    assert!(
+        prop_edges
+            .iter()
+            .all(|e| e["provenance"] == "symbolic_propagation")
+    );
+    assert!(
+        prop_edges
+            .iter()
+            .any(|e| e["to"] == "demo/test.rb:def:v:14")
+    );
+    assert!(
+        prop_edges
+            .iter()
+            .any(|e| e["to"] == "demo/test.rb:use:v:16")
+    );
 }
 
 #[test]
@@ -2967,9 +3122,11 @@ fn ruby_alias_define_fixture_keeps_defined_sym_without_leaking_defined_only() {
     );
     let edges = prop["edges"].as_array().expect("edges array");
 
-    assert!(edges
-        .iter()
-        .any(|e| e["to"] == "ruby:demo/test.rb:method:defined_sym:9"));
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["to"] == "ruby:demo/test.rb:method:defined_sym:9")
+    );
     assert!(
         !edges
             .iter()
