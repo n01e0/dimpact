@@ -635,6 +635,7 @@ fn push_unique_edge(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_nested_completion_bridges(
     pdg: &mut DataFlowGraph,
     seen_edges: &mut std::collections::HashSet<(String, String, DependencyKind)>,
@@ -703,6 +704,67 @@ fn push_nested_completion_bridges(
             }
         }
     }
+}
+
+fn collect_callsite_nodes(
+    nodes_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
+    file: &str,
+    line: u32,
+    expected_len: usize,
+    preferred_offsets: &[i32],
+) -> Vec<String> {
+    let mut collected = Vec::new();
+    for offset in preferred_offsets {
+        let candidate_line = if *offset < 0 {
+            let delta = offset.unsigned_abs();
+            if delta > line {
+                continue;
+            }
+            line - delta
+        } else {
+            line.saturating_add(*offset as u32)
+        };
+        let key = (file.to_string(), candidate_line);
+        let Some(node_ids) = nodes_by_loc.get(&key) else {
+            continue;
+        };
+        collected.extend(node_ids.iter().cloned());
+        if expected_len > 0 && collected.len() >= expected_len {
+            break;
+        }
+    }
+    collected
+}
+
+fn collect_callsite_uses(
+    uses_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
+    file: &str,
+    line: u32,
+    expected_len: usize,
+) -> Vec<String> {
+    let exact = collect_callsite_nodes(uses_by_loc, file, line, expected_len, &[0]);
+    if expected_len == 0 || exact.len() >= expected_len {
+        return exact;
+    }
+    collect_callsite_nodes(
+        uses_by_loc,
+        file,
+        line,
+        expected_len,
+        &[0, 1, -1, 2, -2, 3, -3],
+    )
+}
+
+fn collect_callsite_defs(
+    defs_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
+    file: &str,
+    line: u32,
+) -> Vec<String> {
+    let exact = collect_callsite_nodes(defs_by_loc, file, line, 0, &[0]);
+    if !exact.is_empty() {
+        return exact;
+    }
+    collect_callsite_nodes(defs_by_loc, file, line, 0, &[0, -1, 1, -2, 2])
 }
 
 impl PdgBuilder {
@@ -774,9 +836,17 @@ impl PdgBuilder {
             r.kind == crate::ir::reference::RefKind::Call
                 && r.provenance == crate::ir::reference::EdgeProvenance::CallGraph
         }) {
-            let key = (r.file.clone(), r.line);
-            let callsite_uses = uses_by_loc.get(&key).cloned().unwrap_or_default();
-            let callsite_defs = defs_by_loc.get(&key).cloned().unwrap_or_default();
+            let summary_input_count = summary_by_fn
+                .get(&r.to.0)
+                .map(|summary| summary.inputs.len())
+                .unwrap_or_default();
+            let callsite_uses = collect_callsite_uses(
+                &uses_by_loc,
+                r.file.as_str(),
+                r.line,
+                summary_input_count.max(1),
+            );
+            let callsite_defs = collect_callsite_defs(&defs_by_loc, r.file.as_str(), r.line);
 
             for u in &callsite_uses {
                 push_unique_edge(
@@ -1020,9 +1090,9 @@ impl PdgBuilder {
                 if !id.contains(":def:") {
                     continue;
                 }
-                if !nodes_by_id
+                if nodes_by_id
                     .get(id.as_str())
-                    .is_some_and(|n| n.line == s.range.start_line)
+                    .is_none_or(|n| n.line != s.range.start_line)
                 {
                     continue;
                 }

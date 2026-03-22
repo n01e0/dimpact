@@ -760,6 +760,66 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_multiline_wrapper_return_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("leaf.rs"),
+        r#"pub fn source(v: i32) -> i32 { v + 1 }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("wrapper.rs"),
+        r#"use crate::leaf;
+
+pub fn wrap(v: i32) -> i32 {
+    leaf::source(v)
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod wrapper;
+
+fn caller() {
+    let x = 1;
+    let out = wrapper::wrap(
+        x,
+    );
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod leaf;
+mod wrapper;
+
+fn caller() {
+    let x = 2;
+    let out = wrapper::wrap(
+        x,
+    );
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_cross_file_semantic_support_competition_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -1651,6 +1711,55 @@ fn pdg_propagation_extends_two_hop_wrapper_return_through_rust_bridge_continuati
                     && reason["bridge_kind"] == "wrapper_return"
             })),
         "expected continuation leaf to be explained from the selected step bridge-completion anchor: {prop_json:#}"
+    );
+}
+
+#[test]
+fn pdg_propagation_recovers_multiline_rust_wrapper_callsite_attachment() {
+    let (_tmp, repo) = setup_cross_file_multiline_wrapper_return_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"wrapper.rs:def:v:3\""),
+        "expected plain PDG to keep the wrapper param node in scope, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:6\""),
+        "plain PDG should still avoid synthesizing the multiline callsite bridge without propagation, got:\n{}",
+        pdg
+    );
+    assert!(
+        prop.contains("\"main.rs:use:x:7\" -> \"rust:wrapper.rs:fn:wrap:3\""),
+        "expected propagation to attach the off-line caller arg use to the callee symbol, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:6\""),
+        "expected propagation to recover the caller-side multiline wrapper bridge, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"leaf.rs:use:v:1\" -> \"main.rs:def:out:6\""),
+        "expected propagation to keep the downstream return flow attached to the multiline caller def, got:\n{}",
+        prop
     );
 }
 
