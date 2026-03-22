@@ -2218,10 +2218,10 @@ fn suppress_weaker_same_family_rust_siblings(
     admitted
 }
 
-fn continuation_ready_rust_wrapper_return_anchor(candidate: &Tier2Candidate) -> bool {
+fn continuation_ready_wrapper_return_anchor(candidate: &Tier2Candidate) -> bool {
     candidate.scoring.source_kind == ImpactSliceCandidateSourceKind::GraphSecondHop
         && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
-        && candidate.path.ends_with(".rs")
+        && (candidate.path.ends_with(".rs") || candidate.path.ends_with(".rb"))
 }
 
 fn collect_bridge_continuation_candidates<'a>(
@@ -2244,7 +2244,7 @@ fn collect_bridge_continuation_candidates<'a>(
 
     for anchor in anchors
         .iter()
-        .filter(|candidate| continuation_ready_rust_wrapper_return_anchor(candidate))
+        .filter(|candidate| continuation_ready_wrapper_return_anchor(candidate))
     {
         let Some(anchor_symbol) = symbol_by_id.get(&anchor.completion_symbol_id).copied() else {
             continue;

@@ -901,6 +901,32 @@ impl PdgBuilder {
                             DependencyKind::Data,
                         );
                     }
+                } else if summary.inputs.len() == 1
+                    && callsite_uses.is_empty()
+                    && callsite_defs.len() == 1
+                {
+                    for flow in &active_flows {
+                        for impacted in &flow.impacted_node_ids {
+                            push_unique_edge(
+                                pdg,
+                                &mut seen_edges,
+                                impacted.clone(),
+                                callsite_defs[0].clone(),
+                                DependencyKind::Data,
+                            );
+                        }
+                        push_nested_completion_bridges(
+                            pdg,
+                            &mut seen_edges,
+                            r.to.0.as_str(),
+                            &flow.impacted_node_ids,
+                            &callsite_defs,
+                            refs,
+                            &summary_by_fn,
+                            &node_loc_by_id,
+                            2,
+                        );
+                    }
                 }
             }
         }
