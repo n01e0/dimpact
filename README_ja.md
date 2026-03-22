@@ -143,10 +143,10 @@ dimpact id --name foo -f json
 - `--per-seed` 指定時は、各変更/シードシンボルごとの `impacts[].output.summary` 配下に同じ summary が入り、witness も各 grouped output の中にネストされます。
 - DOT/HTML 出力は互換維持で、今回の summary は JSON/YAML 利用を主対象としています。
 
-### evidence-driven selection の見方
+### evidence-driven selection / evidence-budgeted admission の見方
 - PDG / propagation planner は、到達可能な helper file を全部 scope に入れることを目指していません。
   - 目的は bounded な explanation slice を保ったまま、boundary side ごとに最も筋の良い continuation を選ぶことです
-- G9 では mental model をもう 1 段はっきりさせています:
+- G9/G10 では mental model をもう 1 段はっきりさせています:
   - `source_kind` と `lane` は重要な ranking dimension ですが、それ自体は evidence ではありません
   - evidence は、次の 4 category に分けて読むと追いやすいです:
     1. `primary`: `param_to_return_flow` / `return_flow` / `assigned_result` / `alias_chain` のような、選ばれた continuation を直接支える continuity fact
@@ -161,13 +161,26 @@ dimpact id --name foo -f json
 - 運用上の大事な考え方は、**良い evidence は scope を広げずに precision を上げるべき**、という点です。
   - 強い候補だけが selected explanation file になる
   - 弱い候補は `pruned_candidates[*]` や `slice_context.selected_vs_pruned_reasons` に残して、黙って slice を広げない
+- G10 では、これをさらに 1 段前へ寄せて **evidence-budgeted admission** として扱います:
+  - planner は「どの候補が勝つか」だけでなく、「どの弱い候補は ranking pool に入る前に落とすべきか」も判断します
+  - helper noise、fallback-only loser、弱い same-family sibling、弱い same-path duplicate は、explanation file に昇格するのではなく `pruned_candidates[*]` に留まるのが期待挙動です
+  - 読み分けると便利な prune label は次です:
+    - `suppressed_before_admit`: 通常の side-local ranking に入る前に落とした弱い候補
+    - `weaker_same_family_sibling`: 同じ continuation family にすでにより強い代表候補がいた
+    - `weaker_same_path_duplicate`: 複数の説明が同じ file へ収束したが、より強い代表だけを selected に残した
+    - `bridge_budget_exhausted`: ローカル比較は通ったが、最後の per-seed bounded budget で落ちた
+  - これは「探索を広げた planner」ではなく「family-aware に bounded admission を厳しくした planner」だと読むのが大事です:
+    - admission が厳しくなった
+    - loser bookkeeping が明示的になった
+    - `selected_files_on_path` を含む witness scope は、loser を記録しても意図的に小さく保たれる
 - witness 出力も同じ考え方で圧縮されています:
   - `winning_primary_evidence_kinds` と `winning_support` が selected side を説明する
   - `losing_side_reason` は、helper noise / fallback-only / 弱い `dynamic_fallback` certainty など、loser 側に明確な suppressing reason があるときに短く説明する
 - Rust/Ruby の PDG 出力が意外だったときは、次の順で読むと追いやすいです:
   1. `summary.slice_selection.files[*].reasons[*].scoring` を見る
   2. `summary.slice_selection.pruned_candidates[*].scoring` と見比べる
-  3. 最後に `impacted_witnesses[*].slice_context.selected_vs_pruned_reasons` で人間向けの最短説明を確認する
+  3. admit 前 drop や duplicate/sibling merge だった場合は `pruned_candidates[*].compact_explanation` を見る
+  4. 最後に `impacted_witnesses[*].slice_context.selected_vs_pruned_reasons` で人間向けの最短説明を確認する
 
 ### Impact オプション（`impact` サブコマンド）
 - `--direction callers|callees|both` : 方向 (既定: callers)
