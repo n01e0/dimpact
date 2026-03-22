@@ -127,10 +127,10 @@ CLI Overview
 - With `--per-seed`, the same summary appears under `impacts[].output.summary` for each changed/seed symbol, and witness data stays nested under each grouped output.
 - DOT/HTML output stays compatible; the new summary fields are for JSON/YAML consumption.
 
-### Evidence-driven selection: how to think about it
+### Evidence-driven selection and evidence-budgeted admission
 - The PDG / propagation planner is intentionally **not** trying to include every reachable helper file.
   - the goal is to keep a small bounded explanation slice and choose the strongest local continuation for each boundary side
-- G9 sharpens the mental model a bit:
+- G9/G10 sharpen the mental model a bit:
   - `source_kind` and `lane` are still important ranking dimensions, but they are **not** themselves evidence
   - the evidence vocabulary is easiest to read as four normalized categories:
     1. `primary`: direct continuity facts such as `param_to_return_flow`, `return_flow`, `assigned_result`, or `alias_chain` when they represent the actual selected continuation
@@ -145,13 +145,26 @@ CLI Overview
 - The important operational idea is still: **better evidence should improve precision without widening scope**.
   - a stronger winner becomes the selected explanation file
   - weaker alternatives stay visible in `pruned_candidates[*]` or `slice_context.selected_vs_pruned_reasons` instead of silently expanding the slice
+- G10 pushes this one step earlier with **evidence-budgeted admission**:
+  - the planner now tries to decide not only **which candidate wins**, but also **which weak candidate should not even enter the real ranking pool**
+  - obvious helper noise, fallback-only losers, weaker same-family siblings, and weaker same-path duplicates are expected to stop at `pruned_candidates[*]` instead of becoming explanation files
+  - the most useful prune labels to recognize are:
+    - `suppressed_before_admit`: weak candidate was dropped before the normal side-local ranked selection
+    - `weaker_same_family_sibling`: a stronger candidate in the same continuation family already represented that boundary side
+    - `weaker_same_path_duplicate`: multiple explanations converged on the same file, but only the stronger representative remained selected
+    - `bridge_budget_exhausted`: a candidate survived local comparison but lost to the final per-seed bounded budget
+  - read this as a **family-aware bounded planner**, not as a larger search:
+    - admission is tighter
+    - loser bookkeeping is more explicit
+    - witness scope stays compact on purpose (`selected_files_on_path` should not suddenly grow just because a loser was recorded)
 - Witness output follows the same shape in a compact way:
   - `winning_primary_evidence_kinds` and `winning_support` explain the selected side
   - `losing_side_reason` explains the loser when there is an obvious suppressing reason (for example helper noise, fallback-only status, or weaker `dynamic_fallback` certainty)
 - A good reading order for surprising Rust/Ruby PDG output is:
   1. inspect `summary.slice_selection.files[*].reasons[*].scoring`
   2. compare against `summary.slice_selection.pruned_candidates[*].scoring`
-  3. finish with `impacted_witnesses[*].slice_context.selected_vs_pruned_reasons` for the shortest human-facing explanation
+  3. check `pruned_candidates[*].compact_explanation` when a loser was dropped before admit or merged as a duplicate/sibling
+  4. finish with `impacted_witnesses[*].slice_context.selected_vs_pruned_reasons` for the shortest human-facing explanation
 
 - Impact Options (subcommand `impact`):
   - `--direction callers|callees|both` : traversal direction (default: callers)
