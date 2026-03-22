@@ -969,6 +969,80 @@ end
     (dir, path)
 }
 
+fn setup_ruby_two_hop_require_relative_return_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::write(
+        path.join("main.rb"),
+        r#"require_relative "lib/wrap"
+
+def entry
+  x = 1
+  y = Wrap.wrap(x)
+  puts y
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/wrap.rb"),
+        r#"require_relative "step"
+
+module Wrap
+  def self.wrap(a)
+    Step.step(a)
+  end
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/step.rb"),
+        r#"require_relative "leaf"
+
+module Step
+  def self.step(a)
+    v = Leaf.leaf(a)
+    v + 1
+  end
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/leaf.rb"),
+        r#"module Leaf
+  def self.leaf(a)
+    a + 1
+  end
+end
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rb"),
+        r#"require_relative "lib/wrap"
+
+def entry
+  x = 2
+  y = Wrap.wrap(x)
+  puts y
+end
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_ruby_require_relative_competing_leaf_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -2292,6 +2366,99 @@ fn pdg_slice_selection_prefers_stronger_rust_semantic_support_over_later_callsit
         plain_paths,
         vec!["main.rs", "wrapper.rs"],
         "expected ranked-out plain.rs witness to stay compact and exclude plain.rs from the explanation slice: {prop:#}"
+    );
+}
+
+#[test]
+fn pdg_propagation_extends_two_hop_require_relative_wrapper_return_scope() {
+    let (_tmp, repo) = setup_ruby_two_hop_require_relative_return_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--format",
+            "dot",
+        ],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+    let prop_json = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"lib/leaf.rb:def:a:2\""),
+        "expected bounded slice scope to include the two-hop Ruby leaf DFG nodes in plain PDG, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"lib/leaf.rb:use:a:3\" -> \"main.rb:def:y:5\""),
+        "plain PDG should still avoid synthesizing the two-hop Ruby wrapper return bridge without propagation, got:\n{}",
+        pdg
+    );
+    assert!(
+        prop.contains("\"lib/leaf.rb:use:a:3\" -> \"main.rb:def:y:5\""),
+        "expected propagation to carry the nested Ruby leaf return back into the caller result, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"lib/step.rb:use:a:5\" -> \"main.rb:def:y:5\""),
+        "expected propagation to keep the intermediate Ruby step continuation connected to the caller result, got:\n{}",
+        prop
+    );
+
+    let slice_selection = &prop_json["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["lib/leaf.rb", "lib/step.rb", "lib/wrap.rb", "main.rb"]
+    );
+
+    let leaf = slice_selection_file(slice_selection, "lib/leaf.rb");
+    assert!(
+        leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 3
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && reason["via_path"] == "lib/step.rb"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected continuation leaf to be explained from the selected Ruby step bridge-completion anchor: {prop_json:#}"
     );
 }
 
