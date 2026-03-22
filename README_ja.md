@@ -239,7 +239,8 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 ## PDG / propagation の使い分け
 - bounded slice は、いまの PDG path の scope モデルです
   - 目的は repo 全体を開くことではなく、短い multi-file bridge を説明するのに必要な近傍 file だけを拾うことです
-  - 現在の planner は **controlled 2-hop** で、seed/changed file → direct boundary file → boundary side ごとに必要な bridge completion file を少数だけ足す、という bounded な project slice を狙っています
+  - 現在の planner は **bounded continuation** に進んでおり、seed/changed file → direct boundary file → bounded な bridge completion file に加えて、強い Rust/Ruby case ではさらに 1 枚の `bridge_continuation_file` まで選べます
+  - 実運用で言うと、`main -> wrapper -> step -> leaf` のような短い chain を scope に入れやすくなった一方で、再帰的な whole-repo expansion にはしません
   - `--with-pdg` と `--with-propagation` は、diff モードでも seed モードでも、この同じ bounded slice planner を共有します
 - `--with-pdg`
   - 選ばれた bounded slice 上で、Rust/Ruby の local data/control dependence を少し厚く見たいとき向けです
@@ -248,28 +249,36 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - `--with-propagation`
   - 同じ bounded slice の上に call-site / summary bridge を足す拡張です
   - 引数 → callee → 代入先 のような値伝播や、wrapper return-flow / imported result continuation を見たいときに使います
+  - G11 では、短い Rust/Ruby の wrapper-return chain、2-hop の `require_relative` chain、multiline call site attach が以前より自然につながるようになりました
   - local variable flow、alias chain、wrapper return-flow、短い inter-procedural propagation の false negative を疑うときに向いています
 - `--per-seed`
   - 通常 impact だけでなく PDG / propagation path でも使えます
   - changed/seed symbol ごとの波及を個別に見たいときに便利で、seed ごとの witness や compact path も追いやすくなります
+  - file が direct boundary / bridge completion / `bridge_continuation_file` のどれとして残ったかを見るには、per-seed JSON がいちばん追いやすいです
 
 ## 現在の PDG / propagation の限界
 - scope はまだ意図的に絞っています
   - 現状は **bounded project slice** であって project-wide closure ではありません
-  - Rust/Ruby ではおおむね「root file + direct boundary + いくつかの boundary side ごとの controlled second-hop bridge file」くらいのスコープを狙っています
+  - Rust/Ruby ではおおむね「root file + direct boundary + bounded bridge completion + 強い短距離 family に対する continuation file 1 枚」くらいのスコープを狙っています
   - そのため、短い 2-hop bridge には効きますが、再帰的な whole-project expansion はしません
   - それ以外の言語では `--with-pdg` を付けても、実質的には通常の call graph シグナルに寄る場面が多いです
 - **project-wide PDG** ではありません
   - 現状は依然として `global call graph + bounded local DFG augmentation` に近い挙動です
   - propagation も whole-program symbolic execution ではなく、call-site / summary 中心の heuristic です
+  - つまり本物の cross-file DFG を作っているわけではなく、cross-file continuity の多くは bounded file selection と symbolic bridge で成立しています
 - witness は改善されたが、まだ最小表現です
   - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` で 1 本の multi-hop 説明を見られるようになりました
   - `impacted_witnesses.slice_context` を見ると、その経路上に出てくる selected file が bounded-slice planner でどう選ばれたかを軽く辿れます
+  - continuation tier は `bridge_continuation_file` として別 kind で見えるようになったので、G11 の scope 拡張が JSON 上でも分かりやすくなっています
   - `*_compact` 系フィールドでその説明を読みやすく圧縮していますが、依然として 1 本の選択経路の要約です
   - 競合する複数経路の列挙や、代替経路が存在しないことの証明まではしません
 - `-f dot` の意味が切り替わります
   - 通常の `impact -f dot` は impact graph
   - `impact --with-pdg -f dot` は raw な PDG/DFG 風グラフです
+- propagation の attach は良くなったが、まだ narrow です
+  - multiline call site でも exact `(file, line)` だけに依存しないようになり、近接行に分かれた短い wrapper call は以前より拾いやすくなりました
+  - ただしこれはあくまで局所的な tolerance であって、任意の式正規化や汎用の引数対応づけではありません
+  - nested multi-input summary mapping、広い alias stitching、より賢い budget-aware continuation selection は引き続き部分的な対応に留まります
 - Ruby は short multi-file case が前進した一方で、限界もまだあります
   - `require_relative` / alias / wrapper-return の短い chain や no-paren wrapper parameter flow は以前より拾いやすくなりました
   - bridge scoring は、semantic に強い alias / return-flow completion を単純な `require_relative` helper noise より優先しつつ、弱い fallback は scope を広げず ranked-out candidate として残す方針です
