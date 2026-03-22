@@ -2032,6 +2032,25 @@ fn make_tier2_pruned_candidate(
     candidate: &Tier2Candidate,
     prune_reason: ImpactSlicePruneReason,
 ) -> dimpact::ImpactSlicePrunedCandidate {
+    let compact_explanation = match prune_reason {
+        ImpactSlicePruneReason::SuppressedBeforeAdmit => {
+            let suppressor = if candidate_is_weak_ruby_require_relative(candidate) {
+                Some("fallback_only_suppressor")
+            } else if candidate_has_helper_noise_signal(candidate)
+                && candidate_is_lexical_or_callsite_only(candidate)
+            {
+                Some("helper_noise_suppressor")
+            } else {
+                None
+            };
+            suppressor.map(|label| format!("suppressed_before_admit={label}"))
+        }
+        ImpactSlicePruneReason::WeakerSamePathDuplicate => {
+            Some("suppressed_before_admit=weaker_same_path_duplicate".to_string())
+        }
+        _ => None,
+    };
+
     dimpact::ImpactSlicePrunedCandidate {
         seed_symbol_id: seed_symbol_id.to_string(),
         path: candidate.path.clone(),
@@ -2042,6 +2061,7 @@ fn make_tier2_pruned_candidate(
         bridge_kind: candidate.bridge_kind,
         prune_reason,
         scoring: Some(candidate.scoring.clone()),
+        compact_explanation,
     }
 }
 
@@ -3921,6 +3941,8 @@ fn caller() -> i32 {
                 .any(|candidate| {
                     candidate.path == "aaa_helper.rs"
                         && candidate.prune_reason == ImpactSlicePruneReason::SuppressedBeforeAdmit
+                        && candidate.compact_explanation.as_deref()
+                            == Some("suppressed_before_admit=helper_noise_suppressor")
                         && candidate.bridge_kind
                             == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
                         && candidate.via_symbol_id.as_deref() == Some("rust:wrapper.rs:fn:wrap:3")
@@ -4034,6 +4056,7 @@ fn caller() -> i32 {
                     },
                     support: None,
                 }),
+                compact_explanation: None,
             }]
         );
     }
@@ -4104,6 +4127,8 @@ fn caller() -> i32 {
                 .any(|candidate| {
                     candidate.path == "zzz_helper.rs"
                         && candidate.prune_reason == ImpactSlicePruneReason::SuppressedBeforeAdmit
+                        && candidate.compact_explanation.as_deref()
+                            == Some("suppressed_before_admit=helper_noise_suppressor")
                         && candidate.bridge_kind
                             == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
                         && candidate.via_symbol_id.as_deref() == Some("rust:adapter.rs:fn:wrap:3")
@@ -4464,6 +4489,7 @@ fn caller() -> i32 {
                         ..ImpactSliceCandidateSupportMetadata::default()
                     }),
                 }),
+                compact_explanation: None,
             }]
         );
     }
@@ -4581,6 +4607,9 @@ fn caller() -> i32 {
                     7,
                     "lib/zzz_helper.rb",
                 )),
+                compact_explanation: Some(
+                    "suppressed_before_admit=fallback_only_suppressor".to_string(),
+                ),
             }],
             "expected later Ruby helper noise to be suppressed before side ranking: {:#?}",
             plan.slice_selection.pruned_candidates
@@ -4663,6 +4692,9 @@ fn caller() -> i32 {
                     6,
                     "shared.rs",
                 )),
+                compact_explanation: Some(
+                    "suppressed_before_admit=weaker_same_path_duplicate".to_string(),
+                ),
             }]
         );
     }
@@ -4767,6 +4799,9 @@ fn caller() -> i32 {
                     7,
                     "lib/runtime.rb",
                 )),
+                compact_explanation: Some(
+                    "suppressed_before_admit=fallback_only_suppressor".to_string(),
+                ),
             }]
         );
     }
