@@ -112,6 +112,7 @@ pub enum ImpactSliceReasonKind {
     DirectCallerFile,
     DirectCalleeFile,
     BridgeCompletionFile,
+    BridgeContinuationFile,
     ModuleCompanionFile,
 }
 
@@ -1087,14 +1088,15 @@ fn selected_reason_matches_pruned_candidate(
     reason: &ImpactSliceReasonMetadata,
     candidate: &ImpactSlicePrunedCandidate,
 ) -> bool {
-    reason.kind == ImpactSliceReasonKind::BridgeCompletionFile
-        && matches!(
-            candidate.prune_reason,
-            ImpactSlicePruneReason::RankedOut
-                | ImpactSlicePruneReason::SuppressedBeforeAdmit
-                | ImpactSlicePruneReason::WeakerSameFamilySibling
-        )
-        && candidate.path != selected_path
+    matches!(
+        reason.kind,
+        ImpactSliceReasonKind::BridgeCompletionFile | ImpactSliceReasonKind::BridgeContinuationFile
+    ) && matches!(
+        candidate.prune_reason,
+        ImpactSlicePruneReason::RankedOut
+            | ImpactSlicePruneReason::SuppressedBeforeAdmit
+            | ImpactSlicePruneReason::WeakerSameFamilySibling
+    ) && candidate.path != selected_path
         && reason.seed_symbol_id == candidate.seed_symbol_id
         && reason.tier == candidate.tier
         && reason.kind == candidate.kind
@@ -3294,6 +3296,88 @@ fn foo() { bar(); }
                 compact_explanation: None,
                 summary: "selected over zzz_final_helper.rs because it had less negative evidence (0 < 1); losing side: negative_evidence=noisy_return_hint".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn selected_vs_pruned_reason_matches_bridge_continuation_candidates() {
+        let reasons = build_selected_vs_pruned_reasons(
+            "leaf.rs",
+            &[ImpactSliceReasonMetadata {
+                seed_symbol_id: "rust:main.rs:fn:caller:5".to_string(),
+                tier: 3,
+                kind: ImpactSliceReasonKind::BridgeContinuationFile,
+                via_symbol_id: Some("rust:step.rs:fn:step:3".to_string()),
+                via_path: Some("step.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 2,
+                        secondary_evidence_count: 1,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 1,
+                        call_position_rank: 5,
+                        lexical_tiebreak: "leaf.rs".to_string(),
+                    },
+                    support: Some(ImpactSliceCandidateSupportMetadata {
+                        local_dfg_support: true,
+                        ..ImpactSliceCandidateSupportMetadata::default()
+                    }),
+                }),
+            }],
+            &[ImpactSlicePrunedCandidate {
+                seed_symbol_id: "rust:main.rs:fn:caller:5".to_string(),
+                path: "alt_leaf.rs".to_string(),
+                tier: 3,
+                kind: ImpactSliceReasonKind::BridgeContinuationFile,
+                via_symbol_id: Some("rust:step.rs:fn:step:3".to_string()),
+                via_path: Some("step.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                prune_reason: ImpactSlicePruneReason::RankedOut,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::ReturnContinuation,
+                    primary_evidence_kinds: vec![ImpactSliceEvidenceKind::AssignedResult],
+                    secondary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 0,
+                        primary_evidence_count: 1,
+                        secondary_evidence_count: 2,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 0,
+                        call_position_rank: 6,
+                        lexical_tiebreak: "alt_leaf.rs".to_string(),
+                    },
+                    support: None,
+                }),
+                compact_explanation: None,
+            }],
+        );
+
+        assert_eq!(reasons.len(), 1);
+        assert_eq!(reasons[0].pruned_path, "alt_leaf.rs");
+        assert_eq!(
+            reasons[0].selected_better_by,
+            ImpactWitnessSliceRankingBasis::PrimaryEvidenceCount
+        );
+        assert_eq!(
+            reasons[0].winning_primary_evidence_kinds,
+            Some(vec![ImpactSliceEvidenceKind::ReturnFlow])
         );
     }
 
