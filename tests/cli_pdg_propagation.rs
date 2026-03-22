@@ -3601,6 +3601,83 @@ fn propagation_yaml_reports_slice_selection_summary() {
 }
 
 #[test]
+fn per_seed_seed_mode_pdg_keeps_two_hop_wrapper_witness_compact() {
+    let (_tmp, repo) = setup_cross_file_two_hop_wrapper_return_repo();
+
+    let grouped = run_impact_json(
+        &repo,
+        "",
+        &[
+            "--direction",
+            "callers",
+            "--seed-symbol",
+            "rust:leaf.rs:fn:leaf:1",
+            "--with-pdg",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    assert_eq!(
+        grouped[0]["changed_symbol"]["id"].as_str(),
+        Some("rust:leaf.rs:fn:leaf:1")
+    );
+    let output = &grouped[0]["impacts"][0]["output"];
+    assert!(
+        output["impacted_symbols"]
+            .as_array()
+            .is_some_and(|syms| syms
+                .iter()
+                .any(|sym| sym["id"] == "rust:main.rs:fn:caller:5")),
+        "expected caller to stay impacted through the bounded four-file slice: {grouped:#?}"
+    );
+    let witness = &output["impacted_witnesses"]["rust:main.rs:fn:caller:5"];
+    assert_eq!(witness["depth"].as_u64(), Some(3));
+    assert_eq!(
+        witness["via_symbol_id"].as_str(),
+        Some("rust:wrap.rs:fn:wrap:3")
+    );
+    assert_eq!(witness["path"].as_array().map(|v| v.len()), Some(3));
+    assert_eq!(witness["path_compact"].as_array().map(|v| v.len()), Some(3));
+    assert_eq!(
+        witness["path_compact"][0]["from_symbol_id"].as_str(),
+        Some("rust:leaf.rs:fn:leaf:1")
+    );
+    assert_eq!(
+        witness["path_compact"][2]["to_symbol_id"].as_str(),
+        Some("rust:main.rs:fn:caller:5")
+    );
+    assert_eq!(
+        witness["provenance_chain_compact"],
+        serde_json::json!(["call_graph", "call_graph", "call_graph"])
+    );
+    assert_eq!(
+        witness["kind_chain_compact"],
+        serde_json::json!(["call", "call", "call"])
+    );
+    assert_eq!(
+        witness_slice_paths(witness),
+        vec!["leaf.rs", "step.rs", "wrap.rs", "main.rs"]
+    );
+    let main_file = witness_slice_file(witness, "main.rs");
+    assert!(
+        main_file["selection_reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 3
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:wrap.rs:fn:wrap:3"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected caller witness slice context to retain the tier-3 wrapper-return continuation into main.rs: {grouped:#?}"
+    );
+}
+
+#[test]
 fn per_seed_seed_mode_pdg_keeps_three_file_wrapper_witness_compact() {
     let (_tmp, repo) = setup_cross_file_wrapper_two_arg_repo();
 
@@ -3662,6 +3739,77 @@ fn per_seed_seed_mode_pdg_keeps_three_file_wrapper_witness_compact() {
 }
 
 #[test]
+fn per_seed_diff_mode_propagation_keeps_two_hop_wrapper_witness_compact() {
+    let (_tmp, repo) = setup_cross_file_two_hop_wrapper_return_repo();
+    let diff = diff_text(&repo);
+
+    let grouped = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    let output = &grouped[0]["impacts"][0]["output"];
+    assert!(
+        output["impacted_symbols"]
+            .as_array()
+            .is_some_and(|syms| syms.iter().any(|sym| sym["id"] == "rust:leaf.rs:fn:leaf:1")),
+        "expected leaf to remain impacted in the two-hop propagation output: {grouped:#?}"
+    );
+    let witness = &output["impacted_witnesses"]["rust:leaf.rs:fn:leaf:1"];
+    assert_eq!(witness["depth"].as_u64(), Some(3));
+    assert_eq!(
+        witness["root_symbol_id"].as_str(),
+        Some("rust:main.rs:fn:caller:5")
+    );
+    assert_eq!(
+        witness["via_symbol_id"].as_str(),
+        Some("rust:step.rs:fn:step:3")
+    );
+    assert_eq!(witness["path"].as_array().map(|v| v.len()), Some(3));
+    assert_eq!(witness["path_compact"].as_array().map(|v| v.len()), Some(3));
+    assert_eq!(
+        witness["path_compact"][0]["to_symbol_id"].as_str(),
+        Some("rust:wrap.rs:fn:wrap:3")
+    );
+    assert_eq!(
+        witness["path_compact"][2]["to_symbol_id"].as_str(),
+        Some("rust:leaf.rs:fn:leaf:1")
+    );
+    assert_eq!(
+        witness["provenance_chain_compact"],
+        serde_json::json!(["call_graph", "call_graph", "call_graph"])
+    );
+    assert_eq!(
+        witness_slice_paths(witness),
+        vec!["main.rs", "wrap.rs", "step.rs", "leaf.rs"]
+    );
+    let leaf_file = witness_slice_file(witness, "leaf.rs");
+    assert!(
+        leaf_file["selection_reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 3
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:step.rs:fn:step:3"
+                    && reason["via_path"] == "step.rs"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected leaf witness slice context to keep the continuation-tier wrapper-return reason: {grouped:#?}"
+    );
+}
+
+#[test]
 fn per_seed_diff_mode_propagation_keeps_imported_result_witness_compact() {
     let (_tmp, repo) = setup_cross_file_imported_result_alias_repo();
     let diff = diff_text(&repo);
@@ -3718,6 +3866,76 @@ fn per_seed_diff_mode_propagation_keeps_imported_result_witness_compact() {
     assert_eq!(
         witness["kind_chain_compact"],
         serde_json::json!(["call", "call"])
+    );
+}
+
+#[test]
+fn per_seed_diff_mode_ruby_two_hop_require_relative_propagation_keeps_compact_witness() {
+    let (_tmp, repo) = setup_ruby_two_hop_require_relative_return_repo();
+    let diff = diff_text(&repo);
+
+    let grouped = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    assert_eq!(grouped.len(), 1);
+    let output = &grouped[0]["impacts"][0]["output"];
+    let witness = &output["impacted_witnesses"]["ruby:lib/leaf.rb:method:leaf:2"];
+    assert_eq!(witness["depth"].as_u64(), Some(3));
+    assert_eq!(
+        witness["root_symbol_id"].as_str(),
+        Some("ruby:main.rb:method:entry:3")
+    );
+    assert_eq!(
+        witness["via_symbol_id"].as_str(),
+        Some("ruby:lib/step.rb:method:step:4")
+    );
+    assert_eq!(witness["path_compact"].as_array().map(|v| v.len()), Some(3));
+    assert_eq!(
+        witness["path_compact"][0]["to_symbol_id"].as_str(),
+        Some("ruby:lib/wrap.rb:method:wrap:4")
+    );
+    assert_eq!(
+        witness["path_compact"][2]["to_symbol_id"].as_str(),
+        Some("ruby:lib/leaf.rb:method:leaf:2")
+    );
+    assert_eq!(
+        witness["provenance_chain_compact"],
+        serde_json::json!(["call_graph", "call_graph", "call_graph"])
+    );
+    assert_eq!(
+        witness["kind_chain_compact"],
+        serde_json::json!(["call", "call", "call"])
+    );
+    assert_eq!(
+        witness_slice_paths(witness),
+        vec!["main.rb", "lib/wrap.rb", "lib/step.rb", "lib/leaf.rb"]
+    );
+    let leaf_file = witness_slice_file(witness, "lib/leaf.rb");
+    assert!(
+        leaf_file["selection_reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 3
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && reason["via_path"] == "lib/step.rb"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected Ruby leaf witness slice context to retain the tier-3 wrapper-return reason: {grouped:#?}"
     );
 }
 
