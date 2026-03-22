@@ -635,7 +635,7 @@ fn push_unique_edge(
     }
 }
 
-fn push_one_hop_completion_bridges(
+fn push_nested_completion_bridges(
     pdg: &mut DataFlowGraph,
     seen_edges: &mut std::collections::HashSet<(String, String, DependencyKind)>,
     outer_callee_id: &str,
@@ -644,8 +644,9 @@ fn push_one_hop_completion_bridges(
     refs: &[Reference],
     summary_by_fn: &std::collections::HashMap<String, FunctionSummary>,
     node_loc_by_id: &std::collections::HashMap<String, (String, u32)>,
+    remaining_hops: usize,
 ) {
-    if callsite_defs.is_empty() {
+    if callsite_defs.is_empty() || remaining_hops == 0 {
         return;
     }
 
@@ -688,6 +689,17 @@ fn push_one_hop_completion_bridges(
                         );
                     }
                 }
+                push_nested_completion_bridges(
+                    pdg,
+                    seen_edges,
+                    nested_ref.to.0.as_str(),
+                    &nested_flow.impacted_node_ids,
+                    callsite_defs,
+                    refs,
+                    summary_by_fn,
+                    node_loc_by_id,
+                    remaining_hops.saturating_sub(1),
+                );
             }
         }
     }
@@ -826,7 +838,7 @@ impl PdgBuilder {
                                 );
                             }
                         }
-                        push_one_hop_completion_bridges(
+                        push_nested_completion_bridges(
                             pdg,
                             &mut seen_edges,
                             r.to.0.as_str(),
@@ -835,6 +847,7 @@ impl PdgBuilder {
                             refs,
                             &summary_by_fn,
                             &node_loc_by_id,
+                            2,
                         );
                         if callsite_defs.len() == 1 {
                             push_unique_edge(
@@ -867,7 +880,7 @@ impl PdgBuilder {
                                 );
                             }
                         }
-                        push_one_hop_completion_bridges(
+                        push_nested_completion_bridges(
                             pdg,
                             &mut seen_edges,
                             r.to.0.as_str(),
@@ -876,6 +889,7 @@ impl PdgBuilder {
                             refs,
                             &summary_by_fn,
                             &node_loc_by_id,
+                            2,
                         );
                     }
                     if callsite_defs.len() == 1 {
