@@ -3398,6 +3398,123 @@ fn foo() { bar(); }
     }
 
     #[test]
+    fn selected_vs_pruned_reason_ignores_same_path_duplicates_and_budget_exhaustion() {
+        let seed_symbol_id = "ruby:app/runner.rb:method:entry:3".to_string();
+        let via_symbol_id = "ruby:lib/service.rb:method:bounce:4".to_string();
+        let reasons = build_selected_vs_pruned_reasons(
+            "lib/route_runtime.rb",
+            &[ImpactSliceReasonMetadata {
+                seed_symbol_id: seed_symbol_id.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some(via_symbol_id.clone()),
+                via_path: Some("lib/service.rb".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::AliasContinuation,
+                    primary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::AliasChain,
+                        ImpactSliceEvidenceKind::AssignedResult,
+                    ],
+                    secondary_evidence_kinds: vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 1,
+                        primary_evidence_count: 2,
+                        secondary_evidence_count: 2,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 0,
+                        call_position_rank: 7,
+                        lexical_tiebreak: "lib/route_runtime.rb".to_string(),
+                    },
+                    support: None,
+                }),
+            }],
+            &[
+                ImpactSlicePrunedCandidate {
+                    seed_symbol_id: seed_symbol_id.clone(),
+                    path: "lib/route_runtime.rb".to_string(),
+                    tier: 2,
+                    kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                    via_symbol_id: Some(via_symbol_id.clone()),
+                    via_path: Some("lib/service.rb".to_string()),
+                    bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                    prune_reason: ImpactSlicePruneReason::WeakerSamePathDuplicate,
+                    scoring: Some(ImpactSliceCandidateScoringSummary {
+                        source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                        lane: ImpactSliceCandidateLane::AliasContinuation,
+                        primary_evidence_kinds: vec![
+                            ImpactSliceEvidenceKind::AliasChain,
+                            ImpactSliceEvidenceKind::AssignedResult,
+                        ],
+                        secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                        negative_evidence_kinds: vec![],
+                        score_tuple: ImpactSliceScoreTuple {
+                            source_rank: 0,
+                            lane_rank: 1,
+                            primary_evidence_count: 2,
+                            secondary_evidence_count: 1,
+                            negative_evidence_count: 0,
+                            semantic_support_rank: 0,
+                            call_position_rank: 4,
+                            lexical_tiebreak: "lib/route_runtime.rb".to_string(),
+                        },
+                        support: None,
+                    }),
+                    compact_explanation: Some(
+                        "suppressed_before_admit=weaker_same_path_duplicate".to_string(),
+                    ),
+                },
+                ImpactSlicePrunedCandidate {
+                    seed_symbol_id,
+                    path: "lib/fallback_runtime.rb".to_string(),
+                    tier: 2,
+                    kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                    via_symbol_id: Some(via_symbol_id),
+                    via_path: Some("lib/service.rb".to_string()),
+                    bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                    prune_reason: ImpactSlicePruneReason::BridgeBudgetExhausted,
+                    scoring: Some(ImpactSliceCandidateScoringSummary {
+                        source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                        lane: ImpactSliceCandidateLane::AliasContinuation,
+                        primary_evidence_kinds: vec![
+                            ImpactSliceEvidenceKind::AliasChain,
+                            ImpactSliceEvidenceKind::AssignedResult,
+                        ],
+                        secondary_evidence_kinds: vec![ImpactSliceEvidenceKind::NamePathHint],
+                        negative_evidence_kinds: vec![],
+                        score_tuple: ImpactSliceScoreTuple {
+                            source_rank: 0,
+                            lane_rank: 1,
+                            primary_evidence_count: 2,
+                            secondary_evidence_count: 1,
+                            negative_evidence_count: 0,
+                            semantic_support_rank: 0,
+                            call_position_rank: 8,
+                            lexical_tiebreak: "lib/fallback_runtime.rb".to_string(),
+                        },
+                        support: Some(ImpactSliceCandidateSupportMetadata {
+                            edge_certainty: Some(ImpactSliceSupportEdgeCertainty::DynamicFallback),
+                            ..ImpactSliceCandidateSupportMetadata::default()
+                        }),
+                    }),
+                    compact_explanation: Some("bridge_budget_exhausted".to_string()),
+                },
+            ],
+        );
+
+        assert!(
+            reasons.is_empty(),
+            "expected same-path duplicates and bridge-budget drops to stay out of witness selected-vs-pruned explanation scope"
+        );
+    }
+
+    #[test]
     fn selected_vs_pruned_reason_omits_optional_winning_fields_when_absent() {
         let reason = ImpactWitnessSliceSelectedVsPrunedReason {
             via_symbol_id: Some("rust:wrapper.rs:fn:wrap:2".to_string()),
