@@ -1,7 +1,7 @@
 {
-  "generated_by": "manual G8-6/G9 eval-set extension note",
+  "generated_by": "manual G8-6/G9/G10 eval-set extension note",
   "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
-  "purpose": "fixed evidence-driven evaluation set covering G8 baseline plus G9 evidence-conflict regressions for negative evidence, semantic tie-breaks, dynamic fallback filtering, and losing-side witness reasons",
+  "purpose": "fixed evidence-driven evaluation set covering G8 baseline plus G9 evidence-conflict regressions and G10 evidence-budgeted admission / budget-exhaustion regressions",
   "defaults": {
     "engine": "ts",
     "cli_lanes": [
@@ -11,8 +11,8 @@
     "note": "treat current HEAD planner/unit tests as first-class lanes when the evidence surface is locked there more directly than in CLI output"
   },
   "totals": {
-    "cases": 7,
-    "rust": 3,
+    "cases": 9,
+    "rust": 5,
     "ruby": 4
   },
   "cases": [
@@ -24,11 +24,12 @@
         "docs/g8-3-rust-param-to-return-evidence.md",
         "tests/cli_pdg_propagation.rs::setup_cross_file_param_passthrough_competition_repo",
         "tests/cli_pdg_propagation.rs::pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper",
+        "src/bin/dimpact.rs::bounded_slice_plan_prefers_rust_param_passthrough_over_later_neutral_helper",
         "src/bin/dimpact.rs::collect_rust_tier2_semantic_evidence_detects_param_to_return_flow"
       ],
-      "failure_kind": "rank_regression",
+      "failure_kind": "family_conflict_regression",
       "primary_view": "dot+json+unit_test",
-      "focus": "Rust Tier 2 competition where semantic param continuity must beat later neutral helper noise",
+      "focus": "Rust Tier 2 competition where semantic param continuity must beat a later sibling and keep that loser as same-family suppression metadata",
       "direction": "callees",
       "lanes": {
         "pdg": [
@@ -58,7 +59,16 @@
           "--",
           "--exact"
         ],
-        "unit": [
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "bounded_slice_plan_prefers_rust_param_passthrough_over_later_neutral_helper",
+          "--",
+          "--exact"
+        ],
+        "evidence_unit": [
           "cargo",
           "test",
           "--bin",
@@ -77,7 +87,7 @@
         "pruned_candidates": [
           {
             "path": "later.rs",
-            "prune_reason": "ranked_out"
+            "prune_reason": "weaker_same_family_sibling"
           }
         ],
         "selected_via_symbol_id": "rust:wrapper.rs:fn:wrap:4",
@@ -119,13 +129,14 @@
           "winning_support": {
             "local_dfg_support": true
           },
-          "summary": "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support"
+          "summary": "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support",
+          "prune_reason": "weaker_same_family_sibling"
         }
       },
       "regression_catch": [
         "later helper noise wins again because call position outweighs semantic param continuity",
-        "param_to_return_flow disappears from selected scoring",
-        "winning_support.local_dfg_support drops from witness explanation"
+        "same-family loser stops being recorded as weaker_same_family_sibling metadata",
+        "param_to_return_flow or winning_support.local_dfg_support drops from witness explanation"
       ]
     },
     {
@@ -353,6 +364,190 @@
       ]
     },
     {
+      "case_id": "rust-alias-helper-suppress-before-admit",
+      "lang": "rust",
+      "source_kind": "integration_fixture_plus_unit_guard",
+      "source": [
+        "src/bin/dimpact.rs::bounded_slice_plan_prefers_alias_continuation_over_later_adapter_helper_noise",
+        "tests/cli_pdg_propagation.rs::setup_cross_file_imported_result_alias_competition_repo",
+        "tests/cli_pdg_propagation.rs::pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helper",
+        "src/impact.rs::selected_vs_pruned_reason_carries_compact_explanation_for_suppressed_before_admit"
+      ],
+      "failure_kind": "admission_conflict_regression",
+      "primary_view": "dot+json+unit_test",
+      "focus": "alias continuation stays selected while a later helper is pruned before admit and kept only as helper-noise suppression metadata",
+      "direction": "callees",
+      "lanes": {
+        "pdg": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-pdg",
+          "--format",
+          "dot"
+        ],
+        "propagation": [
+          "impact",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json"
+        ]
+      },
+      "test_lanes": {
+        "integration": [
+          "cargo",
+          "test",
+          "--test",
+          "cli_pdg_propagation",
+          "pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helper",
+          "--",
+          "--exact"
+        ],
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "bounded_slice_plan_prefers_alias_continuation_over_later_adapter_helper_noise",
+          "--",
+          "--exact"
+        ],
+        "witness_unit": [
+          "cargo",
+          "test",
+          "--lib",
+          "selected_vs_pruned_reason_carries_compact_explanation_for_suppressed_before_admit",
+          "--",
+          "--exact"
+        ]
+      },
+      "expected_outcome": {
+        "selected_paths": [
+          "adapter.rs",
+          "main.rs",
+          "value.rs"
+        ],
+        "pruned_candidates": [
+          {
+            "path": "zzz_helper.rs",
+            "prune_reason": "suppressed_before_admit",
+            "compact_explanation": "suppressed_before_admit=helper_noise_suppressor"
+          }
+        ],
+        "selected_better_by": "primary_evidence_count",
+        "witness_symbol_id": "rust:value.rs:fn:make:1"
+      },
+      "expected_fields": {
+        "selected_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "alias_continuation",
+          "primary_evidence_kinds": [
+            "alias_chain",
+            "assigned_result"
+          ],
+          "secondary_evidence_kinds": [
+            "name_path_hint"
+          ]
+        },
+        "pruned_scoring": {
+          "source_kind": "graph_second_hop",
+          "lane": "alias_continuation",
+          "primary_evidence_kinds": [
+            "assigned_result"
+          ],
+          "secondary_evidence_kinds": [
+            "callsite_position_hint",
+            "name_path_hint"
+          ]
+        },
+        "witness_reason": {
+          "selected_better_by": "primary_evidence_count",
+          "winning_primary_evidence_kinds": [
+            "alias_chain"
+          ],
+          "compact_explanation": "suppressed_before_admit=helper_noise_suppressor",
+          "summary": "selected over zzz_helper.rs because it had more primary evidence (2 > 1); winning primary evidence: alias_chain"
+        }
+      },
+      "regression_catch": [
+        "alias helper noise survives into the compare pool",
+        "helper suppression metadata or compact explanation disappears",
+        "selected file drifts from value.rs to the helper side"
+      ]
+    },
+    {
+      "case_id": "rust-tier2-bridge-budget-exhaustion",
+      "lang": "rust",
+      "source_kind": "planner_unit_case",
+      "source": [
+        "src/bin/dimpact.rs::bounded_slice_plan_records_ranked_out_and_budget_pruned_tier2_candidates"
+      ],
+      "failure_kind": "budget_exhaustion_regression",
+      "primary_view": "unit_test",
+      "focus": "side-local suppress-before-admit losers and seed-wide bridge-budget losers remain distinguishable in tier-2 pruning metadata",
+      "direction": "callees",
+      "test_lanes": {
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "bounded_slice_plan_records_ranked_out_and_budget_pruned_tier2_candidates",
+          "--",
+          "--exact"
+        ]
+      },
+      "expected_outcome": {
+        "selected_paths": [
+          "a_leaf.rs",
+          "a_wrapper.rs",
+          "b_leaf.rs",
+          "b_wrapper.rs",
+          "c_wrapper.rs",
+          "main.rs"
+        ],
+        "pruned_candidates": [
+          {
+            "path": "z_alt.rs",
+            "prune_reason": "suppressed_before_admit",
+            "bridge_kind": "boundary_alias_continuation"
+          },
+          {
+            "path": "c_leaf.rs",
+            "prune_reason": "bridge_budget_exhausted",
+            "bridge_kind": "wrapper_return"
+          }
+        ]
+      },
+      "expected_fields": {
+        "cache_update_paths": [
+          "a_leaf.rs",
+          "a_wrapper.rs",
+          "b_leaf.rs",
+          "b_wrapper.rs",
+          "c_wrapper.rs",
+          "main.rs"
+        ],
+        "pruned_metadata": {
+          "z_alt.rs": {
+            "via_symbol_id": "rust:a_wrapper.rs:fn:wrap_a:3",
+            "bridge_kind": "boundary_alias_continuation"
+          },
+          "c_leaf.rs": {
+            "via_symbol_id": "rust:c_wrapper.rs:fn:wrap_c:3",
+            "bridge_kind": "wrapper_return"
+          }
+        }
+      },
+      "regression_catch": [
+        "side-local losers and budget losers collapse back into one generic ranked_out bucket",
+        "bridge_budget_exhausted disappears from pruned metadata",
+        "the final per-seed cap widens and c_leaf.rs leaks into the selected slice"
+      ]
+    },
+    {
       "case_id": "ruby-method-missing-companion-narrow-fallback",
       "lang": "ruby",
       "source_kind": "planner_unit_fixture",
@@ -427,9 +622,9 @@
         "tests/cli_pdg_propagation.rs::setup_ruby_dynamic_send_runtime_noise_repo",
         "tests/cli_pdg_propagation.rs::pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise"
       ],
-      "failure_kind": "fallback_noise_filter_regression",
+      "failure_kind": "admission_conflict_regression",
       "primary_view": "json+unit_test",
-      "focus": "generic dynamic runtime noise is filtered before candidate materialization unless it matches the literal target family",
+      "focus": "generic dynamic runtime noise is filtered before admission while same-path losers on the selected runtime stay visible as duplicate-suppression metadata",
       "direction": "callees",
       "lanes": {
         "propagation": [
@@ -469,7 +664,12 @@
           "lib/route_runtime.rb",
           "lib/service.rb"
         ],
-        "pruned_candidates": [],
+        "pruned_candidates": [
+          {
+            "path": "lib/route_runtime.rb",
+            "prune_reason": "weaker_same_path_duplicate"
+          }
+        ],
         "filtered_before_materialization": [
           "lib/aaa_runtime.rb"
         ]
@@ -498,12 +698,13 @@
           ],
           "selected_files_contains": [
             "lib/route_runtime.rb"
-          ]
+          ],
+          "pruned_candidates_compact_explanation": "suppressed_before_admit=weaker_same_path_duplicate"
         }
       },
       "regression_catch": [
         "generic dynamic runtime noise survives into fallback candidates",
-        "literal target family hints disappear from boundary evidence",
+        "same-path loser bookkeeping disappears from slice_selection.pruned_candidates",
         "the intended route runtime is filtered out together with the noise"
       ]
     },
@@ -581,12 +782,13 @@
       "lang": "ruby",
       "source_kind": "integration_fixture",
       "source": [
+        "src/bin/dimpact.rs::bounded_slice_plan_prefers_ruby_return_completion_over_later_require_relative_helper_noise",
         "tests/cli_pdg_propagation.rs::setup_ruby_require_relative_competing_leaf_repo",
         "tests/cli_pdg_propagation.rs::pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_noise"
       ],
-      "failure_kind": "rank_regression",
-      "primary_view": "dot+json",
-      "focus": "CLI Ruby competition where selected/pruned witness output must keep the semantic leaf and exclude ranked-out helper noise",
+      "failure_kind": "admission_conflict_regression",
+      "primary_view": "dot+json+unit_test",
+      "focus": "CLI Ruby competition where the semantic leaf stays selected and the fallback-only helper is kept only as suppressed-before-admit metadata",
       "direction": "callees",
       "lanes": {
         "pdg": [
@@ -629,6 +831,15 @@
           "pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_noise",
           "--",
           "--exact"
+        ],
+        "planner_unit": [
+          "cargo",
+          "test",
+          "--bin",
+          "dimpact",
+          "bounded_slice_plan_prefers_ruby_return_completion_over_later_require_relative_helper_noise",
+          "--",
+          "--exact"
         ]
       },
       "expected_outcome": {
@@ -640,7 +851,8 @@
         "pruned_candidates": [
           {
             "path": "lib/zzz_helper.rb",
-            "prune_reason": "ranked_out"
+            "prune_reason": "suppressed_before_admit",
+            "compact_explanation": "suppressed_before_admit=fallback_only_suppressor"
           }
         ],
         "selected_better_by": "lane",
@@ -673,13 +885,14 @@
             "assigned_result",
             "return_flow"
           ],
-          "summary": "selected over lib/zzz_helper.rb because return_continuation outranked require_relative_continuation; winning primary evidence: assigned_result + return_flow"
+          "summary": "selected over lib/zzz_helper.rb because return_continuation outranked require_relative_continuation; winning primary evidence: assigned_result + return_flow",
+          "compact_explanation": "suppressed_before_admit=fallback_only_suppressor"
         }
       },
       "regression_catch": [
         "later helper noise outranks the semantic leaf",
-        "ranked-out helper leaks into selected_files_on_path explanation context",
-        "Ruby CLI witness summary loses the winning evidence surface"
+        "suppressed_before_admit=fallback_only_suppressor disappears from pruned or witness metadata",
+        "Ruby helper leaks into selected_files_on_path explanation context"
       ]
     }
   ]
