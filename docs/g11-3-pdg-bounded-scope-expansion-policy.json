@@ -1,0 +1,191 @@
+{
+  "generated_by": "manual G11-3 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "policy for extending current bounded PDG build scope by exactly one continuation step without losing boundedness",
+  "inputs": {
+    "current_design_notes": [
+      "docs/g11-1-pdg-scope-bridge-expansion-memo.md",
+      "docs/g11-2-pdg-failure-eval-set.md"
+    ],
+    "current_planner": "src/bin/dimpact.rs::plan_bounded_slice"
+  },
+  "goals": [
+    "preserve the existing bounded slice planner skeleton",
+    "allow exactly one more scope hop after an admitted bridge-completion file",
+    "keep selection explainable in slice_selection_summary",
+    "improve current scope-limited two-hop continuation cases without turning into project-wide PDG"
+  ],
+  "non_goals": [
+    "project-wide or recursive scope expansion",
+    "solving nested multi-input propagation in this task alone",
+    "solving imported-result alias stitching in this task alone",
+    "final global budget optimization across every seed and family"
+  ],
+  "current_planner_shape": {
+    "tiers": [
+      "root",
+      "direct_boundary",
+      "bridge_completion",
+      "module_companion_fallback"
+    ],
+    "budgets": {
+      "per_boundary_side_tier2_files_max": 1,
+      "per_seed_tier2_files_max": 2
+    },
+    "stop_rule": "planner currently stops after admitted bridge-completion files"
+  },
+  "proposed_extension": {
+    "new_reason_kind": "bridge_continuation_file",
+    "new_tier": "bridge_continuation",
+    "definition": "a single extra file selected from an already-admitted bridge-completion anchor, following the same bridge family for exactly one more graph hop",
+    "hard_stop": "never recurse again from a bridge-continuation file"
+  },
+  "selection_policy": {
+    "step_a": "run the current bounded slice planner unchanged",
+    "step_b": {
+      "anchor_source": "selected bridge_completion reasons only",
+      "anchor_requirements": [
+        "reason kind is bridge_completion_file",
+        "bridge_kind is present",
+        "candidate is not a module companion fallback",
+        "candidate is admitted, not only pruned",
+        "candidate is not lexical-only noise"
+      ]
+    },
+    "step_c": {
+      "expansion_direction": {
+        "callers": "follow one incoming call-graph hop from the admitted completion anchor symbol",
+        "callees": "follow one outgoing call-graph hop from the admitted completion anchor symbol",
+        "both": "evaluate callers and callees independently, then union selected paths"
+      },
+      "candidate_filters": [
+        "reject root-file duplicates",
+        "reject direct-boundary duplicates",
+        "reject already-selected bridge-completion duplicates",
+        "reject already-selected continuation duplicates",
+        "reject candidates reachable only through module-companion fallback"
+      ]
+    },
+    "step_d": {
+      "ranking_priority": [
+        "same bridge-family continuity",
+        "semantic-ready evidence",
+        "later anchor-side callsite position",
+        "lexical path order"
+      ],
+      "initial_bridge_families": [
+        "wrapper_return",
+        "require_relative_chain"
+      ],
+      "deferred_bridge_families": [
+        "boundary_alias_continuation"
+      ]
+    },
+    "step_e": {
+      "continuation_budget": {
+        "per_anchor_tier3_files_max": 1,
+        "per_seed_tier3_files_max": 1
+      },
+      "why_separate_from_tier2": "continuation scope should not consume the existing tier2 bridge-completion budget, otherwise the one-step extension collapses back into current behavior"
+    },
+    "step_f": "merge selected continuation paths into cache_update_paths, local_dfg_paths, and slice_selection_summary; then stop"
+  },
+  "schema_notes": {
+    "minimum_public_change": [
+      "add impact_slice_reason_kind.bridge_continuation_file",
+      "add slice tier bridge_continuation"
+    ],
+    "minimum_internal_change": [
+      "retain the admitted bridge-completion symbol id as an anchor",
+      "retain the admitted bridge-completion path as an anchor",
+      "carry bridge_kind from anchor into continuation selection metadata"
+    ],
+    "suggested_internal_shape": {
+      "tier2_candidate_fields": [
+        "path",
+        "via_symbol_id",
+        "via_path",
+        "completion_symbol_id",
+        "bridge_kind",
+        "scoring"
+      ]
+    }
+  },
+  "budget_policy": {
+    "existing": {
+      "per_boundary_side_tier2_files_max": 1,
+      "per_seed_tier2_files_max": 2
+    },
+    "new": {
+      "per_anchor_tier3_files_max": 1,
+      "per_seed_tier3_files_max": 1
+    },
+    "bounded_invariant": "maximum depth becomes root -> direct_boundary -> bridge_completion -> bridge_continuation, and never deeper"
+  },
+  "g11_2_mapping": {
+    "scope_helped_directly": {
+      "rust-two-hop-wrapper-return-continuation": {
+        "selected_now": [
+          "main.rs",
+          "wrap.rs",
+          "step.rs"
+        ],
+        "missing_now": [
+          "leaf.rs"
+        ],
+        "g11_3_addition": [
+          "leaf.rs as bridge_continuation_file"
+        ]
+      },
+      "ruby-two-hop-require-relative-return-continuation": {
+        "selected_now": [
+          "main.rb",
+          "lib/wrap.rb",
+          "lib/step.rb"
+        ],
+        "missing_now": [
+          "lib/leaf.rb"
+        ],
+        "g11_3_addition": [
+          "lib/leaf.rb as bridge_continuation_file"
+        ]
+      }
+    },
+    "not_fixed_by_scope_alone": {
+      "rust-nested-two-arg-summary-continuation": "pair.rs can already be in scope; the remaining gap is propagation/summary mapping",
+      "rust-cross-file-wrapper-return-alias-chain": "value.rs can already be in scope; the remaining gap is imported-result to alias to caller-result stitching",
+      "rust-three-boundary-bridge-budget-overflow": "the remaining gap is tier2 budget policy, not missing depth after an admitted bridge-completion anchor"
+    }
+  },
+  "reporting_expectations": {
+    "slice_selection_summary": [
+      "selected files may now include bridge_continuation_file reasons",
+      "bridge_kind should be preserved from the admitted anchor family",
+      "via_symbol_id and via_path should still refer to the direct-boundary side",
+      "internal or public metadata should retain anchor symbol/path for debugging and future witness work"
+    ],
+    "pruning_visibility": [
+      "continuation candidates should be explainable when they lose to budget or stronger same-anchor siblings"
+    ]
+  },
+  "test_surface": {
+    "planner_level": [
+      "adds at most one continuation file per seed",
+      "does not derive continuation from module-companion fallback",
+      "preserves current tier2 behavior when no continuation-ready anchor exists"
+    ],
+    "cli_level": [
+      "rust two-hop wrapper-return case reports leaf.rs in slice_selection.summary",
+      "ruby two-hop require_relative case reports lib/leaf.rb in slice_selection.summary"
+    ],
+    "non_regression": [
+      "keep current direct-boundary success cases intact",
+      "keep helper-noise suppression intact",
+      "keep dynamic fallback separation intact"
+    ]
+  },
+  "implementation_entrypoint": {
+    "preferred_location": "extend src/bin/dimpact.rs::plan_bounded_slice rather than creating a brand-new planner",
+    "merge_strategy": "run current selection first, then continuation expansion as a bounded post-pass"
+  }
+}
