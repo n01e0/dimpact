@@ -1894,6 +1894,12 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
         .filter_map(|file| file["path"].as_str())
         .collect();
     assert_eq!(paths, vec!["main.rs", "step.rs", "wrapper.rs"]);
+    assert!(
+        !serde_json::to_string(&slice_selection["files"])
+            .expect("serialize slice_selection.files")
+            .contains("later.rs"),
+        "unexpected later.rs leaked into slice_selection.files explanation scope: {prop:#}"
+    );
 
     let step = slice_selection_file(slice_selection, "step.rs");
     assert!(
@@ -1986,6 +1992,14 @@ fn pdg_slice_selection_prefers_param_passthrough_leaf_over_later_neutral_helper(
             },
             "summary": "selected over later.rs because it had more primary evidence (3 > 2); winning primary evidence: param_to_return_flow; winning support: local_dfg_support",
         }])
+    );
+
+    let later_witness = &prop["impacted_witnesses"]["rust:later.rs:fn:later:1"];
+    let later_paths = witness_slice_paths(later_witness);
+    assert_eq!(
+        later_paths,
+        vec!["main.rs", "wrapper.rs"],
+        "expected weaker same-family sibling later.rs to stay outside the selected explanation slice even if it remains reachable: {prop:#}"
     );
 }
 
@@ -2357,6 +2371,12 @@ fn pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise() {
         "expected family-specific runtime to remain selected through lib/service.rb after filtering generic runtime noise: {prop:#}"
     );
     assert!(
+        !serde_json::to_string(&slice_selection["files"])
+            .expect("serialize slice_selection.files")
+            .contains("weaker_same_path_duplicate"),
+        "unexpected same-path duplicate prune metadata widened slice_selection.files explanation scope: {prop:#}"
+    );
+    assert!(
         !prop["impacted_files"]
             .as_array()
             .is_some_and(|files| files.iter().any(|path| path == "lib/aaa_runtime.rb")),
@@ -2382,6 +2402,34 @@ fn pdg_slice_selection_filters_generic_ruby_dynamic_runtime_noise() {
             .expect("serialize slice_selection")
             .contains("lib/aaa_runtime.rb"),
         "unexpected generic dynamic runtime leaked into slice_selection explanation context: {prop:#}"
+    );
+
+    let runtime_witness =
+        &prop["impacted_witnesses"]["ruby:lib/route_runtime.rb:method:method_missing:2"];
+    assert_eq!(
+        witness_slice_paths(runtime_witness),
+        vec!["app/runner.rb", "lib/service.rb", "lib/route_runtime.rb"],
+        "expected duplicate runtime losers to keep witness scope pinned to the selected runtime path: {prop:#}"
+    );
+    let route_runtime_context = witness_slice_file(runtime_witness, "lib/route_runtime.rb");
+    assert!(
+        route_runtime_context
+            .as_object()
+            .is_some_and(|file| !file.contains_key("selected_vs_pruned_reasons")),
+        "expected same-path duplicate losers to stay folded into the selected runtime path instead of widening witness reasoning: {prop:#}"
+    );
+
+    let service_witness = &prop["impacted_witnesses"]["ruby:lib/service.rb:method:bounce:4"];
+    assert_eq!(
+        witness_slice_paths(service_witness),
+        vec!["app/runner.rb", "lib/service.rb"],
+        "expected same-path duplicate runtime losers to stay out of upstream witness scope: {prop:#}"
+    );
+    assert!(
+        !serde_json::to_string(&service_witness["slice_context"])
+            .expect("serialize service witness slice_context")
+            .contains("lib/route_runtime.rb"),
+        "unexpected selected runtime path leaked into upstream witness explanation scope: {prop:#}"
     );
 }
 
