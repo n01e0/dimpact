@@ -1705,7 +1705,7 @@ fn pdg_propagation_extends_two_hop_wrapper_return_through_rust_bridge_continuati
             .as_array()
             .is_some_and(|reasons| reasons.iter().any(|reason| {
                 reason["tier"] == 3
-                    && reason["kind"] == "bridge_completion_file"
+                    && reason["kind"] == "bridge_continuation_file"
                     && reason["via_symbol_id"] == "rust:step.rs:fn:step:3"
                     && reason["via_path"] == "step.rs"
                     && reason["bridge_kind"] == "wrapper_return"
@@ -2562,7 +2562,7 @@ fn pdg_propagation_extends_two_hop_require_relative_wrapper_return_scope() {
             .as_array()
             .is_some_and(|reasons| reasons.iter().any(|reason| {
                 reason["tier"] == 3
-                    && reason["kind"] == "bridge_completion_file"
+                    && reason["kind"] == "bridge_continuation_file"
                     && reason["via_symbol_id"] == "ruby:lib/step.rb:method:step:4"
                     && reason["via_path"] == "lib/step.rb"
                     && reason["bridge_kind"] == "wrapper_return"
@@ -3669,7 +3669,7 @@ fn per_seed_seed_mode_pdg_keeps_two_hop_wrapper_witness_compact() {
             .as_array()
             .is_some_and(|reasons| reasons.iter().any(|reason| {
                 reason["tier"] == 3
-                    && reason["kind"] == "bridge_completion_file"
+                    && reason["kind"] == "bridge_continuation_file"
                     && reason["via_symbol_id"] == "rust:wrap.rs:fn:wrap:3"
                     && reason["bridge_kind"] == "wrapper_return"
             })),
@@ -3800,7 +3800,7 @@ fn per_seed_diff_mode_propagation_keeps_two_hop_wrapper_witness_compact() {
             .as_array()
             .is_some_and(|reasons| reasons.iter().any(|reason| {
                 reason["tier"] == 3
-                    && reason["kind"] == "bridge_completion_file"
+                    && reason["kind"] == "bridge_continuation_file"
                     && reason["via_symbol_id"] == "rust:step.rs:fn:step:3"
                     && reason["via_path"] == "step.rs"
                     && reason["bridge_kind"] == "wrapper_return"
@@ -3930,7 +3930,7 @@ fn per_seed_diff_mode_ruby_two_hop_require_relative_propagation_keeps_compact_wi
             .as_array()
             .is_some_and(|reasons| reasons.iter().any(|reason| {
                 reason["tier"] == 3
-                    && reason["kind"] == "bridge_completion_file"
+                    && reason["kind"] == "bridge_continuation_file"
                     && reason["via_symbol_id"] == "ruby:lib/step.rb:method:step:4"
                     && reason["via_path"] == "lib/step.rb"
                     && reason["bridge_kind"] == "wrapper_return"

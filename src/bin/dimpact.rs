@@ -1997,12 +1997,19 @@ fn should_suppress_before_admit(
         || candidate_is_weak_ruby_require_relative(candidate)
 }
 
-fn candidate_reason_kind(candidate: &Tier2Candidate) -> ImpactSliceReasonKind {
-    match candidate.scoring.source_kind {
-        ImpactSliceCandidateSourceKind::GraphSecondHop => {
+fn candidate_reason_kind_for_tier(
+    candidate: &Tier2Candidate,
+    tier: SliceSelectionTier,
+) -> ImpactSliceReasonKind {
+    match (candidate.scoring.source_kind, tier) {
+        (
+            ImpactSliceCandidateSourceKind::GraphSecondHop,
+            SliceSelectionTier::BridgeContinuation,
+        ) => ImpactSliceReasonKind::BridgeContinuationFile,
+        (ImpactSliceCandidateSourceKind::GraphSecondHop, _) => {
             ImpactSliceReasonKind::BridgeCompletionFile
         }
-        ImpactSliceCandidateSourceKind::NarrowFallback => {
+        (ImpactSliceCandidateSourceKind::NarrowFallback, _) => {
             ImpactSliceReasonKind::ModuleCompanionFile
         }
     }
@@ -2025,7 +2032,7 @@ fn make_candidate_reason_with_tier(
     ImpactSliceReasonMetadata {
         seed_symbol_id: seed_symbol_id.to_string(),
         tier: slice_selection_tier_value(tier),
-        kind: candidate_reason_kind(candidate),
+        kind: candidate_reason_kind_for_tier(candidate, tier),
         via_symbol_id: Some(candidate.via_symbol_id.clone()),
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
@@ -2051,10 +2058,11 @@ fn make_continuation_reason(
     )
 }
 
-fn make_tier2_pruned_candidate(
+fn make_pruned_candidate_with_tier(
     seed_symbol_id: &str,
     candidate: &Tier2Candidate,
     prune_reason: ImpactSlicePruneReason,
+    tier: SliceSelectionTier,
 ) -> dimpact::ImpactSlicePrunedCandidate {
     let compact_explanation = match prune_reason {
         ImpactSlicePruneReason::SuppressedBeforeAdmit => {
@@ -2078,8 +2086,8 @@ fn make_tier2_pruned_candidate(
     dimpact::ImpactSlicePrunedCandidate {
         seed_symbol_id: seed_symbol_id.to_string(),
         path: candidate.path.clone(),
-        tier: slice_selection_tier_value(candidate_tier(candidate)),
-        kind: candidate_reason_kind(candidate),
+        tier: slice_selection_tier_value(tier),
+        kind: candidate_reason_kind_for_tier(candidate, tier),
         via_symbol_id: Some(candidate.via_symbol_id.clone()),
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
@@ -2089,11 +2097,42 @@ fn make_tier2_pruned_candidate(
     }
 }
 
-fn record_same_path_candidate(
+fn make_tier2_pruned_candidate(
+    seed_symbol_id: &str,
+    candidate: &Tier2Candidate,
+    prune_reason: ImpactSlicePruneReason,
+) -> dimpact::ImpactSlicePrunedCandidate {
+    make_pruned_candidate_with_tier(
+        seed_symbol_id,
+        candidate,
+        prune_reason,
+        candidate_tier(candidate),
+    )
+}
+
+fn make_continuation_pruned_candidate(
+    seed_symbol_id: &str,
+    candidate: &Tier2Candidate,
+    prune_reason: ImpactSlicePruneReason,
+) -> dimpact::ImpactSlicePrunedCandidate {
+    make_pruned_candidate_with_tier(
+        seed_symbol_id,
+        candidate,
+        prune_reason,
+        SliceSelectionTier::BridgeContinuation,
+    )
+}
+
+fn record_same_path_candidate_with_prune(
     side_candidates: &mut std::collections::BTreeMap<String, Tier2Candidate>,
     seed_selection: &mut SliceSelectionAccumulator,
     seed_symbol_id: &str,
     candidate: Tier2Candidate,
+    make_pruned_candidate: impl Fn(
+        &str,
+        &Tier2Candidate,
+        ImpactSlicePruneReason,
+    ) -> dimpact::ImpactSlicePrunedCandidate,
 ) {
     match side_candidates.entry(candidate.path.clone()) {
         std::collections::btree_map::Entry::Vacant(entry) => {
@@ -2102,14 +2141,14 @@ fn record_same_path_candidate(
         std::collections::btree_map::Entry::Occupied(mut entry) => {
             let existing = entry.get().clone();
             if compare_tier2_candidates(&candidate, &existing).is_lt() {
-                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                seed_selection.add_pruned_candidate(make_pruned_candidate(
                     seed_symbol_id,
                     &existing,
                     ImpactSlicePruneReason::WeakerSamePathDuplicate,
                 ));
                 entry.insert(candidate);
             } else {
-                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                seed_selection.add_pruned_candidate(make_pruned_candidate(
                     seed_symbol_id,
                     &candidate,
                     ImpactSlicePruneReason::WeakerSamePathDuplicate,
@@ -2119,10 +2158,45 @@ fn record_same_path_candidate(
     }
 }
 
-fn suppress_before_admit(
+fn record_same_path_candidate(
+    side_candidates: &mut std::collections::BTreeMap<String, Tier2Candidate>,
+    seed_selection: &mut SliceSelectionAccumulator,
+    seed_symbol_id: &str,
+    candidate: Tier2Candidate,
+) {
+    record_same_path_candidate_with_prune(
+        side_candidates,
+        seed_selection,
+        seed_symbol_id,
+        candidate,
+        make_tier2_pruned_candidate,
+    );
+}
+
+fn record_same_path_continuation_candidate(
+    side_candidates: &mut std::collections::BTreeMap<String, Tier2Candidate>,
+    seed_selection: &mut SliceSelectionAccumulator,
+    seed_symbol_id: &str,
+    candidate: Tier2Candidate,
+) {
+    record_same_path_candidate_with_prune(
+        side_candidates,
+        seed_selection,
+        seed_symbol_id,
+        candidate,
+        make_continuation_pruned_candidate,
+    );
+}
+
+fn suppress_before_admit_with_prune(
     seed_symbol_id: &str,
     seed_selection: &mut SliceSelectionAccumulator,
     side_candidates: Vec<Tier2Candidate>,
+    make_pruned_candidate: impl Fn(
+        &str,
+        &Tier2Candidate,
+        ImpactSlicePruneReason,
+    ) -> dimpact::ImpactSlicePrunedCandidate,
 ) -> Vec<Tier2Candidate> {
     let side_has_semantic_ready_candidate = side_candidates
         .iter()
@@ -2131,7 +2205,7 @@ fn suppress_before_admit(
 
     for candidate in side_candidates {
         if should_suppress_before_admit(&candidate, side_has_semantic_ready_candidate) {
-            seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+            seed_selection.add_pruned_candidate(make_pruned_candidate(
                 seed_symbol_id,
                 &candidate,
                 ImpactSlicePruneReason::SuppressedBeforeAdmit,
@@ -2142,6 +2216,32 @@ fn suppress_before_admit(
     }
 
     admitted
+}
+
+fn suppress_before_admit(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    side_candidates: Vec<Tier2Candidate>,
+) -> Vec<Tier2Candidate> {
+    suppress_before_admit_with_prune(
+        seed_symbol_id,
+        seed_selection,
+        side_candidates,
+        make_tier2_pruned_candidate,
+    )
+}
+
+fn suppress_before_admit_continuation(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    side_candidates: Vec<Tier2Candidate>,
+) -> Vec<Tier2Candidate> {
+    suppress_before_admit_with_prune(
+        seed_symbol_id,
+        seed_selection,
+        side_candidates,
+        make_continuation_pruned_candidate,
+    )
 }
 
 fn rust_same_family_sibling_lane(candidate: &Tier2Candidate) -> Option<ImpactSliceCandidateLane> {
@@ -2224,6 +2324,7 @@ fn continuation_ready_wrapper_return_anchor(candidate: &Tier2Candidate) -> bool 
         && (candidate.path.ends_with(".rs") || candidate.path.ends_with(".rb"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_bridge_continuation_candidates<'a>(
     seed_symbol_id: &str,
     seed_selection: &mut SliceSelectionAccumulator,
@@ -2328,10 +2429,15 @@ fn collect_bridge_continuation_candidates<'a>(
                 bridge_kind,
                 scoring,
             };
-            record_same_path_candidate(&mut per_anchor, seed_selection, seed_symbol_id, candidate);
+            record_same_path_continuation_candidate(
+                &mut per_anchor,
+                seed_selection,
+                seed_symbol_id,
+                candidate,
+            );
         }
 
-        let mut per_anchor = suppress_before_admit(
+        let mut per_anchor = suppress_before_admit_continuation(
             seed_symbol_id,
             seed_selection,
             per_anchor.into_values().collect(),
@@ -2589,7 +2695,7 @@ fn plan_bounded_slice(
                 continue;
             }
             if selected_continuation_paths.len() >= PER_SEED_TIER3_FILES_MAX {
-                seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
+                seed_selection.add_pruned_candidate(make_continuation_pruned_candidate(
                     seed.id.0.as_str(),
                     &candidate,
                     ImpactSlicePruneReason::BridgeBudgetExhausted,
