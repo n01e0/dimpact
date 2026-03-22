@@ -1,0 +1,286 @@
+{
+  "generated_by": "manual G11-2 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "fixed current-main failure set for multi-file PDG / propagation continuation work",
+  "context": {
+    "supersedes_focus": "docs/g4-2-pdg-multi-file-eval-set.md",
+    "paired_design_note": "docs/g11-1-pdg-scope-bridge-expansion-memo.md",
+    "selection_basis": [
+      "reproducible on current main",
+      "targets current bounded-frontier / propagation limits instead of older direct-boundary misses",
+      "shapes are small enough to become fixtures/regressions in later G11 tasks"
+    ]
+  },
+  "defaults": {
+    "engine": "ts",
+    "lanes": [
+      "baseline",
+      "pdg",
+      "propagation"
+    ],
+    "note": "keep engine-difference evaluation out of this set; this set isolates current PDG scope / propagation failure modes"
+  },
+  "cases": [
+    {
+      "case_id": "rust-two-hop-wrapper-return-continuation",
+      "lang": "rust",
+      "failure_kind": "fn",
+      "primary_view": "dot",
+      "focus": "caller result should recover a two-hop wrapper-return continuation across wrap -> step -> leaf",
+      "direction": "callees",
+      "lanes": {
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "main.rs",
+          "wrap.rs",
+          "step.rs",
+          "leaf.rs"
+        ],
+        "initial_source": {
+          "main.rs": "mod wrap;\nmod step;\nmod leaf;\nfn caller() {\n    let x = 1;\n    let y = wrap::wrap(x);\n    println!(\"{}\", y);\n}\n",
+          "wrap.rs": "pub fn wrap(a: i32) -> i32 {\n    crate::step::step(a)\n}\n",
+          "step.rs": "pub fn step(a: i32) -> i32 {\n    let v = crate::leaf::leaf(a);\n    v + 1\n}\n",
+          "leaf.rs": "pub fn leaf(a: i32) -> i32 { a + 1 }\n"
+        },
+        "mutation": {
+          "file": "main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        }
+      },
+      "observed_on_current_main": {
+        "present": [
+          "step.rs:def:v:2",
+          "rust:wrap.rs:fn:wrap:1 -> main.rs:def:y:6"
+        ],
+        "absent": [
+          "main.rs:use:x:6 -> main.rs:def:y:6",
+          "leaf.rs:def:a:1"
+        ]
+      },
+      "why_it_matters": "current propagation already handles direct boundary plus one-hop completion; this case fixes the next frontier where continuation needs two inter-file hops before it can explain the caller result"
+    },
+    {
+      "case_id": "rust-nested-two-arg-summary-continuation",
+      "lang": "rust",
+      "failure_kind": "fn",
+      "primary_view": "dot",
+      "focus": "relevant second argument should survive a nested multi-input continuation through wrap -> pair",
+      "direction": "callees",
+      "lanes": {
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "main.rs",
+          "wrap.rs",
+          "pair.rs"
+        ],
+        "initial_source": {
+          "main.rs": "mod wrap;\nmod pair;\nfn caller() {\n    let x = 1;\n    let y = 2;\n    let out = wrap::wrap(x, y);\n    println!(\"{}\", out);\n}\n",
+          "wrap.rs": "pub fn wrap(a: i32, b: i32) -> i32 {\n    let v = crate::pair::pair(a, b);\n    v + 1\n}\n",
+          "pair.rs": "pub fn pair(a: i32, b: i32) -> i32 { b + 1 }\n"
+        },
+        "mutation": {
+          "file": "main.rs",
+          "replace": "let y = 2;",
+          "with": "let y = 3;"
+        }
+      },
+      "observed_on_current_main": {
+        "present": [
+          "pair.rs:def:b:1",
+          "wrap.rs:def:v:2",
+          "wrap.rs:use:b:2 -> wrap.rs:def:v:2"
+        ],
+        "absent": [
+          "main.rs:use:y:6 -> main.rs:def:out:6"
+        ]
+      },
+      "why_it_matters": "single-file two-arg FP guards already exist, but nested multi-input continuation is still weak; this case isolates the missing step without conflating it with direct-boundary scope selection"
+    },
+    {
+      "case_id": "rust-cross-file-wrapper-return-alias-chain",
+      "lang": "rust",
+      "failure_kind": "fn",
+      "primary_view": "dot",
+      "focus": "imported result should flow through wrapper-local alias chain and return to caller result",
+      "direction": "callees",
+      "lanes": {
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "main.rs",
+          "wrap.rs",
+          "value.rs"
+        ],
+        "initial_source": {
+          "main.rs": "mod wrap;\nmod value;\nfn caller() {\n    let x = 1;\n    let out = wrap::wrap(x);\n    println!(\"{}\", out);\n}\n",
+          "wrap.rs": "pub fn wrap(a: i32) -> i32 {\n    let y = crate::value::make(a);\n    let alias = y;\n    alias\n}\n",
+          "value.rs": "pub fn make(a: i32) -> i32 { a + 1 }\n"
+        },
+        "mutation": {
+          "file": "main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        }
+      },
+      "observed_on_current_main": {
+        "present": [
+          "wrap.rs:def:y:2 -> wrap.rs:def:alias:3",
+          "value.rs:def:a:1"
+        ],
+        "absent": [
+          "main.rs:use:x:5 -> main.rs:def:out:5"
+        ]
+      },
+      "why_it_matters": "this is the smallest current-main case where return continuation and alias continuation interact; direct imported-result stitching works inside the wrapper, but it still does not naturally close back at the caller"
+    },
+    {
+      "case_id": "ruby-two-hop-require-relative-return-continuation",
+      "lang": "ruby",
+      "failure_kind": "fn",
+      "primary_view": "dot",
+      "focus": "require_relative split should recover a two-hop return continuation across wrap -> step -> leaf",
+      "direction": "callees",
+      "lanes": {
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--lang",
+          "ruby",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "dot"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "main.rb",
+          "lib/wrap.rb",
+          "lib/step.rb",
+          "lib/leaf.rb"
+        ],
+        "initial_source": {
+          "main.rb": "require_relative \"lib/wrap\"\n\ndef entry\n  x = 1\n  y = Wrap.wrap(x)\n  puts y\nend\n",
+          "lib/wrap.rb": "require_relative \"step\"\n\nmodule Wrap\n  def self.wrap(a)\n    Step.step(a)\n  end\nend\n",
+          "lib/step.rb": "require_relative \"leaf\"\n\nmodule Step\n  def self.step(a)\n    v = Leaf.leaf(a)\n    v + 1\n  end\nend\n",
+          "lib/leaf.rb": "module Leaf\n  def self.leaf(a)\n    a + 1\n  end\nend\n"
+        },
+        "mutation": {
+          "file": "main.rb",
+          "replace": "x = 1",
+          "with": "x = 2"
+        }
+      },
+      "observed_on_current_main": {
+        "present": [
+          "lib/step.rb:def:v:5",
+          "ruby:lib/leaf.rb:method:leaf:2"
+        ],
+        "absent": [
+          "main.rb:use:x:4 -> main.rb:def:y:4",
+          "lib/leaf.rb:def:a:3"
+        ]
+      },
+      "why_it_matters": "direct Ruby require_relative success cases already exist, but this keeps the current frontier honest: Ruby still weakens once continuation must cross two file boundaries before returning to the caller"
+    },
+    {
+      "case_id": "rust-three-boundary-bridge-budget-overflow",
+      "lang": "rust",
+      "failure_kind": "fn_scope",
+      "primary_view": "json",
+      "focus": "bounded slice planner should not drop a third semantically valid leaf only because per-seed tier2 budget is exhausted",
+      "direction": "callees",
+      "lanes": {
+        "propagation": [
+          "impact",
+          "--engine",
+          "ts",
+          "--direction",
+          "callees",
+          "--with-propagation",
+          "--format",
+          "json",
+          "--with-edges"
+        ]
+      },
+      "repro": {
+        "layout": [
+          "main.rs",
+          "a_wrapper.rs",
+          "a_leaf.rs",
+          "b_wrapper.rs",
+          "b_leaf.rs",
+          "c_wrapper.rs",
+          "c_leaf.rs"
+        ],
+        "initial_source": {
+          "main.rs": "mod a_wrapper;\nmod a_leaf;\nmod b_wrapper;\nmod b_leaf;\nmod c_wrapper;\nmod c_leaf;\n\nfn caller() {\n    let x = 1;\n    let ya = a_wrapper::wrap_a(x);\n    let yb = b_wrapper::wrap_b(x);\n    let yc = c_wrapper::wrap_c(x);\n    println!(\"{} {} {}\", ya, yb, yc);\n}\n",
+          "a_wrapper.rs": "pub fn wrap_a(a: i32) -> i32 {\n    crate::a_leaf::leaf_a(a)\n}\n",
+          "a_leaf.rs": "pub fn leaf_a(a: i32) -> i32 { a + 1 }\n",
+          "b_wrapper.rs": "pub fn wrap_b(a: i32) -> i32 {\n    crate::b_leaf::leaf_b(a)\n}\n",
+          "b_leaf.rs": "pub fn leaf_b(a: i32) -> i32 { a + 2 }\n",
+          "c_wrapper.rs": "pub fn wrap_c(a: i32) -> i32 {\n    crate::c_leaf::leaf_c(a)\n}\n",
+          "c_leaf.rs": "pub fn leaf_c(a: i32) -> i32 { a + 3 }\n"
+        },
+        "mutation": {
+          "file": "main.rs",
+          "replace": "let x = 1;",
+          "with": "let x = 2;"
+        }
+      },
+      "observed_on_current_main": {
+        "selected_files": [
+          "a_leaf.rs",
+          "a_wrapper.rs",
+          "b_leaf.rs",
+          "b_wrapper.rs",
+          "c_wrapper.rs",
+          "main.rs"
+        ],
+        "pruned_candidates": [
+          {
+            "path": "c_leaf.rs",
+            "prune_reason": "bridge_budget_exhausted",
+            "via_symbol_id": "rust:c_wrapper.rs:fn:wrap_c:1"
+          }
+        ]
+      },
+      "why_it_matters": "G11 is about bounded slices, not unbounded growth, but the current budget is still crude; this case fixes a concrete planner failure where the third valid leaf loses for purely budgetary reasons"
+    }
+  ]
+}
