@@ -813,13 +813,22 @@ fn collect_callsite_nodes(
     collected
 }
 
+fn collect_exact_callsite_uses(
+    uses_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
+    file: &str,
+    line: u32,
+    expected_len: usize,
+) -> Vec<String> {
+    collect_callsite_nodes(uses_by_loc, file, line, expected_len, &[0])
+}
+
 fn collect_callsite_uses(
     uses_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
     file: &str,
     line: u32,
     expected_len: usize,
 ) -> Vec<String> {
-    let exact = collect_callsite_nodes(uses_by_loc, file, line, expected_len, &[0]);
+    let exact = collect_exact_callsite_uses(uses_by_loc, file, line, expected_len);
     if expected_len == 0 || exact.len() >= expected_len {
         return exact;
     }
@@ -832,16 +841,118 @@ fn collect_callsite_uses(
     )
 }
 
+fn collect_exact_callsite_defs(
+    defs_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
+    file: &str,
+    line: u32,
+) -> Vec<String> {
+    collect_callsite_nodes(defs_by_loc, file, line, 0, &[0])
+}
+
 fn collect_callsite_defs(
     defs_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
     file: &str,
     line: u32,
 ) -> Vec<String> {
-    let exact = collect_callsite_nodes(defs_by_loc, file, line, 0, &[0]);
+    let exact = collect_exact_callsite_defs(defs_by_loc, file, line);
     if !exact.is_empty() {
         return exact;
     }
     collect_callsite_nodes(defs_by_loc, file, line, 0, &[0, -1, 1, -2, 2])
+}
+
+fn filter_symbolic_propagation_refs<'a>(
+    refs: &'a [Reference],
+    defs_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
+    uses_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
+    summary_by_fn: &std::collections::HashMap<String, FunctionSummary>,
+) -> Vec<&'a Reference> {
+    let mut grouped: std::collections::BTreeMap<(String, String, String), Vec<&Reference>> =
+        std::collections::BTreeMap::new();
+
+    for reference in refs.iter().filter(|r| {
+        r.kind == crate::ir::reference::RefKind::Call
+            && r.provenance == crate::ir::reference::EdgeProvenance::CallGraph
+    }) {
+        grouped
+            .entry((
+                reference.from.0.clone(),
+                reference.to.0.clone(),
+                reference.file.clone(),
+            ))
+            .or_default()
+            .push(reference);
+    }
+
+    let mut selected = Vec::new();
+    for group in grouped.into_values() {
+        let summary_input_count = group
+            .first()
+            .and_then(|reference| summary_by_fn.get(&reference.to.0))
+            .map(|summary| summary.inputs.len())
+            .unwrap_or_default()
+            .max(1);
+
+        let with_exact_defs_and_uses: Vec<&Reference> = group
+            .iter()
+            .copied()
+            .filter(|reference| {
+                let exact_defs = collect_exact_callsite_defs(
+                    defs_by_loc,
+                    reference.file.as_str(),
+                    reference.line,
+                );
+                let exact_uses = collect_exact_callsite_uses(
+                    uses_by_loc,
+                    reference.file.as_str(),
+                    reference.line,
+                    summary_input_count,
+                );
+                !exact_defs.is_empty()
+                    && !exact_uses.is_empty()
+                    && exact_uses.len() >= summary_input_count
+            })
+            .collect();
+        if !with_exact_defs_and_uses.is_empty() {
+            selected.extend(with_exact_defs_and_uses);
+            continue;
+        }
+
+        let with_exact_defs: Vec<&Reference> = group
+            .iter()
+            .copied()
+            .filter(|reference| {
+                !collect_exact_callsite_defs(defs_by_loc, reference.file.as_str(), reference.line)
+                    .is_empty()
+            })
+            .collect();
+        if !with_exact_defs.is_empty() {
+            selected.extend(with_exact_defs);
+            continue;
+        }
+
+        let with_exact_uses: Vec<&Reference> = group
+            .iter()
+            .copied()
+            .filter(|reference| {
+                let exact_uses = collect_exact_callsite_uses(
+                    uses_by_loc,
+                    reference.file.as_str(),
+                    reference.line,
+                    summary_input_count,
+                );
+                !exact_uses.is_empty() && exact_uses.len() >= summary_input_count
+            })
+            .collect();
+        if !with_exact_uses.is_empty() {
+            selected.extend(with_exact_uses);
+            continue;
+        }
+
+        selected.extend(group);
+    }
+
+    selected
 }
 
 impl PdgBuilder {
@@ -908,11 +1019,11 @@ impl PdgBuilder {
             summary_by_fn.insert(s.function_id.clone(), s);
         }
 
+        let symbolic_refs =
+            filter_symbolic_propagation_refs(refs, &defs_by_loc, &uses_by_loc, &summary_by_fn);
+
         // 1) Call-site bridges + summary-connected inter-procedural bridges
-        for r in refs.iter().filter(|r| {
-            r.kind == crate::ir::reference::RefKind::Call
-                && r.provenance == crate::ir::reference::EdgeProvenance::CallGraph
-        }) {
+        for r in symbolic_refs {
             let summary_input_count = summary_by_fn
                 .get(&r.to.0)
                 .map(|summary| summary.inputs.len())
