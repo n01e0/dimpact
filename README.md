@@ -115,6 +115,7 @@ CLI Overview
   - `path` expands that witness into one chosen hop-by-hop route from the root changed/seed symbol
   - `provenance_chain` / `kind_chain` make it easier to see where call / data / control / symbolic-propagation edges entered that route
   - `path_compact` / `provenance_chain_compact` / `kind_chain_compact` keep the same route in a more compressed, explanation-oriented form
+  - `bridge_execution_family` / `bridge_execution_chain_compact` add the current bounded continuation/stitching explanation on top of that path, so you can tell whether the selected route was carried by a return continuation, alias-result stitch, Ruby `require_relative` load, or a nested continuation step
   - `slice_context.selected_files_on_path` lightly connects that witness route back to the bounded-slice planner, so you can see which selected files were actually on the witness path, which hop indices they covered, and which slice-selection reasons retained them
   - `slice_context.selected_vs_pruned_reasons` adds the minimal "why this won" explanation when a selected bridge candidate beat a ranked-out competitor
   - this is still one selected shortest-path explanation, not an exhaustive proof of every possible route
@@ -224,7 +225,7 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - Bounded slice is the current scope model for the PDG path:
   - the goal is **not** to open the whole repo, but to recover the few nearby files that are most likely needed to explain a short multi-file bridge
   - the current planner is now a **bounded continuation** model: seed/changed file first, then direct boundary files, then a bounded bridge-completion file, and in the strongest Rust/Ruby cases one more `bridge_continuation_file`
-  - in practice this means G11 can now keep short `main -> wrapper -> step -> leaf` style chains in scope without turning into recursive whole-repo expansion
+  - in practice this now covers short `main -> wrapper -> step -> leaf` wrapper-return chains **and** the smallest `main -> adapter -> value -> out/shared` style alias-continuation follow-ups, without turning into recursive whole-repo expansion
   - `--with-pdg` and `--with-propagation` share that same bounded slice planner in both diff mode and seed mode
 - `--with-pdg`
   - best when you want extra Rust/Ruby local data/control-dependence context around the selected bounded slice
@@ -233,8 +234,8 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - `--with-propagation`
   - builds on the same bounded slice, then adds symbolic call-site / summary bridges on top
   - best when the real question is "does this value / argument / result continue across the boundary?"
-  - G11 specifically improved short Rust/Ruby wrapper-return style propagation, including two-hop wrapper / `require_relative` chains and more natural attachment for multiline call sites
-  - use this when you suspect false negatives around alias chains, wrapper return-flow, imported-result continuation, or other short inter-procedural Rust/Ruby bridges
+  - G11/G12 improved short Rust/Ruby continuation handling in a few concrete ways: two-hop wrapper / `require_relative` chains, selected nested multi-input continuation cases, imported-result / alias-result stitching, and less noisy Ruby duplicate-callsite attachment
+  - use this when you suspect false negatives around alias chains, wrapper return-flow, imported-result continuation, nested short multi-input bridging, or other short inter-procedural Rust/Ruby bridges
 - `--per-seed`
   - works with both normal impact and the PDG / propagation path
   - useful when you want to compare how each changed/seed symbol fans out independently, including per-seed witnesses and compact path summaries
@@ -244,7 +245,7 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - Scope is intentionally bounded today:
   - the planner is still closer to a **bounded project slice** than to project-wide closure
   - current Rust/Ruby scope selection is roughly: root file(s) + direct boundary + bounded bridge-completion + at most one extra continuation file for the strongest short bridge family
-  - that helps short 2-hop-style bridges, but it still deliberately stops before recursive whole-project expansion
+  - that now covers the best short wrapper-return chains and the narrowest alias-continuation follow-up, but it still deliberately stops before recursive whole-project expansion or family-wide closure
   - other languages still mostly fall back to the normal call-graph signal even if you pass `--with-pdg`
 - It is **not** a project-wide PDG yet:
   - current behavior is still closer to `global call graph + bounded local DFG augmentation`
@@ -253,7 +254,8 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - Witnesses are better, but still intentionally minimal:
   - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` expose one chosen multi-hop explanation
   - `impacted_witnesses.slice_context` now tells you which selected files on that route came from the bounded-slice planner and which seed-specific reasons retained them
-  - continuation-tier files are now labeled separately as `bridge_continuation_file`, which makes the G11 scope extension visible in `summary.slice_selection` and witness slice context
+  - continuation-tier files are now labeled separately as `bridge_continuation_file`, which makes the G11/G12 scope extension visible in `summary.slice_selection` and witness slice context
+  - `bridge_execution_family` / `bridge_execution_chain_compact` give you the current compact continuation/stitching explanation for that route, but they are still representative metadata rather than a complete execution trace
   - the `*_compact` witness fields make that explanation easier to read, but they are still summaries of one selected route
   - you still do **not** get all competing paths or a full proof that no alternative route exists
 - `-f dot` changes meaning when PDG is enabled:
@@ -261,8 +263,8 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
   - `impact --with-pdg -f dot` shows the raw PDG/DFG-style graph instead
 - Propagation is better attached than before, but still narrow:
   - multiline call-site attachment is more tolerant than exact `(file, line)` matching used to be, so short wrapper calls split across nearby lines are less brittle
-  - that tolerance is still intentionally local; it is not a generic expression-normalization or arbitrary argument-matching layer
-  - nested multi-input summary mapping, broader alias stitching, and richer budget-aware continuation selection are still only partially modeled
+  - selected nested multi-input continuation and short alias-result stitching cases are better than before, but the current model is still intentionally local and heuristic
+  - it is still **not** a generic expression-normalization or arbitrary argument-matching layer: reordered/partial bindings, wider alias zones, and richer family-aware continuation budgeting are only partially modeled
 - Ruby has improved short multi-file coverage, but still has clear boundaries:
   - short `require_relative` / alias / wrapper-return chains are better than before, including no-paren wrapper parameter flow
   - bridge scoring now tries to keep semantic alias / return-flow completions ahead of plain `require_relative` helper noise, while leaving weaker fallback paths visible as ranked-out candidates instead of silently broadening scope
