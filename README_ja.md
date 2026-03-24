@@ -131,6 +131,7 @@ dimpact id --name foo -f json
   - `path` は root changed/seed symbol からそこに至る 1 本の hop-by-hop 経路を出します
   - `provenance_chain` / `kind_chain` で、その経路のどこに call / data / control / symbolic_propagation が入ったかを追いやすくなります
   - `path_compact` / `provenance_chain_compact` / `kind_chain_compact` は、その同じ経路をより説明しやすい圧縮形で返します
+  - `bridge_execution_family` / `bridge_execution_chain_compact` を見ると、その経路が return continuation / alias-result stitching / Ruby の `require_relative` load / nested continuation step のどれで支えられていたかを compact に確認できます
   - `slice_context.selected_files_on_path` を見ると、その witness 経路上の file が bounded-slice planner でどう選ばれたか、どの hop index を担当したか、どの seed-specific reason で残ったかを軽く追えます
   - `slice_context.selected_vs_pruned_reasons` には、selected された bridge candidate が ranked-out 候補に勝った最小理由が入ります
   - ただし、これは依然として 1 本の最短経路ベースの説明であり、すべての候補経路を網羅するものではありません
@@ -240,7 +241,7 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - bounded slice は、いまの PDG path の scope モデルです
   - 目的は repo 全体を開くことではなく、短い multi-file bridge を説明するのに必要な近傍 file だけを拾うことです
   - 現在の planner は **bounded continuation** に進んでおり、seed/changed file → direct boundary file → bounded な bridge completion file に加えて、強い Rust/Ruby case ではさらに 1 枚の `bridge_continuation_file` まで選べます
-  - 実運用で言うと、`main -> wrapper -> step -> leaf` のような短い chain を scope に入れやすくなった一方で、再帰的な whole-repo expansion にはしません
+  - 実運用では、`main -> wrapper -> step -> leaf` のような wrapper-return chain だけでなく、`main -> adapter -> value -> out/shared` のような最小の alias-continuation follow-up も scope に残しやすくなりましたが、再帰的な whole-repo expansion にはしません
   - `--with-pdg` と `--with-propagation` は、diff モードでも seed モードでも、この同じ bounded slice planner を共有します
 - `--with-pdg`
   - 選ばれた bounded slice 上で、Rust/Ruby の local data/control dependence を少し厚く見たいとき向けです
@@ -249,8 +250,8 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - `--with-propagation`
   - 同じ bounded slice の上に call-site / summary bridge を足す拡張です
   - 引数 → callee → 代入先 のような値伝播や、wrapper return-flow / imported result continuation を見たいときに使います
-  - G11 では、短い Rust/Ruby の wrapper-return chain、2-hop の `require_relative` chain、multiline call site attach が以前より自然につながるようになりました
-  - local variable flow、alias chain、wrapper return-flow、短い inter-procedural propagation の false negative を疑うときに向いています
+  - G11/G12 では、短い Rust/Ruby の wrapper-return chain、2-hop の `require_relative` chain、selected な nested multi-input continuation、imported-result / alias-result stitching、Ruby の duplicate-callsite attach のノイズ低減が前進しました
+  - local variable flow、alias chain、wrapper return-flow、nested な短距離 multi-input bridge、短い inter-procedural propagation の false negative を疑うときに向いています
 - `--per-seed`
   - 通常 impact だけでなく PDG / propagation path でも使えます
   - changed/seed symbol ごとの波及を個別に見たいときに便利で、seed ごとの witness や compact path も追いやすくなります
@@ -260,7 +261,7 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - scope はまだ意図的に絞っています
   - 現状は **bounded project slice** であって project-wide closure ではありません
   - Rust/Ruby ではおおむね「root file + direct boundary + bounded bridge completion + 強い短距離 family に対する continuation file 1 枚」くらいのスコープを狙っています
-  - そのため、短い 2-hop bridge には効きますが、再帰的な whole-project expansion はしません
+  - いまは短い wrapper-return chain と最小の alias-continuation follow-up までは扱えますが、family 全体を再帰的に閉じるような whole-project expansion はしません
   - それ以外の言語では `--with-pdg` を付けても、実質的には通常の call graph シグナルに寄る場面が多いです
 - **project-wide PDG** ではありません
   - 現状は依然として `global call graph + bounded local DFG augmentation` に近い挙動です
@@ -269,7 +270,8 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - witness は改善されたが、まだ最小表現です
   - `impacted_witnesses.path` / `provenance_chain` / `kind_chain` で 1 本の multi-hop 説明を見られるようになりました
   - `impacted_witnesses.slice_context` を見ると、その経路上に出てくる selected file が bounded-slice planner でどう選ばれたかを軽く辿れます
-  - continuation tier は `bridge_continuation_file` として別 kind で見えるようになったので、G11 の scope 拡張が JSON 上でも分かりやすくなっています
+  - continuation tier は `bridge_continuation_file` として別 kind で見えるようになったので、G11/G12 の scope 拡張が JSON 上でも分かりやすくなっています
+  - `bridge_execution_family` / `bridge_execution_chain_compact` で、その経路の continuation / stitching explanation を compact に見られますが、これは依然として代表経路ベースの metadata です
   - `*_compact` 系フィールドでその説明を読みやすく圧縮していますが、依然として 1 本の選択経路の要約です
   - 競合する複数経路の列挙や、代替経路が存在しないことの証明まではしません
 - `-f dot` の意味が切り替わります
@@ -277,8 +279,8 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
   - `impact --with-pdg -f dot` は raw な PDG/DFG 風グラフです
 - propagation の attach は良くなったが、まだ narrow です
   - multiline call site でも exact `(file, line)` だけに依存しないようになり、近接行に分かれた短い wrapper call は以前より拾いやすくなりました
-  - ただしこれはあくまで局所的な tolerance であって、任意の式正規化や汎用の引数対応づけではありません
-  - nested multi-input summary mapping、広い alias stitching、より賢い budget-aware continuation selection は引き続き部分的な対応に留まります
+  - selected な nested multi-input continuation や短い alias-result stitching は改善しましたが、モデル自体は依然として局所的で heuristic です
+  - 任意の式正規化や汎用の引数対応づけがあるわけではなく、reordered/partial binding、広い alias zone、より賢い family-aware continuation budget は引き続き部分的な対応に留まります
 - Ruby は short multi-file case が前進した一方で、限界もまだあります
   - `require_relative` / alias / wrapper-return の短い chain や no-paren wrapper parameter flow は以前より拾いやすくなりました
   - bridge scoring は、semantic に強い alias / return-flow completion を単純な `require_relative` helper noise より優先しつつ、弱い fallback は scope を広げず ranked-out candidate として残す方針です
