@@ -2318,9 +2318,15 @@ fn suppress_weaker_same_family_rust_siblings(
     admitted
 }
 
-fn continuation_ready_wrapper_return_anchor(candidate: &Tier2Candidate) -> bool {
+fn continuation_ready_bridge_anchor(candidate: &Tier2Candidate) -> bool {
     candidate.scoring.source_kind == ImpactSliceCandidateSourceKind::GraphSecondHop
-        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+        && matches!(
+            candidate.bridge_kind,
+            Some(
+                ImpactSliceBridgeKind::WrapperReturn
+                    | ImpactSliceBridgeKind::BoundaryAliasContinuation
+            )
+        )
         && (candidate.path.ends_with(".rs") || candidate.path.ends_with(".rb"))
 }
 
@@ -2345,7 +2351,7 @@ fn collect_bridge_continuation_candidates<'a>(
 
     for anchor in anchors
         .iter()
-        .filter(|candidate| continuation_ready_wrapper_return_anchor(candidate))
+        .filter(|candidate| continuation_ready_bridge_anchor(candidate))
     {
         let Some(anchor_symbol) = symbol_by_id.get(&anchor.completion_symbol_id).copied() else {
             continue;
@@ -4443,6 +4449,72 @@ fn caller() -> i32 {
             "expected later helper noise to lose to the stronger alias continuation candidate: {:#?}",
             plan.slice_selection.pruned_candidates
         );
+    }
+
+    #[test]
+    fn bounded_slice_plan_extends_alias_continuation_beyond_tier2() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let adapter = test_symbol("rust:adapter.rs:fn:wrap:3", "wrap", "adapter.rs", 3);
+        let value = test_symbol("rust:value.rs:fn:make:1", "make", "value.rs", 1);
+        let out = test_symbol("rust:out.rs:fn:alias_out:1", "alias_out", "out.rs", 1);
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            adapter.clone(),
+            value.clone(),
+            out.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), adapter.id.0.as_str(), "main.rs", 5),
+            call_ref(adapter.id.0.as_str(), value.id.0.as_str(), "adapter.rs", 4),
+            call_ref(value.id.0.as_str(), out.id.0.as_str(), "value.rs", 3),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "adapter.rs".to_string(),
+                "main.rs".to_string(),
+                "out.rs".to_string(),
+                "value.rs".to_string(),
+            ]
+        );
+
+        let out_file = slice_selection_file(&plan.slice_selection, "out.rs");
+        assert_eq!(
+            out_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 3,
+                kind: ImpactSliceReasonKind::BridgeContinuationFile,
+                via_symbol_id: Some("rust:value.rs:fn:make:1".to_string()),
+                via_path: Some("value.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AliasChain,
+                        ImpactSliceEvidenceKind::AssignedResult,
+                    ],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    3,
+                    "out.rs",
+                )),
+            }]
+        );
+        assert!(plan.slice_selection.pruned_candidates.is_empty());
     }
 
     #[test]
