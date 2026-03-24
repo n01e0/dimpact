@@ -377,6 +377,41 @@ pub struct ImpactWitnessSliceFileContext {
     pub selected_vs_pruned_reasons: Vec<ImpactWitnessSliceSelectedVsPrunedReason>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactBridgeExecutionFamily {
+    ReturnContinuation,
+    AliasResultStitch,
+    RequireRelativeContinuation,
+    MixedRequireRelativeAliasStitch,
+    NestedMultiInputContinuation,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactBridgeExecutionStepFamily {
+    CallsiteInputBinding,
+    SummaryReturnBridge,
+    NestedSummaryBridge,
+    AliasResultStitch,
+    RequireRelativeLoad,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImpactBridgeExecutionStepCompact {
+    pub family: ImpactBridgeExecutionFamily,
+    pub step_family: ImpactBridgeExecutionStepFamily,
+    pub anchor_symbol_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge_kind: Option<ImpactSliceBridgeKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_kind: Option<ImpactSliceReasonKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactWitness {
     pub symbol_id: String,
@@ -396,6 +431,10 @@ pub struct ImpactWitness {
     pub provenance_chain_compact: Vec<EdgeProvenance>,
     #[serde(default)]
     pub kind_chain_compact: Vec<RefKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge_execution_family: Option<ImpactBridgeExecutionFamily>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bridge_execution_chain_compact: Vec<ImpactBridgeExecutionStepCompact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slice_context: Option<ImpactWitnessSliceContext>,
 }
@@ -1234,6 +1273,301 @@ fn build_witness_slice_context(
     }
 }
 
+fn bridge_execution_family_for_bridge_kind(
+    bridge_kind: ImpactSliceBridgeKind,
+) -> ImpactBridgeExecutionFamily {
+    match bridge_kind {
+        ImpactSliceBridgeKind::WrapperReturn => ImpactBridgeExecutionFamily::ReturnContinuation,
+        ImpactSliceBridgeKind::BoundaryAliasContinuation => {
+            ImpactBridgeExecutionFamily::AliasResultStitch
+        }
+        ImpactSliceBridgeKind::RequireRelativeChain => {
+            ImpactBridgeExecutionFamily::RequireRelativeContinuation
+        }
+    }
+}
+
+fn bridge_execution_step_family_for_reason(
+    reason: &ImpactSliceReasonMetadata,
+) -> Option<ImpactBridgeExecutionStepFamily> {
+    match (reason.kind, reason.bridge_kind) {
+        (
+            ImpactSliceReasonKind::BridgeCompletionFile,
+            Some(ImpactSliceBridgeKind::WrapperReturn),
+        ) => Some(ImpactBridgeExecutionStepFamily::SummaryReturnBridge),
+        (
+            ImpactSliceReasonKind::BridgeContinuationFile,
+            Some(ImpactSliceBridgeKind::WrapperReturn),
+        ) => Some(ImpactBridgeExecutionStepFamily::NestedSummaryBridge),
+        (
+            ImpactSliceReasonKind::BridgeCompletionFile
+            | ImpactSliceReasonKind::BridgeContinuationFile,
+            Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+        ) => Some(ImpactBridgeExecutionStepFamily::AliasResultStitch),
+        (
+            ImpactSliceReasonKind::BridgeCompletionFile
+            | ImpactSliceReasonKind::BridgeContinuationFile,
+            Some(ImpactSliceBridgeKind::RequireRelativeChain),
+        ) => Some(ImpactBridgeExecutionStepFamily::RequireRelativeLoad),
+        _ => None,
+    }
+}
+
+fn bridge_execution_step_summary(
+    step_family: ImpactBridgeExecutionStepFamily,
+    bridge_kind: Option<ImpactSliceBridgeKind>,
+    reason_kind: ImpactSliceReasonKind,
+) -> String {
+    let action = match step_family {
+        ImpactBridgeExecutionStepFamily::CallsiteInputBinding => "entered selected boundary",
+        ImpactBridgeExecutionStepFamily::SummaryReturnBridge => "selected bridge completion",
+        ImpactBridgeExecutionStepFamily::NestedSummaryBridge => "selected bridge continuation",
+        ImpactBridgeExecutionStepFamily::AliasResultStitch => "selected alias-result stitch",
+        ImpactBridgeExecutionStepFamily::RequireRelativeLoad => {
+            "selected require_relative continuation"
+        }
+    };
+    match bridge_kind {
+        Some(bridge_kind) => format!(
+            "{} via {} ({})",
+            action,
+            witness_bridge_kind_label(bridge_kind),
+            witness_reason_kind_label(reason_kind)
+        ),
+        None => format!("{} ({})", action, witness_reason_kind_label(reason_kind)),
+    }
+}
+
+fn witness_reason_kind_label(kind: ImpactSliceReasonKind) -> &'static str {
+    match kind {
+        ImpactSliceReasonKind::SeedFile => "seed_file",
+        ImpactSliceReasonKind::ChangedFile => "changed_file",
+        ImpactSliceReasonKind::DirectCallerFile => "direct_caller_file",
+        ImpactSliceReasonKind::DirectCalleeFile => "direct_callee_file",
+        ImpactSliceReasonKind::BridgeCompletionFile => "bridge_completion_file",
+        ImpactSliceReasonKind::BridgeContinuationFile => "bridge_continuation_file",
+        ImpactSliceReasonKind::ModuleCompanionFile => "module_companion_file",
+    }
+}
+
+fn witness_bridge_kind_label(kind: ImpactSliceBridgeKind) -> &'static str {
+    match kind {
+        ImpactSliceBridgeKind::WrapperReturn => "wrapper_return",
+        ImpactSliceBridgeKind::BoundaryAliasContinuation => "boundary_alias_continuation",
+        ImpactSliceBridgeKind::RequireRelativeChain => "require_relative_chain",
+    }
+}
+
+fn relative_require_target(from_path: &str, to_path: &str) -> Option<String> {
+    let from_parent = std::path::Path::new(from_path).parent()?;
+    let from_components: Vec<_> = from_parent.components().collect();
+    let to_components: Vec<_> = std::path::Path::new(to_path).components().collect();
+    let mut shared = 0usize;
+    while shared < from_components.len()
+        && shared < to_components.len()
+        && from_components[shared] == to_components[shared]
+    {
+        shared += 1;
+    }
+
+    let mut parts = Vec::new();
+    for _ in shared..from_components.len() {
+        parts.push("..".to_string());
+    }
+    for component in to_components.iter().skip(shared) {
+        let part = component.as_os_str().to_string_lossy().to_string();
+        if !part.is_empty() {
+            parts.push(part);
+        }
+    }
+    let relative = parts.join("/");
+    let relative = relative
+        .strip_suffix(".rb")
+        .unwrap_or(&relative)
+        .to_string();
+    (!relative.is_empty()).then_some(relative)
+}
+
+fn file_has_require_relative_load(from_path: &str, to_path: &str) -> bool {
+    if !(from_path.ends_with(".rb") && to_path.ends_with(".rb")) {
+        return false;
+    }
+    let Some(target) = relative_require_target(from_path, to_path) else {
+        return false;
+    };
+    let Ok(contents) = fs::read_to_string(from_path) else {
+        return false;
+    };
+    [
+        format!("require_relative \"{target}\""),
+        format!("require_relative '{target}'"),
+    ]
+    .into_iter()
+    .any(|needle| contents.contains(&needle))
+}
+
+fn build_bridge_execution_chain_compact(
+    slice_context: &ImpactWitnessSliceContext,
+    provenance_chain: &[EdgeProvenance],
+) -> (
+    Option<ImpactBridgeExecutionFamily>,
+    Vec<ImpactBridgeExecutionStepCompact>,
+) {
+    let mut bridge_steps = Vec::new();
+    let mut seen_steps = HashSet::new();
+
+    for file_context in &slice_context.selected_files_on_path {
+        for reason in &file_context.seed_reasons {
+            let Some(step_family) = bridge_execution_step_family_for_reason(reason) else {
+                continue;
+            };
+            let Some(bridge_kind) = reason.bridge_kind else {
+                continue;
+            };
+            let Some(anchor_symbol_id) = reason.via_symbol_id.clone() else {
+                continue;
+            };
+            if let Some(anchor_path) = reason.via_path.clone()
+                && file_has_require_relative_load(anchor_path.as_str(), file_context.path.as_str())
+            {
+                let require_relative_step = ImpactBridgeExecutionStepCompact {
+                    family: ImpactBridgeExecutionFamily::RequireRelativeContinuation,
+                    step_family: ImpactBridgeExecutionStepFamily::RequireRelativeLoad,
+                    anchor_symbol_id: anchor_symbol_id.clone(),
+                    anchor_path: Some(anchor_path.clone()),
+                    bridge_kind: Some(ImpactSliceBridgeKind::RequireRelativeChain),
+                    reason_kind: Some(reason.kind),
+                    summary: Some(bridge_execution_step_summary(
+                        ImpactBridgeExecutionStepFamily::RequireRelativeLoad,
+                        Some(ImpactSliceBridgeKind::RequireRelativeChain),
+                        reason.kind,
+                    )),
+                };
+                let key = (
+                    require_relative_step.family,
+                    require_relative_step.step_family,
+                    anchor_symbol_id.clone(),
+                    require_relative_step.anchor_path.clone(),
+                    require_relative_step.bridge_kind,
+                    require_relative_step.reason_kind,
+                );
+                if seen_steps.insert(key) {
+                    bridge_steps.push(require_relative_step);
+                }
+            }
+
+            let family = bridge_execution_family_for_bridge_kind(bridge_kind);
+            let step = ImpactBridgeExecutionStepCompact {
+                family,
+                step_family,
+                anchor_symbol_id: anchor_symbol_id.clone(),
+                anchor_path: reason
+                    .via_path
+                    .clone()
+                    .or_else(|| Some(file_context.path.clone())),
+                bridge_kind: Some(bridge_kind),
+                reason_kind: Some(reason.kind),
+                summary: Some(bridge_execution_step_summary(
+                    step_family,
+                    Some(bridge_kind),
+                    reason.kind,
+                )),
+            };
+            let key = (
+                step.family,
+                step.step_family,
+                anchor_symbol_id,
+                step.anchor_path.clone(),
+                step.bridge_kind,
+                step.reason_kind,
+            );
+            if seen_steps.insert(key) {
+                bridge_steps.push(step);
+            }
+        }
+    }
+
+    let has_alias_step = bridge_steps
+        .iter()
+        .any(|step| step.family == ImpactBridgeExecutionFamily::AliasResultStitch);
+    let has_require_relative_step = bridge_steps
+        .iter()
+        .any(|step| step.family == ImpactBridgeExecutionFamily::RequireRelativeContinuation);
+    let has_nested_step = bridge_steps
+        .iter()
+        .any(|step| step.step_family == ImpactBridgeExecutionStepFamily::NestedSummaryBridge);
+    let has_return_step = bridge_steps.iter().any(|step| {
+        matches!(
+            step.step_family,
+            ImpactBridgeExecutionStepFamily::SummaryReturnBridge
+                | ImpactBridgeExecutionStepFamily::NestedSummaryBridge
+        )
+    });
+
+    let representative_family = if has_alias_step && has_require_relative_step {
+        Some(ImpactBridgeExecutionFamily::MixedRequireRelativeAliasStitch)
+    } else if has_alias_step {
+        Some(ImpactBridgeExecutionFamily::AliasResultStitch)
+    } else if has_require_relative_step {
+        Some(ImpactBridgeExecutionFamily::RequireRelativeContinuation)
+    } else if has_nested_step && provenance_chain.contains(&EdgeProvenance::SymbolicPropagation) {
+        Some(ImpactBridgeExecutionFamily::NestedMultiInputContinuation)
+    } else if has_return_step {
+        Some(ImpactBridgeExecutionFamily::ReturnContinuation)
+    } else {
+        None
+    };
+
+    if let (Some(entry_family), Some(boundary_reason)) = (
+        representative_family.or_else(|| bridge_steps.first().map(|step| step.family)),
+        slice_context
+            .selected_files_on_path
+            .iter()
+            .flat_map(|file_context| {
+                file_context
+                    .seed_reasons
+                    .iter()
+                    .map(move |reason| (file_context, reason))
+            })
+            .find(|(_, reason)| {
+                matches!(
+                    reason.kind,
+                    ImpactSliceReasonKind::DirectCallerFile
+                        | ImpactSliceReasonKind::DirectCalleeFile
+                ) && reason.via_symbol_id.is_some()
+            }),
+    ) {
+        let (file_context, reason) = boundary_reason;
+        let anchor_symbol_id = reason.via_symbol_id.clone().expect("checked is_some");
+        let boundary_step = ImpactBridgeExecutionStepCompact {
+            family: entry_family,
+            step_family: ImpactBridgeExecutionStepFamily::CallsiteInputBinding,
+            anchor_symbol_id: anchor_symbol_id.clone(),
+            anchor_path: Some(file_context.path.clone()),
+            bridge_kind: None,
+            reason_kind: Some(reason.kind),
+            summary: Some(bridge_execution_step_summary(
+                ImpactBridgeExecutionStepFamily::CallsiteInputBinding,
+                None,
+                reason.kind,
+            )),
+        };
+        let key = (
+            boundary_step.family,
+            boundary_step.step_family,
+            anchor_symbol_id,
+            boundary_step.anchor_path.clone(),
+            boundary_step.bridge_kind,
+            boundary_step.reason_kind,
+        );
+        if seen_steps.insert(key) {
+            bridge_steps.insert(0, boundary_step);
+        }
+    }
+
+    (representative_family, bridge_steps)
+}
+
 pub fn attach_slice_selection_summary(
     output: &mut ImpactOutput,
     slice_selection: &ImpactSliceSelectionSummary,
@@ -1257,6 +1591,12 @@ pub fn attach_slice_selection_summary(
             &symbol_file_by_id,
             slice_selection,
         ));
+        if let Some(slice_context) = witness.slice_context.as_ref() {
+            let (bridge_execution_family, bridge_execution_chain_compact) =
+                build_bridge_execution_chain_compact(slice_context, &witness.provenance_chain);
+            witness.bridge_execution_family = bridge_execution_family;
+            witness.bridge_execution_chain_compact = bridge_execution_chain_compact;
+        }
     }
 }
 
@@ -1948,6 +2288,8 @@ pub fn compute_impact(
                     path_compact,
                     provenance_chain_compact,
                     kind_chain_compact,
+                    bridge_execution_family: None,
+                    bridge_execution_chain_compact: vec![],
                     slice_context: None,
                 },
             ))
@@ -2098,7 +2440,12 @@ fn foo() { bar(); }
             provenance: crate::ir::reference::EdgeProvenance::CallGraph,
         }];
 
-        let out = compute_impact(&[changed.clone()], &index, &refs, &ImpactOptions::default());
+        let out = compute_impact(
+            std::slice::from_ref(&changed),
+            &index,
+            &refs,
+            &ImpactOptions::default(),
+        );
         let witness = out
             .impacted_witnesses
             .get(&impacted.id.0)
@@ -2216,7 +2563,7 @@ fn foo() { bar(); }
             ignore_dirs: Vec::new(),
         };
 
-        let out = compute_impact(&[changed.clone()], &index, &refs, &opts);
+        let out = compute_impact(std::slice::from_ref(&changed), &index, &refs, &opts);
         let witness = out
             .impacted_witnesses
             .get(&target.id.0)
@@ -2582,7 +2929,7 @@ fn foo() { bar(); }
             with_edges: Some(true),
             ignore_dirs: Vec::new(),
         };
-        let mut out = compute_impact(&[seed.clone()], &index, &refs, &opts);
+        let mut out = compute_impact(std::slice::from_ref(&seed), &index, &refs, &opts);
 
         let wrapper_seed_reason = ImpactSliceReasonMetadata {
             seed_symbol_id: seed.id.0.clone(),
@@ -2858,7 +3205,7 @@ fn foo() { bar(); }
             with_edges: Some(true),
             ignore_dirs: Vec::new(),
         };
-        let mut out = compute_impact(&[seed.clone()], &index, &refs, &opts);
+        let mut out = compute_impact(std::slice::from_ref(&seed), &index, &refs, &opts);
 
         let selected_reason = ImpactSliceReasonMetadata {
             seed_symbol_id: seed.id.0.clone(),
@@ -3729,6 +4076,8 @@ fn foo() { bar(); }
                     path_compact: vec![],
                     provenance_chain_compact: vec![],
                     kind_chain_compact: vec![],
+                    bridge_execution_family: None,
+                    bridge_execution_chain_compact: vec![],
                     slice_context: None,
                 },
             )]),
