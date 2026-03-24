@@ -1024,6 +1024,52 @@ end
     (dir, path)
 }
 
+fn setup_ruby_require_relative_alias_caller_chain_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::create_dir_all(path.join("app")).unwrap();
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"def bounce(value)
+  alias_value = value
+  return alias_value
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry(seed)
+  reply = bounce(seed)
+  out = reply
+  return out
+end
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"def bounce(value)
+  alias_value = value
+  return alias_value.to_s
+end
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_ruby_require_relative_no_paren_wrapper_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -3378,6 +3424,69 @@ fn ruby_require_relative_alias_return_only_gains_symbolic_edges_with_propagation
             .filter(|e| e["kind"] == "data")
             .all(|e| e["provenance"] == "symbolic_propagation")),
         "expected propagation-only data edges to stay tagged as symbolic_propagation: {prop:#}"
+    );
+}
+
+#[test]
+fn ruby_require_relative_alias_caller_chain_avoids_leaking_duplicate_callsite_refs() {
+    let (_tmp, repo) = setup_ruby_require_relative_alias_caller_chain_repo();
+    let diff = diff_text(&repo);
+
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+
+    let prop_data: std::collections::BTreeSet<(String, String)> = prop["edges"]
+        .as_array()
+        .expect("edges array")
+        .iter()
+        .filter(|e| e["kind"] == "data")
+        .map(|e| {
+            (
+                e["from"].as_str().unwrap().to_string(),
+                e["to"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+
+    assert!(
+        prop_data.contains(&(
+            "app/runner.rb:use:seed:4".to_string(),
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+        )),
+        "expected propagation to keep the real caller arg bridge into bounce(seed): {prop:#}"
+    );
+    assert!(
+        prop_data.contains(&(
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+            "app/runner.rb:def:reply:4".to_string(),
+        )),
+        "expected propagation to keep the immediate caller def bridge: {prop:#}"
+    );
+    assert!(
+        !prop_data.contains(&(
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+            "app/runner.rb:def:seed:3".to_string(),
+        )),
+        "unexpected duplicate-callsite leakage should not bridge callee return into the method param def: {prop:#}"
+    );
+    assert!(
+        !prop_data.contains(&(
+            "app/runner.rb:use:out:6".to_string(),
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+        )),
+        "unexpected duplicate-callsite leakage should not treat return out as another bounce callsite: {prop:#}"
     );
 }
 
