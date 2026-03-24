@@ -247,6 +247,63 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_nested_two_arg_summary_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("pair.rs"),
+        r#"pub fn pair(a: i32, b: i32) -> i32 { b + 1 }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("wrap.rs"),
+        r#"pub fn wrap(a: i32, b: i32) -> i32 {
+    let v = crate::pair::pair(a, b);
+    v + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod wrap;
+mod pair;
+
+fn caller() {
+    let x = 1;
+    let y = 2;
+    let out = wrap::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod wrap;
+mod pair;
+
+fn caller() {
+    let x = 1;
+    let y = 3;
+    let out = wrap::wrap(x, y);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_cross_file_wrapper_noise_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -1632,6 +1689,55 @@ fn pdg_propagation_maps_multi_file_wrapper_return_without_leaking_irrelevant_arg
     assert!(
         !prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:7\""),
         "unexpected irrelevant arg bridge leaked through wrapper summary, got:\n{}",
+        prop
+    );
+}
+
+#[test]
+fn pdg_propagation_extends_nested_two_arg_summary_continuation_without_leaking_irrelevant_arg() {
+    let (_tmp, repo) = setup_cross_file_nested_two_arg_summary_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_dot(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "dot",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"pair.rs:def:b:1\""),
+        "expected bounded slice scope to keep the nested pair callee nodes in plain PDG, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"pair.rs:use:b:1\" -> \"main.rs:def:out:7\""),
+        "plain PDG should still avoid synthesizing the nested two-arg continuation bridge without propagation, got:\n{}",
+        pdg
+    );
+    assert!(
+        prop.contains("\"pair.rs:use:b:1\" -> \"main.rs:def:out:7\""),
+        "expected propagation to carry the relevant nested pair arg back into the caller result, got:\n{}",
+        prop
+    );
+    assert!(
+        prop.contains("\"main.rs:use:y:7\" -> \"main.rs:def:out:7\""),
+        "expected propagation to recover the caller-side bridge from the relevant arg, got:\n{}",
+        prop
+    );
+    assert!(
+        !prop.contains("\"main.rs:use:x:7\" -> \"main.rs:def:out:7\""),
+        "unexpected irrelevant caller arg bridge leaked through the nested two-arg summary, got:\n{}",
         prop
     );
 }

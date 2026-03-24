@@ -635,6 +635,39 @@ fn push_unique_edge(
     }
 }
 
+fn collect_nested_call_refs<'a>(
+    outer_callee_id: &str,
+    impacted_node_ids: &[String],
+    refs: &'a [Reference],
+    node_loc_by_id: &std::collections::HashMap<String, (String, u32)>,
+) -> Vec<&'a Reference> {
+    let impacted_locs: std::collections::HashSet<(String, u32)> = impacted_node_ids
+        .iter()
+        .filter_map(|id| node_loc_by_id.get(id).cloned())
+        .collect();
+    if impacted_locs.is_empty() {
+        return Vec::new();
+    }
+
+    refs.iter()
+        .filter(|nested| {
+            nested.kind == crate::ir::reference::RefKind::Call
+                && nested.provenance == crate::ir::reference::EdgeProvenance::CallGraph
+                && nested.from.0 == outer_callee_id
+                && impacted_locs.contains(&(nested.file.clone(), nested.line))
+        })
+        .collect()
+}
+
+fn has_nested_completion_candidate(
+    outer_callee_id: &str,
+    impacted_node_ids: &[String],
+    refs: &[Reference],
+    node_loc_by_id: &std::collections::HashMap<String, (String, u32)>,
+) -> bool {
+    !collect_nested_call_refs(outer_callee_id, impacted_node_ids, refs, node_loc_by_id).is_empty()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_nested_completion_bridges(
     pdg: &mut DataFlowGraph,
@@ -645,40 +678,81 @@ fn push_nested_completion_bridges(
     refs: &[Reference],
     summary_by_fn: &std::collections::HashMap<String, FunctionSummary>,
     node_loc_by_id: &std::collections::HashMap<String, (String, u32)>,
+    uses_by_loc: &std::collections::HashMap<(String, u32), Vec<String>>,
     remaining_hops: usize,
-) {
+) -> bool {
     if callsite_defs.is_empty() || remaining_hops == 0 {
-        return;
+        return false;
     }
 
-    for impacted in impacted_node_ids {
-        let Some((file, line)) = node_loc_by_id.get(impacted) else {
+    let impacted_set: std::collections::HashSet<&str> =
+        impacted_node_ids.iter().map(String::as_str).collect();
+    let mut propagated_any = false;
+
+    for nested_ref in
+        collect_nested_call_refs(outer_callee_id, impacted_node_ids, refs, node_loc_by_id)
+    {
+        let Some(nested_summary) = summary_by_fn.get(&nested_ref.to.0) else {
             continue;
         };
-        for nested_ref in refs.iter().filter(|nested| {
-            nested.kind == crate::ir::reference::RefKind::Call
-                && nested.provenance == crate::ir::reference::EdgeProvenance::CallGraph
-                && nested.from.0 == outer_callee_id
-                && nested.file == *file
-                && nested.line == *line
-        }) {
-            let Some(nested_summary) = summary_by_fn.get(&nested_ref.to.0) else {
-                continue;
+
+        let nested_callsite_uses = collect_callsite_uses(
+            uses_by_loc,
+            nested_ref.file.as_str(),
+            nested_ref.line,
+            nested_summary.inputs.len(),
+        );
+
+        let mut relevant_bindings: Vec<(String, String)> = if nested_callsite_uses.len()
+            == nested_summary.inputs.len()
+            && !nested_callsite_uses.is_empty()
+        {
+            nested_summary
+                .inputs
+                .iter()
+                .zip(nested_callsite_uses.iter())
+                .filter(|(_, use_id)| impacted_set.contains(use_id.as_str()))
+                .map(|(input, use_id)| (use_id.clone(), input.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        if relevant_bindings.is_empty() && nested_summary.inputs.len() == 1 {
+            let binding_sources: Vec<String> = if nested_callsite_uses.len() == 1 {
+                vec![nested_callsite_uses[0].clone()]
+            } else {
+                impacted_node_ids
+                    .iter()
+                    .filter(|impacted| {
+                        node_loc_by_id
+                            .get(impacted.as_str())
+                            .is_some_and(|(file, line)| {
+                                *file == nested_ref.file && *line == nested_ref.line
+                            })
+                    })
+                    .cloned()
+                    .collect()
             };
-            if nested_summary.inputs.len() != 1 {
-                continue;
-            }
             let nested_input = nested_summary.inputs[0].clone();
+            relevant_bindings = binding_sources
+                .into_iter()
+                .map(|binding_source| (binding_source, nested_input.clone()))
+                .collect();
+        }
+
+        for (binding_source, nested_input) in relevant_bindings {
             push_unique_edge(
                 pdg,
                 seen_edges,
-                impacted.clone(),
+                binding_source,
                 nested_input.clone(),
                 DependencyKind::Data,
             );
             for nested_flow in nested_summary.flows.iter().filter(|flow| {
                 flow.input_node_id == nested_input && !flow.impacted_node_ids.is_empty()
             }) {
+                propagated_any = true;
                 for nested_impacted in &nested_flow.impacted_node_ids {
                     for d in callsite_defs {
                         push_unique_edge(
@@ -690,7 +764,7 @@ fn push_nested_completion_bridges(
                         );
                     }
                 }
-                push_nested_completion_bridges(
+                propagated_any |= push_nested_completion_bridges(
                     pdg,
                     seen_edges,
                     nested_ref.to.0.as_str(),
@@ -699,11 +773,14 @@ fn push_nested_completion_bridges(
                     refs,
                     summary_by_fn,
                     node_loc_by_id,
+                    uses_by_loc,
                     remaining_hops.saturating_sub(1),
                 );
             }
         }
     }
+
+    propagated_any
 }
 
 fn collect_callsite_nodes(
@@ -897,18 +974,13 @@ impl PdgBuilder {
                             flow.input_node_id.clone(),
                             DependencyKind::Data,
                         );
-                        for impacted in &flow.impacted_node_ids {
-                            for d in &callsite_defs {
-                                push_unique_edge(
-                                    pdg,
-                                    &mut seen_edges,
-                                    impacted.clone(),
-                                    d.clone(),
-                                    DependencyKind::Data,
-                                );
-                            }
-                        }
-                        push_nested_completion_bridges(
+                        let requires_nested_validation = has_nested_completion_candidate(
+                            r.to.0.as_str(),
+                            &flow.impacted_node_ids,
+                            refs,
+                            &node_loc_by_id,
+                        );
+                        let nested_completion_found = push_nested_completion_bridges(
                             pdg,
                             &mut seen_edges,
                             r.to.0.as_str(),
@@ -917,9 +989,25 @@ impl PdgBuilder {
                             refs,
                             &summary_by_fn,
                             &node_loc_by_id,
+                            &uses_by_loc,
                             2,
                         );
-                        if callsite_defs.len() == 1 {
+                        let can_bridge_to_callsite_defs =
+                            !requires_nested_validation || nested_completion_found;
+                        if can_bridge_to_callsite_defs {
+                            for impacted in &flow.impacted_node_ids {
+                                for d in &callsite_defs {
+                                    push_unique_edge(
+                                        pdg,
+                                        &mut seen_edges,
+                                        impacted.clone(),
+                                        d.clone(),
+                                        DependencyKind::Data,
+                                    );
+                                }
+                            }
+                        }
+                        if callsite_defs.len() == 1 && can_bridge_to_callsite_defs {
                             push_unique_edge(
                                 pdg,
                                 &mut seen_edges,
@@ -939,18 +1027,13 @@ impl PdgBuilder {
                             flow.input_node_id.clone(),
                             DependencyKind::Data,
                         );
-                        for impacted in &flow.impacted_node_ids {
-                            for d in &callsite_defs {
-                                push_unique_edge(
-                                    pdg,
-                                    &mut seen_edges,
-                                    impacted.clone(),
-                                    d.clone(),
-                                    DependencyKind::Data,
-                                );
-                            }
-                        }
-                        push_nested_completion_bridges(
+                        let requires_nested_validation = has_nested_completion_candidate(
+                            r.to.0.as_str(),
+                            &flow.impacted_node_ids,
+                            refs,
+                            &node_loc_by_id,
+                        );
+                        let nested_completion_found = push_nested_completion_bridges(
                             pdg,
                             &mut seen_edges,
                             r.to.0.as_str(),
@@ -959,33 +1042,46 @@ impl PdgBuilder {
                             refs,
                             &summary_by_fn,
                             &node_loc_by_id,
+                            &uses_by_loc,
                             2,
                         );
-                    }
-                    if callsite_defs.len() == 1 {
-                        push_unique_edge(
-                            pdg,
-                            &mut seen_edges,
-                            only_use,
-                            callsite_defs[0].clone(),
-                            DependencyKind::Data,
-                        );
+                        let can_bridge_to_callsite_defs =
+                            !requires_nested_validation || nested_completion_found;
+                        if can_bridge_to_callsite_defs {
+                            for impacted in &flow.impacted_node_ids {
+                                for d in &callsite_defs {
+                                    push_unique_edge(
+                                        pdg,
+                                        &mut seen_edges,
+                                        impacted.clone(),
+                                        d.clone(),
+                                        DependencyKind::Data,
+                                    );
+                                }
+                            }
+                            if callsite_defs.len() == 1 {
+                                push_unique_edge(
+                                    pdg,
+                                    &mut seen_edges,
+                                    only_use.clone(),
+                                    callsite_defs[0].clone(),
+                                    DependencyKind::Data,
+                                );
+                            }
+                        }
                     }
                 } else if summary.inputs.len() == 1
                     && callsite_uses.is_empty()
                     && callsite_defs.len() == 1
                 {
                     for flow in &active_flows {
-                        for impacted in &flow.impacted_node_ids {
-                            push_unique_edge(
-                                pdg,
-                                &mut seen_edges,
-                                impacted.clone(),
-                                callsite_defs[0].clone(),
-                                DependencyKind::Data,
-                            );
-                        }
-                        push_nested_completion_bridges(
+                        let requires_nested_validation = has_nested_completion_candidate(
+                            r.to.0.as_str(),
+                            &flow.impacted_node_ids,
+                            refs,
+                            &node_loc_by_id,
+                        );
+                        let nested_completion_found = push_nested_completion_bridges(
                             pdg,
                             &mut seen_edges,
                             r.to.0.as_str(),
@@ -994,8 +1090,20 @@ impl PdgBuilder {
                             refs,
                             &summary_by_fn,
                             &node_loc_by_id,
+                            &uses_by_loc,
                             2,
                         );
+                        if !requires_nested_validation || nested_completion_found {
+                            for impacted in &flow.impacted_node_ids {
+                                push_unique_edge(
+                                    pdg,
+                                    &mut seen_edges,
+                                    impacted.clone(),
+                                    callsite_defs[0].clone(),
+                                    DependencyKind::Data,
+                                );
+                            }
+                        }
                     }
                 }
             }
