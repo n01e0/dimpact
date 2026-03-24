@@ -1,0 +1,236 @@
+{
+  "generated_by": "manual G12-3 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "define the bounded stitching policy that connects continuation chains on top of the existing bounded slice planner",
+  "context": {
+    "paired_design_notes": [
+      "docs/g12-1-bounded-continuation-multi-input-alias-stitching-memo.md",
+      "docs/g12-2-bounded-continuation-failure-eval-set.md",
+      "docs/g11-3-pdg-bounded-scope-expansion-policy.md"
+    ],
+    "problem_statement": [
+      "multi-input continuation is still too single-input biased at execution time",
+      "alias-result stitching is not yet a first-class execution family",
+      "planner bridge families and propagation/witness execution families are still partly misaligned",
+      "edge provenance alone is too weak to explain which continuation chain actually won"
+    ]
+  },
+  "goal": [
+    "define bounded continuation stitching on top of the selected bounded slice",
+    "treat multi-input continuation as an input-binding problem rather than only a summary-input-count problem",
+    "treat alias-result stitching as an independent bridge family",
+    "define the minimal bridge-execution provenance needed for later G12 tasks"
+  ],
+  "non_goal": [
+    "project-wide PDG or whole-program SSA",
+    "unbounded recursive continuation exploration",
+    "full parity across all languages in this task alone",
+    "replacing the existing bounded slice planner"
+  ],
+  "core_split": {
+    "scope_planner_responsibility": [
+      "select bounded files and symbols",
+      "retain bridge-family representatives",
+      "stop expansion at the selected bounded slice"
+    ],
+    "stitching_policy_responsibility": [
+      "connect selected files and symbols into bounded continuation chains",
+      "choose input bindings, summary bridges, nested bridges, and alias-result stitches",
+      "report the winning continuation chain compactly"
+    ]
+  },
+  "terms": {
+    "stitch_ready_anchor": "a selected direct-boundary, bridge-completion, or bridge-continuation symbol that can start a bounded continuation chain",
+    "bounded_stitching_chain": "a bounded ordered list of continuation execution steps built strictly within the selected bounded slice",
+    "binding_map": "a mapping from caller-side input nodes to callee summary input nodes, with explicit binding kinds",
+    "coarse_chain_family": "a compact family label used for representative selection, budgeting, and reporting"
+  },
+  "step_families": [
+    {
+      "id": "callsite_input_binding",
+      "role": "bind caller-side uses to callee summary inputs before continuation proceeds"
+    },
+    {
+      "id": "summary_return_bridge",
+      "role": "carry selected summary output/impact back toward the caller result"
+    },
+    {
+      "id": "nested_summary_bridge",
+      "role": "continue the chain through a nested callee without collapsing back to a single-input fallback"
+    },
+    {
+      "id": "alias_result_stitch",
+      "role": "carry an imported or nested result through temp/alias/result zones across wrapper and caller scopes"
+    },
+    {
+      "id": "require_relative_load",
+      "role": "record Ruby require_relative continuity as part of a mixed continuation chain"
+    }
+  ],
+  "binding_map": {
+    "required_fields": [
+      "caller_node_id",
+      "callee_input_node_id",
+      "binding_kind"
+    ],
+    "binding_kinds": [
+      "positional",
+      "reordered_positional",
+      "repeated",
+      "partial",
+      "literal_or_unknown_companion"
+    ],
+    "rules": [
+      "single-input cases still use the same binding-map contract",
+      "multi-input continuation must not treat zip-by-order as the canonical semantic contract",
+      "later bridge steps consume only the relevant subset selected by the binding map",
+      "unknown or literal companion slots are tracked explicitly instead of being silently ignored"
+    ]
+  },
+  "coarse_chain_families": [
+    "return_continuation",
+    "alias_result_stitch",
+    "require_relative_continuation",
+    "mixed_require_relative_alias_stitch",
+    "nested_multi_input_continuation"
+  ],
+  "chain_construction": [
+    {
+      "step": "A",
+      "name": "extract_stitch_ready_anchor",
+      "rules": [
+        "prefer selected bridge-continuation symbols first, then selected bridge-completion symbols, then direct-boundary symbols",
+        "same-seed same-family duplicates collapse to the representative that already won selected-vs-pruned reasoning"
+      ]
+    },
+    {
+      "step": "B",
+      "name": "build_binding_map",
+      "rules": [
+        "construct a binding map before summary or nested bridging begins",
+        "reordered, repeated, and partial bindings remain explicit rather than being normalized away",
+        "single-input fallback does not erase the binding-map abstraction"
+      ]
+    },
+    {
+      "step": "C",
+      "name": "apply_summary_and_nested_bridges",
+      "rules": [
+        "summary bridges consume only the binding-map subset that is actually selected",
+        "nested summaries may remain multi-input and must not immediately fall back to a single-input-only contract",
+        "caller-result bridges should be attached only for the relevant bound inputs"
+      ]
+    },
+    {
+      "step": "D",
+      "name": "apply_alias_result_stitch",
+      "rules": [
+        "alias-result stitching is a distinct step family, not just an accidental side-effect of summary return bridging",
+        "wrapper-local and caller-local alias zones may both participate in the same bounded chain",
+        "return-family and alias-result-family steps may coexist in one chain when needed"
+      ]
+    },
+    {
+      "step": "E",
+      "name": "record_require_relative_load_when_needed",
+      "rules": [
+        "Ruby mixed cases may include require_relative_load in the same chain as alias_result_stitch",
+        "require_relative provenance participates in chain reporting even when it is not itself a data-flow step"
+      ]
+    }
+  ],
+  "boundedness": {
+    "hard_rules": [
+      "stitching never reopens files or symbols outside the selected bounded slice",
+      "pruned candidates are not revived by stitching execution",
+      "scope widening remains a planner responsibility, not a stitching responsibility"
+    ],
+    "representative_budgets": {
+      "per_anchor_per_family": 1,
+      "per_seed_family": {
+        "return_continuation": 1,
+        "alias_result_stitch": 1,
+        "require_relative_continuation": 1,
+        "nested_multi_input_continuation": 1,
+        "mixed_require_relative_alias_stitch": 1
+      }
+    },
+    "depth_policy": [
+      "one selected binding map",
+      "one nested summary expansion layer",
+      "one alias-result stitching segment per locality",
+      "at most one coarse family transition inside the representative chain"
+    ]
+  },
+  "reporting": {
+    "keep_existing_edge_provenance": [
+      "call_graph",
+      "local_dfg",
+      "symbolic_propagation"
+    ],
+    "add_chain_provenance": [
+      "selected coarse chain family",
+      "selected step-family sequence",
+      "selected anchor",
+      "selected relevant binding-map entries"
+    ],
+    "compact_example": {
+      "bridge_execution_chain_compact": [
+        {
+          "family": "nested_multi_input_continuation",
+          "anchor_symbol_id": "rust:wrap.rs:fn:wrap:1",
+          "step_family": "callsite_input_binding",
+          "binding": [
+            "main.rs:use:y -> pair.rs:def:b"
+          ]
+        },
+        {
+          "family": "nested_multi_input_continuation",
+          "anchor_symbol_id": "rust:pair.rs:fn:pair:1",
+          "step_family": "nested_summary_bridge"
+        },
+        {
+          "family": "alias_result_stitch",
+          "anchor_symbol_id": "rust:wrap.rs:fn:wrap:1",
+          "step_family": "alias_result_stitch",
+          "stitch": [
+            "wrap.rs:def:tmp -> wrap.rs:def:alias -> main.rs:def:out"
+          ]
+        }
+      ]
+    }
+  },
+  "directly_targets_cases": [
+    {
+      "case_id": "rust-nested-two-arg-summary-continuation",
+      "policy_value": "binding-map-first continuation instead of single-input fallback"
+    },
+    {
+      "case_id": "rust-reordered-partial-input-binding-continuation",
+      "policy_value": "explicit reordered/partial binding kinds"
+    },
+    {
+      "case_id": "rust-wrapper-caller-double-alias-result-stitching",
+      "policy_value": "distinct alias-result stitch steps across wrapper and caller alias zones"
+    },
+    {
+      "case_id": "ruby-require-relative-alias-result-mixed-stitching",
+      "policy_value": "mixed require_relative and alias-result chain reporting"
+    }
+  ],
+  "needs_planner_followup": [
+    {
+      "case_id": "rust-alias-family-continuation-beyond-tier2",
+      "reason": "the stitching policy can explain how to chain it once selected, but planner-side family-aware continuation still has to retain the alias-family representative in scope"
+    }
+  ],
+  "fixed_decisions": [
+    "scope and stitching stay separate responsibilities",
+    "multi-input continuation is handled as a binding-map problem",
+    "alias-result stitching is a first-class execution family",
+    "continuation chains are represented as bounded step-family sequences",
+    "stitching stays strictly inside the selected bounded slice",
+    "representative selection uses family-aware budgets rather than only path-count budgets",
+    "bridge execution provenance must include compact chain-level reporting in addition to raw edge provenance"
+  ]
+}
