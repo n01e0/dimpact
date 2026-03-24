@@ -1070,6 +1070,54 @@ end
     (dir, path)
 }
 
+fn setup_ruby_require_relative_alias_duplicate_callsite_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::create_dir_all(path.join("app")).unwrap();
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"def bounce(value)
+  alias_value = value
+  return alias_value
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry(seed)
+  forwarded = seed
+  reply = bounce(forwarded)
+  echoed = reply
+  final = echoed
+  return final
+end
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"def bounce(value)
+  alias_value = value
+  return alias_value.to_s
+end
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_ruby_require_relative_no_paren_wrapper_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -1786,6 +1834,112 @@ fn pdg_propagation_extends_nested_two_arg_summary_continuation_without_leaking_i
         "unexpected irrelevant caller arg bridge leaked through the nested two-arg summary, got:\n{}",
         prop
     );
+}
+
+#[test]
+fn nested_two_arg_json_with_edges_only_adds_bridge_metadata_in_pdg_modes() {
+    let (_tmp, repo) = setup_cross_file_nested_two_arg_summary_repo();
+    let diff = diff_text(&repo);
+
+    let baseline = run_impact_json(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--format", "json", "--with-edges"],
+    );
+    let pdg = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-pdg",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+
+    let edge_pairs = |value: &serde_json::Value| -> std::collections::BTreeSet<(String, String)> {
+        value["edges"]
+            .as_array()
+            .expect("edges array")
+            .iter()
+            .map(|edge| {
+                (
+                    edge["from"].as_str().unwrap().to_string(),
+                    edge["to"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+
+    assert_eq!(edge_pairs(&baseline), edge_pairs(&pdg));
+    assert_eq!(edge_pairs(&pdg), edge_pairs(&prop));
+
+    let baseline_witness = &baseline["impacted_witnesses"]["rust:pair.rs:fn:pair:1"];
+    let pdg_witness = &pdg["impacted_witnesses"]["rust:pair.rs:fn:pair:1"];
+    let prop_witness = &prop["impacted_witnesses"]["rust:pair.rs:fn:pair:1"];
+
+    assert!(
+        baseline_witness["bridge_execution_family"].is_null()
+            && baseline_witness["slice_context"].is_null(),
+        "baseline should keep the nested pair witness free of stitched bridge metadata: {baseline:#}"
+    );
+
+    for (label, witness) in [("pdg", pdg_witness), ("propagation", prop_witness)] {
+        assert_eq!(
+            witness["bridge_execution_family"],
+            serde_json::json!("return_continuation"),
+            "{label} should surface wrapper-return stitching for the nested pair witness: {witness:#}"
+        );
+        assert!(
+            witness["bridge_execution_chain_compact"]
+                .as_array()
+                .is_some_and(|steps| steps.iter().any(|step| {
+                    step["step_family"] == "summary_return_bridge"
+                        && step["anchor_symbol_id"] == "rust:wrap.rs:fn:wrap:1"
+                        && step["anchor_path"] == "wrap.rs"
+                        && step["bridge_kind"] == "wrapper_return"
+                })),
+            "{label} should keep the wrapper-return bridge execution step for the nested pair witness: {witness:#}"
+        );
+        assert!(
+            witness_slice_file(witness, "pair.rs")["selection_reasons"]
+                .as_array()
+                .is_some_and(|reasons| reasons.iter().any(|reason| {
+                    reason["kind"] == "bridge_completion_file"
+                        && reason["via_symbol_id"] == "rust:wrap.rs:fn:wrap:1"
+                        && reason["via_path"] == "wrap.rs"
+                        && reason["bridge_kind"] == "wrapper_return"
+                        && reason["scoring"]["primary_evidence_kinds"]
+                            .as_array()
+                            .is_some_and(|kinds| {
+                                kinds
+                                    .iter()
+                                    .any(|kind| kind.as_str() == Some("assigned_result"))
+                                    && kinds
+                                        .iter()
+                                        .any(|kind| kind.as_str() == Some("param_to_return_flow"))
+                                    && kinds
+                                        .iter()
+                                        .any(|kind| kind.as_str() == Some("return_flow"))
+                            })
+                })),
+            "{label} should retain the multi-input nested stitching evidence on pair.rs: {witness:#}"
+        );
+    }
 }
 
 #[test]
@@ -3491,6 +3645,92 @@ fn ruby_require_relative_alias_caller_chain_avoids_leaking_duplicate_callsite_re
 }
 
 #[test]
+fn ruby_require_relative_caller_alias_duplicate_callsites_stay_pruned_in_pdg_and_propagation() {
+    let (_tmp, repo) = setup_ruby_require_relative_alias_duplicate_callsite_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callers",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+            "--with-edges",
+        ],
+    );
+
+    let data_pairs = |value: &serde_json::Value| -> std::collections::BTreeSet<(String, String)> {
+        value["edges"]
+            .as_array()
+            .expect("edges array")
+            .iter()
+            .filter(|edge| edge["kind"] == "data")
+            .map(|edge| {
+                (
+                    edge["from"].as_str().unwrap().to_string(),
+                    edge["to"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+
+    let pdg_data = data_pairs(&pdg);
+    let prop_data = data_pairs(&prop);
+
+    assert!(
+        pdg_data.is_empty(),
+        "plain PDG should not stitch Ruby require_relative caller-alias bridges on its own: {pdg:#}"
+    );
+    assert!(
+        prop_data.contains(&(
+            "app/runner.rb:use:forwarded:5".to_string(),
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+        )),
+        "expected propagation to keep the real caller-alias bridge into bounce(forwarded): {prop:#}"
+    );
+    assert!(
+        prop_data.contains(&(
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+            "app/runner.rb:def:reply:5".to_string(),
+        )),
+        "expected propagation to keep the immediate caller def bridge for reply: {prop:#}"
+    );
+    assert!(
+        !prop_data.contains(&(
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+            "app/runner.rb:def:seed:3".to_string(),
+        )),
+        "unexpected duplicate-callsite leakage should not bridge the callee return into the method param def: {prop:#}"
+    );
+    assert!(
+        !prop_data.contains(&(
+            "app/runner.rb:use:final:8".to_string(),
+            "ruby:lib/service.rb:method:bounce:1".to_string(),
+        )),
+        "unexpected duplicate-callsite leakage should not treat the later caller alias as another bounce callsite: {prop:#}"
+    );
+}
+
+#[test]
 fn ruby_require_relative_no_paren_wrapper_recovers_caller_arg_and_callee_param_scope() {
     let (_tmp, repo) = setup_ruby_require_relative_no_paren_wrapper_repo();
     let diff = diff_text(&repo);
@@ -4131,6 +4371,49 @@ fn per_seed_diff_mode_propagation_keeps_imported_result_witness_compact() {
                     && step["bridge_kind"] == "boundary_alias_continuation"
             })),
         "expected imported-result witness to expose alias-result stitching provenance: {grouped:#?}"
+    );
+}
+
+#[test]
+fn per_seed_diff_mode_propagation_keeps_nested_two_arg_bridge_reason() {
+    let (_tmp, repo) = setup_cross_file_nested_two_arg_summary_repo();
+    let diff = diff_text(&repo);
+
+    let grouped = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+
+    let witness = &grouped
+        .as_array()
+        .expect("per-seed top-level array")
+        .first()
+        .expect("single per-seed output")["impacts"][0]["output"]["impacted_witnesses"]["rust:pair.rs:fn:pair:1"];
+    assert!(
+        witness_slice_file(witness, "pair.rs")["selection_reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:wrap.rs:fn:wrap:1"
+                    && reason["bridge_kind"] == "wrapper_return"
+                    && reason["scoring"]["primary_evidence_kinds"]
+                        .as_array()
+                        .is_some_and(|kinds| {
+                            kinds
+                                .iter()
+                                .any(|kind| kind.as_str() == Some("param_to_return_flow"))
+                        })
+            })),
+        "expected per-seed propagation output to keep the nested two-arg stitching reason on pair.rs: {grouped:#?}"
     );
 }
 
