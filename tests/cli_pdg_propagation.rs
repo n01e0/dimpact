@@ -1414,7 +1414,7 @@ fn witness_slice_file<'a>(witness: &'a serde_json::Value, path: &str) -> &'a ser
         .unwrap_or_else(|| panic!("missing witness slice_context file for {path}: {witness:#}"))
 }
 
-fn witness_slice_paths<'a>(witness: &'a serde_json::Value) -> Vec<&'a str> {
+fn witness_slice_paths(witness: &serde_json::Value) -> Vec<&str> {
     witness["slice_context"]["selected_files_on_path"]
         .as_array()
         .expect("witness slice_context.selected_files_on_path array")
@@ -4022,6 +4022,40 @@ fn per_seed_diff_mode_propagation_keeps_two_hop_wrapper_witness_compact() {
             })),
         "expected leaf witness slice context to keep the continuation-tier wrapper-return reason: {grouped:#?}"
     );
+    assert_eq!(
+        witness["bridge_execution_family"],
+        serde_json::json!("return_continuation")
+    );
+    let bridge_execution_chain = witness["bridge_execution_chain_compact"]
+        .as_array()
+        .expect("bridge execution chain array");
+    assert!(
+        bridge_execution_chain.iter().any(|step| {
+            step["step_family"] == "callsite_input_binding"
+                && step["anchor_symbol_id"] == "rust:wrap.rs:fn:wrap:3"
+                && step["anchor_path"] == "wrap.rs"
+        }),
+        "expected witness to expose the selected boundary entry step: {grouped:#?}"
+    );
+    assert!(
+        bridge_execution_chain.iter().any(|step| {
+            step["step_family"] == "summary_return_bridge"
+                && step["family"] == "return_continuation"
+                && step["anchor_symbol_id"] == "rust:wrap.rs:fn:wrap:3"
+                && step["bridge_kind"] == "wrapper_return"
+        }),
+        "expected witness to expose the bridge completion step: {grouped:#?}"
+    );
+    assert!(
+        bridge_execution_chain.iter().any(|step| {
+            step["step_family"] == "nested_summary_bridge"
+                && step["family"] == "return_continuation"
+                && step["anchor_symbol_id"] == "rust:step.rs:fn:step:3"
+                && step["anchor_path"] == "step.rs"
+                && step["bridge_kind"] == "wrapper_return"
+        }),
+        "expected witness to expose the continuation-tier bridge execution step: {grouped:#?}"
+    );
 }
 
 #[test]
@@ -4081,6 +4115,22 @@ fn per_seed_diff_mode_propagation_keeps_imported_result_witness_compact() {
     assert_eq!(
         witness["kind_chain_compact"],
         serde_json::json!(["call", "call"])
+    );
+    assert_eq!(
+        witness["bridge_execution_family"],
+        serde_json::json!("alias_result_stitch")
+    );
+    assert!(
+        witness["bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "alias_result_stitch"
+                    && step["family"] == "alias_result_stitch"
+                    && step["anchor_symbol_id"] == "rust:adapter.rs:fn:wrap:3"
+                    && step["anchor_path"] == "adapter.rs"
+                    && step["bridge_kind"] == "boundary_alias_continuation"
+            })),
+        "expected imported-result witness to expose alias-result stitching provenance: {grouped:#?}"
     );
 }
 
@@ -4151,6 +4201,34 @@ fn per_seed_diff_mode_ruby_two_hop_require_relative_propagation_keeps_compact_wi
                     && reason["bridge_kind"] == "wrapper_return"
             })),
         "expected Ruby leaf witness slice context to retain the tier-3 wrapper-return reason: {grouped:#?}"
+    );
+    assert_eq!(
+        witness["bridge_execution_family"],
+        serde_json::json!("require_relative_continuation")
+    );
+    assert!(
+        witness["bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "require_relative_load"
+                    && step["family"] == "require_relative_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && step["anchor_path"] == "lib/step.rb"
+                    && step["bridge_kind"] == "require_relative_chain"
+            })),
+        "expected Ruby two-hop wrapper witness to expose require_relative bridge execution provenance: {grouped:#?}"
+    );
+    assert!(
+        witness["bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "nested_summary_bridge"
+                    && step["family"] == "return_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && step["anchor_path"] == "lib/step.rb"
+                    && step["bridge_kind"] == "wrapper_return"
+            })),
+        "expected Ruby two-hop wrapper witness to keep the nested bridge execution step alongside require_relative provenance: {grouped:#?}"
     );
 }
 
