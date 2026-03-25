@@ -3336,6 +3336,55 @@ fn pdg_json_reports_winning_bridge_chain_and_supporting_steps_for_ruby_alias_clo
 }
 
 #[test]
+fn pdg_json_keeps_bounded_slice_reason_aligned_with_ruby_alias_winning_chain() {
+    let (_tmp, repo) = setup_ruby_require_relative_alias_closer_vs_return_sibling_repo();
+    let diff = diff_text(&repo);
+
+    let output = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--with-edges",
+            "--format",
+            "json",
+        ],
+    );
+
+    let slice_selection = &output["summary"]["slice_selection"];
+    let alias_leaf = slice_selection_file(slice_selection, "lib/alias_leaf.rb");
+    assert!(
+        alias_leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && reason["via_path"] == "lib/service.rb"
+                    && reason["bridge_kind"] == "boundary_alias_continuation"
+            })),
+        "expected bounded slice selection to keep the alias completion reason on lib/alias_leaf.rb: {output:#?}"
+    );
+
+    let witness = &output["impacted_witnesses"]["ruby:lib/alias_leaf.rb:method:alias_finish:1"];
+    assert!(
+        witness["winning_bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "alias_result_stitch"
+                    && step["anchor_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && step["anchor_path"] == "lib/service.rb"
+                    && step["bridge_kind"] == "boundary_alias_continuation"
+            })),
+        "expected winning bridge chain to stay aligned with the bounded slice alias reason: {output:#?}"
+    );
+}
+
+#[test]
 fn pdg_slice_selection_prefers_ruby_alias_closer_over_return_looking_required_sibling() {
     let (_tmp, repo) = setup_ruby_require_relative_alias_closer_vs_return_sibling_repo();
     let diff = diff_text(&repo);
@@ -4888,6 +4937,55 @@ fn propagation_json_reports_winning_bridge_chain_and_supporting_steps_for_ruby_t
                     && step["bridge_kind"] == "require_relative_chain"
             })),
         "expected propagation output to retain require_relative provenance as supporting context: {output:#?}"
+    );
+}
+
+#[test]
+fn propagation_json_keeps_bounded_slice_reason_aligned_with_ruby_wrapper_winning_chain() {
+    let (_tmp, repo) = setup_ruby_two_hop_require_relative_return_repo();
+    let diff = diff_text(&repo);
+
+    let output = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--with-edges",
+            "--format",
+            "json",
+        ],
+    );
+
+    let slice_selection = &output["summary"]["slice_selection"];
+    let leaf = slice_selection_file(slice_selection, "lib/leaf.rb");
+    assert!(
+        leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 3
+                    && reason["kind"] == "bridge_continuation_file"
+                    && reason["via_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && reason["via_path"] == "lib/step.rb"
+                    && reason["bridge_kind"] == "wrapper_return"
+            })),
+        "expected bounded slice selection to keep the wrapper-return continuation reason on lib/leaf.rb: {output:#?}"
+    );
+
+    let witness = &output["impacted_witnesses"]["ruby:lib/leaf.rb:method:leaf:2"];
+    assert!(
+        witness["winning_bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "nested_summary_bridge"
+                    && step["anchor_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && step["anchor_path"] == "lib/step.rb"
+                    && step["bridge_kind"] == "wrapper_return"
+            })),
+        "expected winning bridge chain to stay aligned with the bounded slice wrapper-return reason: {output:#?}"
     );
 }
 
