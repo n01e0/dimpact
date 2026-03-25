@@ -3273,6 +3273,69 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
 }
 
 #[test]
+fn pdg_json_reports_winning_bridge_chain_and_supporting_steps_for_ruby_alias_closer() {
+    let (_tmp, repo) = setup_ruby_require_relative_alias_closer_vs_return_sibling_repo();
+    let diff = diff_text(&repo);
+
+    let output = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-pdg",
+            "--with-edges",
+            "--format",
+            "json",
+        ],
+    );
+
+    let witness = &output["impacted_witnesses"]["ruby:lib/alias_leaf.rb:method:alias_finish:1"];
+    assert_eq!(
+        witness["bridge_execution_family"],
+        serde_json::json!("alias_result_stitch")
+    );
+    assert_eq!(
+        witness["bridge_execution_chain_compact"],
+        witness["winning_bridge_execution_chain_compact"]
+    );
+    assert!(
+        witness["winning_bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "alias_result_stitch"
+                    && step["family"] == "alias_result_stitch"
+                    && step["anchor_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && step["anchor_path"] == "lib/service.rb"
+                    && step["bridge_kind"] == "boundary_alias_continuation"
+            })),
+        "expected PDG output to expose the alias-result winning chain step: {output:#?}"
+    );
+    assert!(
+        witness["bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps
+                .iter()
+                .all(|step| { step["step_family"] != "require_relative_load" })),
+        "expected PDG winning chain to exclude require_relative support-only steps: {output:#?}"
+    );
+    assert!(
+        witness["observed_supporting_steps_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "require_relative_load"
+                    && step["family"] == "require_relative_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && step["anchor_path"] == "lib/service.rb"
+                    && step["bridge_kind"] == "require_relative_chain"
+            })),
+        "expected PDG output to keep require_relative provenance as supporting context: {output:#?}"
+    );
+}
+
+#[test]
 fn pdg_slice_selection_prefers_ruby_alias_closer_over_return_looking_required_sibling() {
     let (_tmp, repo) = setup_ruby_require_relative_alias_closer_vs_return_sibling_repo();
     let diff = diff_text(&repo);
@@ -4762,6 +4825,69 @@ fn per_seed_diff_mode_propagation_keeps_nested_two_arg_bridge_reason() {
                         })
             })),
         "expected per-seed propagation output to keep the nested two-arg stitching reason on pair.rs: {grouped:#?}"
+    );
+}
+
+#[test]
+fn propagation_json_reports_winning_bridge_chain_and_supporting_steps_for_ruby_two_hop_wrapper() {
+    let (_tmp, repo) = setup_ruby_two_hop_require_relative_return_repo();
+    let diff = diff_text(&repo);
+
+    let output = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--with-edges",
+            "--format",
+            "json",
+        ],
+    );
+
+    let witness = &output["impacted_witnesses"]["ruby:lib/leaf.rb:method:leaf:2"];
+    assert_eq!(
+        witness["bridge_execution_family"],
+        serde_json::json!("return_continuation")
+    );
+    assert_eq!(
+        witness["bridge_execution_chain_compact"],
+        witness["winning_bridge_execution_chain_compact"]
+    );
+    assert!(
+        witness["winning_bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "nested_summary_bridge"
+                    && step["family"] == "return_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && step["anchor_path"] == "lib/step.rb"
+                    && step["bridge_kind"] == "wrapper_return"
+            })),
+        "expected propagation output to keep the wrapper-return winning chain step: {output:#?}"
+    );
+    assert!(
+        witness["bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps
+                .iter()
+                .all(|step| { step["step_family"] != "require_relative_load" })),
+        "expected propagation winning chain to stay free of require_relative support-only steps: {output:#?}"
+    );
+    assert!(
+        witness["observed_supporting_steps_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "require_relative_load"
+                    && step["family"] == "require_relative_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && step["anchor_path"] == "lib/step.rb"
+                    && step["bridge_kind"] == "require_relative_chain"
+            })),
+        "expected propagation output to retain require_relative provenance as supporting context: {output:#?}"
     );
 }
 
