@@ -1461,7 +1461,9 @@ enum SliceSelectionTier {
 
 const PER_BOUNDARY_SIDE_TIER2_FILES_MAX: usize = 1;
 const PER_SEED_TIER2_FILES_MAX: usize = 2;
-const PER_SEED_TIER3_FILES_MAX: usize = 1;
+// Keep stitched tier-3 scope small, but allow one continuation per bridge family.
+const PER_SEED_TIER3_FILES_MAX: usize = 2;
+const PER_SEED_TIER3_FILES_PER_BRIDGE_KIND_MAX: usize = 1;
 
 fn slice_selection_tier_value(tier: SliceSelectionTier) -> u8 {
     match tier {
@@ -2748,12 +2750,25 @@ fn plan_bounded_slice(
             &mut tier2_semantic_evidence_by_symbol_id,
         );
         let mut selected_continuation_paths = std::collections::BTreeSet::new();
+        let mut selected_continuation_bridge_kinds = std::collections::BTreeMap::new();
         for candidate in continuation_candidates {
             if selected_continuation_paths.contains(&candidate.path) {
                 seed_selection.add_reason(
                     candidate.path.as_str(),
                     make_continuation_reason(seed.id.0.as_str(), &candidate),
                 );
+                continue;
+            }
+            let selected_bridge_kind_count = selected_continuation_bridge_kinds
+                .get(&candidate.bridge_kind)
+                .copied()
+                .unwrap_or_default();
+            if selected_bridge_kind_count >= PER_SEED_TIER3_FILES_PER_BRIDGE_KIND_MAX {
+                seed_selection.add_pruned_candidate(make_continuation_pruned_candidate(
+                    seed.id.0.as_str(),
+                    &candidate,
+                    ImpactSlicePruneReason::BridgeBudgetExhausted,
+                ));
                 continue;
             }
             if selected_continuation_paths.len() >= PER_SEED_TIER3_FILES_MAX {
@@ -2769,6 +2784,9 @@ fn plan_bounded_slice(
                 make_continuation_reason(seed.id.0.as_str(), &candidate),
             );
             selected_continuation_paths.insert(candidate.path);
+            *selected_continuation_bridge_kinds
+                .entry(candidate.bridge_kind)
+                .or_insert(0usize) += 1;
         }
 
         overall.merge(&seed_selection);
@@ -4571,6 +4589,266 @@ fn caller() -> i32 {
             }]
         );
         assert!(plan.slice_selection.pruned_candidates.is_empty());
+    }
+
+    #[test]
+    fn bounded_slice_plan_allows_distinct_continuation_bridge_families_to_coexist() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let alias_wrapper = test_symbol(
+            "rust:alias_wrapper.rs:fn:wrap_alias:3",
+            "wrap_alias",
+            "alias_wrapper.rs",
+            3,
+        );
+        let return_wrapper = test_symbol(
+            "rust:return_wrapper.rs:fn:wrap_return:3",
+            "wrap_return",
+            "return_wrapper.rs",
+            3,
+        );
+        let value = test_symbol("rust:value.rs:fn:make:1", "make", "value.rs", 1);
+        let leaf = test_symbol("rust:leaf.rs:fn:leaf:1", "leaf", "leaf.rs", 1);
+        let out = test_symbol("rust:out.rs:fn:alias_out:1", "alias_out", "out.rs", 1);
+        let final_leaf = test_symbol(
+            "rust:final_leaf.rs:fn:finish:1",
+            "finish",
+            "final_leaf.rs",
+            1,
+        );
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            alias_wrapper.clone(),
+            return_wrapper.clone(),
+            value.clone(),
+            leaf.clone(),
+            out.clone(),
+            final_leaf.clone(),
+        ]);
+        let refs = vec![
+            call_ref(
+                seed.id.0.as_str(),
+                alias_wrapper.id.0.as_str(),
+                "main.rs",
+                4,
+            ),
+            call_ref(
+                seed.id.0.as_str(),
+                return_wrapper.id.0.as_str(),
+                "main.rs",
+                5,
+            ),
+            call_ref(
+                alias_wrapper.id.0.as_str(),
+                value.id.0.as_str(),
+                "alias_wrapper.rs",
+                4,
+            ),
+            call_ref(
+                return_wrapper.id.0.as_str(),
+                leaf.id.0.as_str(),
+                "return_wrapper.rs",
+                4,
+            ),
+            call_ref(value.id.0.as_str(), out.id.0.as_str(), "value.rs", 3),
+            call_ref(leaf.id.0.as_str(), final_leaf.id.0.as_str(), "leaf.rs", 4),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        let value_file = slice_selection_file(&plan.slice_selection, "value.rs");
+        assert_eq!(
+            value_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("rust:alias_wrapper.rs:fn:wrap_alias:3".to_string()),
+                via_path: Some("alias_wrapper.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AliasChain,
+                        ImpactSliceEvidenceKind::AssignedResult,
+                    ],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    4,
+                    "value.rs",
+                )),
+            }]
+        );
+
+        let out_file = slice_selection_file(&plan.slice_selection, "out.rs");
+        assert_eq!(
+            out_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 3,
+                kind: ImpactSliceReasonKind::BridgeContinuationFile,
+                via_symbol_id: Some("rust:value.rs:fn:make:1".to_string()),
+                via_path: Some("value.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AliasChain,
+                        ImpactSliceEvidenceKind::AssignedResult,
+                    ],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    3,
+                    "out.rs",
+                )),
+            }]
+        );
+
+        let final_leaf_file = slice_selection_file(&plan.slice_selection, "final_leaf.rs");
+        assert_eq!(
+            final_leaf_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 3,
+                kind: ImpactSliceReasonKind::BridgeContinuationFile,
+                via_symbol_id: Some("rust:leaf.rs:fn:leaf:1".to_string()),
+                via_path: Some("leaf.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    4,
+                    "final_leaf.rs",
+                )),
+            }]
+        );
+
+        assert!(
+            plan.cache_update_paths.contains(&"out.rs".to_string())
+                && plan
+                    .cache_update_paths
+                    .contains(&"final_leaf.rs".to_string())
+        );
+        assert!(plan.slice_selection.pruned_candidates.is_empty());
+    }
+
+    #[test]
+    fn bounded_slice_plan_limits_continuation_budget_per_bridge_family() {
+        let seed = test_symbol("rust:main.rs:fn:caller:1", "caller", "main.rs", 1);
+        let wrap_a = test_symbol("rust:a_wrapper.rs:fn:wrap_a:3", "wrap_a", "a_wrapper.rs", 3);
+        let wrap_b = test_symbol("rust:b_wrapper.rs:fn:wrap_b:3", "wrap_b", "b_wrapper.rs", 3);
+        let leaf_a = test_symbol("rust:a_leaf.rs:fn:leaf_a:1", "leaf_a", "a_leaf.rs", 1);
+        let leaf_b = test_symbol("rust:b_leaf.rs:fn:leaf_b:1", "leaf_b", "b_leaf.rs", 1);
+        let final_a = test_symbol("rust:a_final.rs:fn:final_a:1", "final_a", "a_final.rs", 1);
+        let final_b = test_symbol("rust:b_final.rs:fn:final_b:1", "final_b", "b_final.rs", 1);
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            wrap_a.clone(),
+            wrap_b.clone(),
+            leaf_a.clone(),
+            leaf_b.clone(),
+            final_a.clone(),
+            final_b.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), wrap_a.id.0.as_str(), "main.rs", 4),
+            call_ref(seed.id.0.as_str(), wrap_b.id.0.as_str(), "main.rs", 5),
+            call_ref(
+                wrap_a.id.0.as_str(),
+                leaf_a.id.0.as_str(),
+                "a_wrapper.rs",
+                4,
+            ),
+            call_ref(
+                wrap_b.id.0.as_str(),
+                leaf_b.id.0.as_str(),
+                "b_wrapper.rs",
+                4,
+            ),
+            call_ref(leaf_a.id.0.as_str(), final_a.id.0.as_str(), "a_leaf.rs", 4),
+            call_ref(leaf_b.id.0.as_str(), final_b.id.0.as_str(), "b_leaf.rs", 4),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "a_final.rs".to_string(),
+                "a_leaf.rs".to_string(),
+                "a_wrapper.rs".to_string(),
+                "b_leaf.rs".to_string(),
+                "b_wrapper.rs".to_string(),
+                "main.rs".to_string(),
+            ]
+        );
+
+        let a_final_file = slice_selection_file(&plan.slice_selection, "a_final.rs");
+        assert_eq!(
+            a_final_file.reasons,
+            vec![ImpactSliceReasonMetadata {
+                seed_symbol_id: seed.id.0.clone(),
+                tier: 3,
+                kind: ImpactSliceReasonKind::BridgeContinuationFile,
+                via_symbol_id: Some("rust:a_leaf.rs:fn:leaf_a:1".to_string()),
+                via_path: Some("a_leaf.rs".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: Some(test_tier2_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![
+                        ImpactSliceEvidenceKind::AssignedResult,
+                        ImpactSliceEvidenceKind::ReturnFlow,
+                    ],
+                    vec![
+                        ImpactSliceEvidenceKind::CallsitePositionHint,
+                        ImpactSliceEvidenceKind::NamePathHint,
+                    ],
+                    4,
+                    "a_final.rs",
+                )),
+            }]
+        );
+        assert!(
+            plan.slice_selection
+                .pruned_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.path == "b_final.rs"
+                        && candidate.tier == 3
+                        && candidate.prune_reason == ImpactSlicePruneReason::BridgeBudgetExhausted
+                        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+                        && candidate.via_symbol_id.as_deref() == Some("rust:b_leaf.rs:fn:leaf_b:1")
+                        && candidate.via_path.as_deref() == Some("b_leaf.rs")
+                }),
+            "expected second wrapper-return continuation family member to be pruned once the per-family budget is spent: {:#?}",
+            plan.slice_selection.pruned_candidates
+        );
     }
 
     #[test]
