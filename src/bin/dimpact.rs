@@ -1778,17 +1778,18 @@ fn tier2_scoring_summary(
         || completion_return_hint
         || completion_alias_hint
         || completion_noise_hint;
-    let has_param_to_return_flow = semantic_evidence.param_to_return_flow
-        && !completion_return_hint
-        && !completion_alias_hint
-        && !completion_noise_hint;
+    let has_semantic_param_to_return_flow =
+        semantic_evidence.param_to_return_flow && !completion_noise_hint;
+    let has_return_param_to_return_flow =
+        has_semantic_param_to_return_flow && !completion_return_hint && !completion_alias_hint;
+    let has_alias_param_to_return_flow = has_semantic_param_to_return_flow && completion_alias_hint;
     let mut negative_evidence_kinds = Vec::new();
     if completion_return_hint && completion_noise_hint {
         negative_evidence_kinds.push(ImpactSliceNegativeEvidenceKind::NoisyReturnHint);
     }
 
     let lane = if completion_return_hint
-        || has_param_to_return_flow
+        || has_return_param_to_return_flow
         || (boundary_wrapper_hint
             && !completion_alias_hint
             && !completion_noise_hint
@@ -1803,12 +1804,12 @@ fn tier2_scoring_summary(
     match lane {
         ImpactSliceCandidateLane::ReturnContinuation => {
             if completion_return_hint
-                || has_param_to_return_flow
+                || has_return_param_to_return_flow
                 || (!completion_alias_hint && !completion_noise_hint)
             {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::ReturnFlow);
             }
-            if has_param_to_return_flow {
+            if has_return_param_to_return_flow {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::ParamToReturnFlow);
             }
             if boundary_wrapper_hint || call_line == side_max_call_line {
@@ -1819,7 +1820,7 @@ fn tier2_scoring_summary(
             if completion_alias_hint {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::AliasChain);
             }
-            if has_param_to_return_flow {
+            if has_alias_param_to_return_flow {
                 primary_evidence_kinds.push(ImpactSliceEvidenceKind::ParamToReturnFlow);
             }
             if boundary_wrapper_hint || !completion_noise_hint {
@@ -1856,7 +1857,9 @@ fn tier2_scoring_summary(
     negative_evidence_kinds.sort_by_key(|kind| negative_evidence_kind_key(*kind));
     negative_evidence_kinds.dedup();
 
-    let support = if has_param_to_return_flow {
+    let has_semantic_stitch_support =
+        has_return_param_to_return_flow || has_alias_param_to_return_flow;
+    let support = if has_semantic_stitch_support {
         Some(ImpactSliceCandidateSupportMetadata {
             local_dfg_support: true,
             ..ImpactSliceCandidateSupportMetadata::default()
@@ -1864,7 +1867,7 @@ fn tier2_scoring_summary(
     } else {
         None
     };
-    let semantic_support_rank = if has_param_to_return_flow {
+    let semantic_support_rank = if has_semantic_stitch_support {
         semantic_evidence.semantic_support_rank()
     } else {
         0
@@ -1891,7 +1894,40 @@ fn tier2_scoring_summary(
     }
 }
 
+fn candidate_has_primary_evidence(
+    candidate: &Tier2Candidate,
+    kind: ImpactSliceEvidenceKind,
+) -> bool {
+    candidate.scoring.primary_evidence_kinds.contains(&kind)
+}
+
+fn candidate_is_semantic_alias_stitch_closer(candidate: &Tier2Candidate) -> bool {
+    candidate.scoring.lane == ImpactSliceCandidateLane::AliasContinuation
+        && candidate_has_primary_evidence(candidate, ImpactSliceEvidenceKind::AliasChain)
+        && candidate_has_primary_evidence(candidate, ImpactSliceEvidenceKind::ParamToReturnFlow)
+        && candidate.scoring.score_tuple.semantic_support_rank > 0
+        && candidate
+            .scoring
+            .support
+            .as_ref()
+            .is_some_and(|support| support.local_dfg_support)
+}
+
+fn candidate_is_lexical_return_continuation(candidate: &Tier2Candidate) -> bool {
+    candidate.scoring.lane == ImpactSliceCandidateLane::ReturnContinuation
+        && !candidate_has_primary_evidence(candidate, ImpactSliceEvidenceKind::ParamToReturnFlow)
+        && candidate.scoring.score_tuple.semantic_support_rank == 0
+        && !candidate_has_helper_noise_signal(candidate)
+}
+
 fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp::Ordering {
+    if candidate_is_semantic_alias_stitch_closer(a) && candidate_is_lexical_return_continuation(b) {
+        return std::cmp::Ordering::Less;
+    }
+    if candidate_is_semantic_alias_stitch_closer(b) && candidate_is_lexical_return_continuation(a) {
+        return std::cmp::Ordering::Greater;
+    }
+
     a.scoring
         .score_tuple
         .source_rank
@@ -4515,6 +4551,147 @@ fn caller() -> i32 {
             }]
         );
         assert!(plan.slice_selection.pruned_candidates.is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn bounded_slice_plan_prefers_semantic_alias_closer_over_return_looking_sibling() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("value.rs"),
+            "pub fn make(a: i32) -> i32 {\n    let alias = a;\n    alias\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("final.rs"),
+            "pub fn finalize(a: i32) -> i32 {\n    a + 1\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("adapter.rs"),
+            "use crate::final;\nuse crate::value;\n\npub fn wrap(a: i32) -> i32 {\n    let keep = value::make(a);\n    let _audit = final::finalize(a);\n    keep\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("main.rs"),
+            "mod adapter;\nmod final;\nmod value;\n\nfn caller() {\n    let input = 7;\n    let out = adapter::wrap(input);\n    println!(\"{}\", out);\n}\n",
+        )
+        .unwrap();
+
+        let seed = dimpact::Symbol {
+            id: SymbolId("rust:main.rs:fn:caller:5".to_string()),
+            name: "caller".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "main.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 5,
+                end_line: 9,
+            },
+            language: "rust".to_string(),
+        };
+        let adapter = dimpact::Symbol {
+            id: SymbolId("rust:adapter.rs:fn:wrap:4".to_string()),
+            name: "wrap".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "adapter.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 4,
+                end_line: 8,
+            },
+            language: "rust".to_string(),
+        };
+        let value = dimpact::Symbol {
+            id: SymbolId("rust:value.rs:fn:make:1".to_string()),
+            name: "make".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "value.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 1,
+                end_line: 4,
+            },
+            language: "rust".to_string(),
+        };
+        let final_symbol = dimpact::Symbol {
+            id: SymbolId("rust:final.rs:fn:finalize:1".to_string()),
+            name: "finalize".to_string(),
+            kind: dimpact::SymbolKind::Function,
+            file: "final.rs".to_string(),
+            range: dimpact::TextRange {
+                start_line: 1,
+                end_line: 3,
+            },
+            language: "rust".to_string(),
+        };
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            adapter.clone(),
+            value.clone(),
+            final_symbol.clone(),
+        ]);
+        let refs = vec![
+            call_ref(seed.id.0.as_str(), adapter.id.0.as_str(), "main.rs", 7),
+            call_ref(adapter.id.0.as_str(), value.id.0.as_str(), "adapter.rs", 5),
+            call_ref(
+                adapter.id.0.as_str(),
+                final_symbol.id.0.as_str(),
+                "adapter.rs",
+                6,
+            ),
+        ];
+
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(root).expect("chdir temp repo");
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+        std::env::set_current_dir(cwd).expect("restore cwd");
+
+        let value_file = slice_selection_file(&plan.slice_selection, "value.rs");
+        assert!(value_file.reasons.iter().any(|reason| {
+            reason.kind == ImpactSliceReasonKind::BridgeCompletionFile
+                && reason.bridge_kind == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
+                && reason.scoring.as_ref().is_some_and(|scoring| {
+                    scoring.lane == ImpactSliceCandidateLane::AliasContinuation
+                        && scoring
+                            .primary_evidence_kinds
+                            .contains(&ImpactSliceEvidenceKind::AliasChain)
+                        && scoring
+                            .primary_evidence_kinds
+                            .contains(&ImpactSliceEvidenceKind::ParamToReturnFlow)
+                        && scoring.score_tuple.semantic_support_rank > 0
+                        && scoring
+                            .support
+                            .as_ref()
+                            .is_some_and(|support| support.local_dfg_support)
+                })
+        }));
+        assert!(
+            plan.slice_selection
+                .files
+                .iter()
+                .all(|file| file.path != "final.rs"),
+            "expected return-looking sibling to stay out of the selected slice: {:#?}",
+            plan.slice_selection.files
+        );
+        assert!(
+            plan.slice_selection
+                .pruned_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.path == "final.rs"
+                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+                }),
+            "expected final.rs to remain only as the weaker ranked-out stitched sibling: {:#?}",
+            plan.slice_selection.pruned_candidates
+        );
     }
 
     #[test]
