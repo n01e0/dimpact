@@ -303,6 +303,37 @@ Q54-10 の再計測結果（`release-notes/0.5.4-confidence-distribution-q54-10.
 - seed ごとに分けて見たいなら、上のどれに対しても `--per-seed` を足し、`impacted_witnesses` と compact witness fields を見る
 - Go/Java/Python/JS/TS/TSX では、現時点の `--with-pdg` に大きな上積みを期待しすぎない方が安全です。fixture / regression で確認できる範囲の experimental 機能として扱ってください
 
+## G13 後の stitched ranking / provenance の読み方
+短い stitched chain（wrapper-return、alias-result stitch、Ruby `require_relative` continuation など）が見える場合、PDG / propagation の JSON は **planner 側の winner と witness 側の support を分けて読む** のが基本です。
+
+- `summary.slice_selection`
+  - bounded planner がどの file を残したかの説明です
+  - `bridge_completion_file` / `bridge_continuation_file` reason は、ranking / budget を通って残った stitched candidate の planner 側説明です
+- `impacted_witnesses[*].bridge_execution_family`
+  - **勝った** stitched chain の coarse family です（`return_continuation`、`alias_result_stitch`、`require_relative_continuation` など）
+- `impacted_witnesses[*].bridge_execution_chain_compact`
+  - 勝ち筋寄りの compact stitched chain です
+  - 互換性のため、現時点では `winning_bridge_execution_chain_compact` と同じ内容です
+- `impacted_witnesses[*].winning_bridge_execution_chain_compact`
+  - 勝者だけを明示した stitched chain です
+  - 「実際にどの stitched path が勝ったか」を知りたいときはまずこれを見ます
+- `impacted_witnesses[*].observed_supporting_steps_compact`
+  - selected witness path 上で見えたが、勝者そのものではない stitched step です
+  - 典型例として、winner が `alias_result_stitch` や `return_continuation` でも、Ruby の `require_relative_load` は support としてここに残ります
+
+実務上の読み順としては、次が分かりやすいです。
+1. `summary.slice_selection` で、なぜその file が bounded scope に入ったかを見る
+2. `winning_bridge_execution_chain_compact` で、どの stitched chain が実際に勝ったかを見る
+3. `observed_supporting_steps_compact` で、勝者を定義しなかった補助 stitched 根拠を見る
+
+G13 では、見えている stitched step を全部 1 本の mixed union として読む寄りの表示から少し離し、
+
+- planner 側の selected reason
+- witness 側の winning chain
+- witness 側の supporting stitched observation
+
+を**揃えつつも分離して読む**方向に寄せています。
+
 ## PDG 可視化
 `--with-pdg` と `-f dot` を組み合わせて PDG を dot 形式で出力できます。
 ```bash

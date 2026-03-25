@@ -287,6 +287,36 @@ Based on Q54-10 re-sampling (`release-notes/0.5.4-confidence-distribution-q54-10
 - If you need to review one seed at a time, add `--per-seed` to any of the above and inspect `impacted_witnesses`, especially the compact witness fields, for the chosen path summary.
 - If you are working in Go/Java/Python/JS/TS/TSX, do not assume `--with-pdg` adds much today; treat it as experimental unless the fixture/regression says otherwise.
 
+### Reading stitched ranking / provenance after G13
+For short stitched chains (wrapper-return, alias-result stitch, Ruby `require_relative` continuation), the PDG / propagation JSON is now easier to read as **planner winner vs observed support**.
+
+- `summary.slice_selection`
+  - planner-side explanation of which bounded files were kept
+  - `bridge_completion_file` / `bridge_continuation_file` reasons are the selection-time explanation of the stitched candidate that survived ranking/budgeting
+- `impacted_witnesses[*].bridge_execution_family`
+  - coarse family of the **winning** stitched chain (`return_continuation`, `alias_result_stitch`, `require_relative_continuation`, etc.)
+- `impacted_witnesses[*].bridge_execution_chain_compact`
+  - compact winner-oriented stitched chain
+  - for compatibility, this currently mirrors `winning_bridge_execution_chain_compact`
+- `impacted_witnesses[*].winning_bridge_execution_chain_compact`
+  - explicit winner-only stitched chain
+  - read this first when the main question is "which stitched path actually won?"
+- `impacted_witnesses[*].observed_supporting_steps_compact`
+  - stitched steps seen on the selected witness path that are **supporting context**, not the winner itself
+  - common example: a Ruby `require_relative_load` stays here while the winner remains `alias_result_stitch` or `return_continuation`
+
+A good reading order is:
+1. `summary.slice_selection` to see why the file entered bounded scope
+2. `winning_bridge_execution_chain_compact` to see which stitched chain actually won
+3. `observed_supporting_steps_compact` to see extra stitched evidence that was present but did not define the winner
+
+This matters because G13 moved witness provenance away from treating every visible stitched step as one mixed union. The output now tries to keep:
+- planner-side selected reason
+- witness-side winning chain
+- witness-side supporting stitched observations
+
+aligned but distinct.
+
 ### PDG Visualization
 - Generate PDG in `dot` format with `--with-pdg` and `-f dot`:
   ```
