@@ -3359,17 +3359,17 @@ fn pdg_slice_selection_prefers_ruby_alias_closer_over_return_looking_required_si
     assert!(
         witness["bridge_execution_chain_compact"]
             .as_array()
-            .is_some_and(|steps| steps.iter().any(|step| {
-                step["step_family"] == "require_relative_load"
-                    && step["family"] == "require_relative_continuation"
-                    && step["anchor_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
-                    && step["anchor_path"] == "lib/service.rb"
-                    && step["bridge_kind"] == "require_relative_chain"
-            })),
-        "expected the Ruby alias witness to retain the require_relative support step: {grouped:#?}"
+            .is_some_and(|steps| steps
+                .iter()
+                .all(|step| { step["step_family"] != "require_relative_load" })),
+        "expected the Ruby alias witness winning chain to stay free of supporting require_relative steps: {grouped:#?}"
+    );
+    assert_eq!(
+        witness["bridge_execution_chain_compact"],
+        witness["winning_bridge_execution_chain_compact"]
     );
     assert!(
-        witness["bridge_execution_chain_compact"]
+        witness["winning_bridge_execution_chain_compact"]
             .as_array()
             .is_some_and(|steps| steps.iter().any(|step| {
                 step["step_family"] == "alias_result_stitch"
@@ -3379,6 +3379,18 @@ fn pdg_slice_selection_prefers_ruby_alias_closer_over_return_looking_required_si
                     && step["bridge_kind"] == "boundary_alias_continuation"
             })),
         "expected the Ruby alias witness to expose the winning alias-result stitched step: {grouped:#?}"
+    );
+    assert!(
+        witness["observed_supporting_steps_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "require_relative_load"
+                    && step["family"] == "require_relative_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && step["anchor_path"] == "lib/service.rb"
+                    && step["bridge_kind"] == "require_relative_chain"
+            })),
+        "expected the Ruby alias witness to keep the require_relative step as observed support: {grouped:#?}"
     );
 }
 
@@ -4823,22 +4835,22 @@ fn per_seed_diff_mode_ruby_two_hop_require_relative_propagation_keeps_compact_wi
     );
     assert_eq!(
         witness["bridge_execution_family"],
-        serde_json::json!("require_relative_continuation")
+        serde_json::json!("return_continuation")
+    );
+    assert_eq!(
+        witness["bridge_execution_chain_compact"],
+        witness["winning_bridge_execution_chain_compact"]
     );
     assert!(
         witness["bridge_execution_chain_compact"]
             .as_array()
-            .is_some_and(|steps| steps.iter().any(|step| {
-                step["step_family"] == "require_relative_load"
-                    && step["family"] == "require_relative_continuation"
-                    && step["anchor_symbol_id"] == "ruby:lib/step.rb:method:step:4"
-                    && step["anchor_path"] == "lib/step.rb"
-                    && step["bridge_kind"] == "require_relative_chain"
-            })),
-        "expected Ruby two-hop wrapper witness to expose require_relative bridge execution provenance: {grouped:#?}"
+            .is_some_and(|steps| steps
+                .iter()
+                .all(|step| { step["step_family"] != "require_relative_load" })),
+        "expected Ruby two-hop wrapper winning chain to stay focused on the wrapper-return path: {grouped:#?}"
     );
     assert!(
-        witness["bridge_execution_chain_compact"]
+        witness["winning_bridge_execution_chain_compact"]
             .as_array()
             .is_some_and(|steps| steps.iter().any(|step| {
                 step["step_family"] == "nested_summary_bridge"
@@ -4847,7 +4859,19 @@ fn per_seed_diff_mode_ruby_two_hop_require_relative_propagation_keeps_compact_wi
                     && step["anchor_path"] == "lib/step.rb"
                     && step["bridge_kind"] == "wrapper_return"
             })),
-        "expected Ruby two-hop wrapper witness to keep the nested bridge execution step alongside require_relative provenance: {grouped:#?}"
+        "expected Ruby two-hop wrapper witness to keep the nested bridge execution step on the winning chain: {grouped:#?}"
+    );
+    assert!(
+        witness["observed_supporting_steps_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "require_relative_load"
+                    && step["family"] == "require_relative_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/step.rb:method:step:4"
+                    && step["anchor_path"] == "lib/step.rb"
+                    && step["bridge_kind"] == "require_relative_chain"
+            })),
+        "expected Ruby two-hop wrapper witness to keep require_relative provenance as observed support: {grouped:#?}"
     );
 }
 
