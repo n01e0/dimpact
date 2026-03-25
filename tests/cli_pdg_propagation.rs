@@ -673,6 +673,78 @@ fn caller() {
     (dir, path)
 }
 
+fn setup_cross_file_alias_closer_vs_return_sibling_repo() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::write(
+        path.join("value.rs"),
+        r#"pub fn make(a: i32) -> i32 {
+    let alias = a;
+    alias
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("final.rs"),
+        r#"pub fn finalize(a: i32) -> i32 {
+    a + 1
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("adapter.rs"),
+        r#"use crate::final;
+use crate::value;
+
+pub fn wrap(a: i32) -> i32 {
+    let keep = value::make(a);
+    let _audit = final::finalize(a);
+    keep
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("main.rs"),
+        r#"mod adapter;
+mod final;
+mod value;
+
+fn caller() {
+    let x = 1;
+    let out = adapter::wrap(x);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("main.rs"),
+        r#"mod adapter;
+mod final;
+mod value;
+
+fn caller() {
+    let x = 2;
+    let out = adapter::wrap(x);
+    println!("{}", out);
+}
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_cross_file_param_passthrough_competition_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -2405,28 +2477,28 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
                     && reason["via_symbol_id"] == "rust:adapter.rs:fn:wrap:4"
                     && reason["via_path"] == "adapter.rs"
                     && reason["bridge_kind"] == "boundary_alias_continuation"
-                    && reason["scoring"]
-                        == serde_json::json!({
-                            "source_kind": "graph_second_hop",
-                            "lane": "alias_continuation",
-                            "primary_evidence_kinds": [
-                                "alias_chain",
-                                "assigned_result"
-                            ],
-                            "secondary_evidence_kinds": [
-                                "name_path_hint"
-                            ],
-                            "score_tuple": {
-                                "source_rank": 0,
-                                "lane_rank": 1,
-                                "primary_evidence_count": 2,
-                                "secondary_evidence_count": 1,
-                                "call_position_rank": 5,
-                                "lexical_tiebreak": "value.rs"
-                            }
+                    && reason["scoring"]["source_kind"] == "graph_second_hop"
+                    && reason["scoring"]["lane"] == "alias_continuation"
+                    && reason["scoring"]["primary_evidence_kinds"]
+                        .as_array()
+                        .is_some_and(|kinds| {
+                            kinds.iter().any(|kind| kind == "alias_chain")
+                                && kinds.iter().any(|kind| kind == "assigned_result")
+                                && kinds.iter().any(|kind| kind == "param_to_return_flow")
                         })
+                    && reason["scoring"]["secondary_evidence_kinds"]
+                        == serde_json::json!(["name_path_hint"])
+                    && reason["scoring"]["score_tuple"]["lane_rank"] == 1
+                    && reason["scoring"]["score_tuple"]["primary_evidence_count"] == 3
+                    && reason["scoring"]["score_tuple"]["secondary_evidence_count"] == 1
+                    && reason["scoring"]["score_tuple"]["call_position_rank"] == 5
+                    && reason["scoring"]["score_tuple"]["lexical_tiebreak"] == "value.rs"
+                    && reason["scoring"]["score_tuple"]["semantic_support_rank"]
+                        .as_u64()
+                        .is_some_and(|rank| rank > 0)
+                    && reason["scoring"]["support"]["local_dfg_support"] == true
             })),
-        "expected value.rs to win the alias-continuation competition with scoring metadata: {prop:#}"
+        "expected value.rs to win the alias-continuation competition with semantic stitched scoring metadata: {prop:#}"
     );
     assert!(
         slice_selection["pruned_candidates"]
@@ -2475,10 +2547,14 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
             "pruned_bridge_kind": "boundary_alias_continuation",
             "selected_better_by": "primary_evidence_count",
             "winning_primary_evidence_kinds": [
-                "alias_chain"
+                "alias_chain",
+                "param_to_return_flow"
             ],
+            "winning_support": {
+                "local_dfg_support": true
+            },
             "compact_explanation": "suppressed_before_admit=helper_noise_suppressor",
-            "summary": "selected over zzz_helper.rs because it had more primary evidence (2 > 1); winning primary evidence: alias_chain",
+            "summary": "selected over zzz_helper.rs because it had more primary evidence (3 > 1); winning primary evidence: alias_chain + param_to_return_flow; winning support: local_dfg_support",
         }])
     );
 
@@ -2488,6 +2564,84 @@ fn pdg_slice_selection_prefers_alias_continuation_value_over_later_adapter_helpe
         helper_paths,
         vec!["main.rs", "adapter.rs"],
         "expected helper noise to stay outside the selected explanation slice even if it remains reachable: {prop:#}"
+    );
+}
+
+#[test]
+fn pdg_slice_selection_prefers_semantic_alias_closer_over_return_looking_sibling() {
+    let (_tmp, repo) = setup_cross_file_alias_closer_vs_return_sibling_repo();
+    let diff = diff_text(&repo);
+
+    let pdg = run_impact_dot(
+        &repo,
+        &diff,
+        &["--direction", "callees", "--with-pdg", "--format", "dot"],
+    );
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert!(
+        pdg.contains("\"value.rs:def:a:1\""),
+        "expected bounded slice scope to keep the semantic alias closer, got:\n{}",
+        pdg
+    );
+    assert!(
+        !pdg.contains("\"final.rs:def:a:1\""),
+        "unexpected return-looking sibling entered the bounded slice scope, got:\n{}",
+        pdg
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(paths, vec!["adapter.rs", "main.rs", "value.rs"]);
+
+    let value = slice_selection_file(slice_selection, "value.rs");
+    assert!(
+        value["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "rust:adapter.rs:fn:wrap:4"
+                    && reason["via_path"] == "adapter.rs"
+                    && reason["bridge_kind"] == "boundary_alias_continuation"
+                    && reason["scoring"]["lane"] == "alias_continuation"
+                    && reason["scoring"]["primary_evidence_kinds"]
+                        .as_array()
+                        .is_some_and(|kinds| {
+                            kinds.iter().any(|kind| kind == "alias_chain")
+                                && kinds.iter().any(|kind| kind == "param_to_return_flow")
+                        })
+                    && reason["scoring"]["score_tuple"]["semantic_support_rank"]
+                        .as_u64()
+                        .is_some_and(|rank| rank > 0)
+                    && reason["scoring"]["support"]["local_dfg_support"] == true
+            })),
+        "expected value.rs to win as a semantic alias closer: {prop:#}"
+    );
+    assert!(
+        slice_selection["pruned_candidates"]
+            .as_array()
+            .is_some_and(|candidates| candidates.iter().any(|candidate| {
+                candidate["path"] == "final.rs"
+                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["bridge_kind"] == "wrapper_return"
+            })),
+        "expected final.rs to remain only as the ranked-out return-looking sibling: {prop:#}"
     );
 }
 
