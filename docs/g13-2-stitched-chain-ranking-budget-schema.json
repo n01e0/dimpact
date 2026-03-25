@@ -1,0 +1,331 @@
+{
+  "generated_by": "manual G13-2 design note",
+  "repo_root": "/home/shioriko/src/github.com/n01e0/dimpact",
+  "purpose": "define the stitched-chain ranking and budget schema on top of the existing bounded continuation/stitching model",
+  "context": {
+    "paired_design_notes": [
+      "docs/g13-1-stitched-continuation-ranking-memo.md",
+      "docs/g12-3-bounded-continuation-stitching-policy.md",
+      "docs/g10-1-g9-admission-pruning-stop-inventory-and-evidence-budget-memo.md"
+    ],
+    "problem_statement": [
+      "post-G12 stitched continuation now exposes multiple chain candidates inside already-selected bounded scope",
+      "current ranking is still too file-local and lane-first, so return-looking candidates can beat better alias-result closers",
+      "same-path suppression does not eliminate semantically duplicate stitched chains that differ only by path/locality",
+      "current bridge-execution provenance is closer to an observed stitched-step union than a true winning-chain explanation"
+    ]
+  },
+  "goal": [
+    "introduce a stitched-chain representative schema above file-local candidate scoring",
+    "define closure-first ranking for bounded stitched continuation",
+    "define same-chain duplicate suppression and chain-level prune vocabulary",
+    "define per-anchor, per-family, and per-seed stitched-chain budgets",
+    "split winning-chain provenance from observed supporting stitched steps"
+  ],
+  "non_goal": [
+    "project-wide recursive continuation search",
+    "full argument-binding generalization in this task alone",
+    "replacing existing file-level structural guardrails immediately",
+    "UI or reporter-focused redesign without ranking/budget changes"
+  ],
+  "core_model": {
+    "selected_scope_precondition": "stitched-chain candidates are reconstructed only from already-selected bounded files/symbols",
+    "primary_unit": "stitched_chain_candidate",
+    "principles": [
+      "compare chain representatives rather than raw file candidates when deciding stitched winners",
+      "prefer actual closure quality before local lane/evidence heuristics",
+      "keep bounded file budgets as structural guardrails while layering chain budgets above them",
+      "report the winning chain first and treat other observed stitched steps as support/alternates"
+    ]
+  },
+  "stitched_chain_candidate_schema": {
+    "required_fields": [
+      "seed_symbol_id",
+      "entry_boundary_symbol_id",
+      "entry_boundary_path",
+      "anchor_symbol_id",
+      "anchor_path",
+      "terminal_symbol_id",
+      "terminal_path",
+      "family",
+      "step_families",
+      "closure",
+      "evidence",
+      "penalties",
+      "duplicate_chain_key",
+      "origin_reasons"
+    ],
+    "family_vocabulary": [
+      "return_continuation",
+      "alias_result_stitch",
+      "require_relative_continuation",
+      "mixed_require_relative_alias_stitch",
+      "nested_multi_input_continuation"
+    ],
+    "step_family_vocabulary": [
+      "callsite_input_binding",
+      "summary_return_bridge",
+      "nested_summary_bridge",
+      "alias_result_stitch",
+      "require_relative_load"
+    ],
+    "closure": {
+      "required_fields": [
+        "reaches_caller_result",
+        "reaches_nested_continuation",
+        "has_alias_result_stitch",
+        "has_require_relative_load",
+        "binding_quality",
+        "closure_target_kind",
+        "relevant_binding_count",
+        "irrelevant_binding_leak"
+      ],
+      "binding_quality_vocabulary": [
+        "exact",
+        "reordered",
+        "partial",
+        "weak_or_unknown"
+      ],
+      "closure_target_kind_vocabulary": [
+        "caller_result",
+        "wrapper_result",
+        "nested_result",
+        "supporting_only"
+      ]
+    },
+    "evidence": {
+      "required_fields": [
+        "primary_evidence_kinds",
+        "secondary_evidence_kinds",
+        "negative_evidence_kinds",
+        "semantic_support_rank",
+        "call_position_rank",
+        "lexical_tiebreak"
+      ],
+      "note": "these extend rather than replace the current file-local evidence model"
+    },
+    "penalties": {
+      "required_fields": [
+        "duplicate_penalty",
+        "overreach_penalty",
+        "budget_pressure"
+      ],
+      "duplicate_penalty_vocabulary": [
+        "none",
+        "weak_same_chain_duplicate",
+        "merged_same_chain_duplicate"
+      ],
+      "overreach_penalty_vocabulary": [
+        "none",
+        "helper_only_stitch",
+        "weak_mixed_label",
+        "irrelevant_arg_leak"
+      ],
+      "budget_pressure_vocabulary": [
+        "none",
+        "anchor_budget_edge",
+        "family_budget_edge",
+        "seed_budget_edge"
+      ]
+    },
+    "origin_reasons": {
+      "required_fields": [
+        "selected_reason_refs",
+        "pruned_reason_refs",
+        "observed_supporting_reason_refs"
+      ],
+      "note": "links existing file-level reasons to chain-level ranking/provenance"
+    }
+  },
+  "ranking_schema": {
+    "score_tuple_order": [
+      "closure_rank",
+      "overreach_penalty_rank",
+      "duplicate_penalty_rank",
+      "family_fit_rank",
+      "semantic_support_rank",
+      "primary_evidence_count",
+      "negative_evidence_count",
+      "secondary_evidence_count",
+      "call_position_rank",
+      "lexical_tiebreak"
+    ],
+    "closure_rank": {
+      "highest_to_lowest": [
+        "reaches caller_result with relevant stitched closure",
+        "reaches wrapper_result or nested_result but caller_result remains support-only",
+        "stitched steps are visible but closure_target_kind is supporting_only"
+      ],
+      "bonus_signals": [
+        "explicit relevant binding subset",
+        "alias-result continuity across wrapper and caller localities",
+        "Ruby mixed chain where require_relative plus alias-result stitch actually forms the closing route"
+      ]
+    },
+    "overreach_penalty_rank": {
+      "lower_is_better": true,
+      "signals": [
+        "irrelevant_arg_leak",
+        "helper_only_stitch",
+        "weak_mixed_label",
+        "non-closing alias chain presented as a closer"
+      ]
+    },
+    "duplicate_penalty_rank": {
+      "lower_is_better": true,
+      "rule": "weaker chains sharing the same duplicate_chain_key must lose before cross-family final selection"
+    },
+    "family_fit_rank": {
+      "purpose": "measure whether the coarse family label matches the actual stitched closure instead of just reflecting visible steps on the selected path",
+      "examples": [
+        "penalize return_continuation when alias-result stitching is the actual closing route",
+        "penalize mixed_require_relative_alias_stitch when require_relative is only a support observation",
+        "reward nested_multi_input_continuation when the relevant binding subset truly drives the chosen closer"
+      ]
+    },
+    "legacy_evidence_role": "existing evidence counts and lexical tiebreak remain, but only after closure/penalty/family-fit comparisons"
+  },
+  "judgement_taxonomy": {
+    "chain_admission_result": [
+      "admitted",
+      "merged_same_chain_duplicate",
+      "dropped_before_chain_compare"
+    ],
+    "chain_prune_result": [
+      "weaker_same_chain_duplicate",
+      "weaker_same_family_chain",
+      "family_budget_exhausted",
+      "stitched_chain_budget_exhausted",
+      "support_only_not_winner",
+      "overreach_penalized_out"
+    ],
+    "relation_to_existing_file_prunes": "file-level prune reasons remain authoritative for bounded scope; chain-level prune reasons explain why a selected-or-reconstructable chain did not become the stitched representative"
+  },
+  "budget_schema": {
+    "per_anchor_per_family": 1,
+    "per_seed_family": {
+      "return_continuation": 1,
+      "alias_result_stitch": 1,
+      "require_relative_continuation": 1,
+      "nested_multi_input_continuation": 1,
+      "mixed_require_relative_alias_stitch": 1
+    },
+    "final_per_seed_stitched_representatives_max": 2,
+    "application_order": [
+      "same_chain_duplicate_merge_or_suppress",
+      "per_anchor_per_family_selection",
+      "per_seed_family_budget",
+      "final_per_seed_stitched_representative_budget",
+      "existing_file_level_hard_cap_reconciliation"
+    ],
+    "budget_intent": [
+      "prevent thin same-family/same-chain variations from consuming the bounded seed budget before actual chain comparison happens",
+      "allow return and alias-result families to coexist long enough for chain-first ranking to compare them",
+      "keep existing file budgets as structural guardrails rather than replacing them outright"
+    ]
+  },
+  "provenance_schema": {
+    "split": [
+      "winning_bridge_execution_chain_compact",
+      "observed_supporting_steps_compact"
+    ],
+    "winning_bridge_execution_chain_compact": {
+      "required_fields": [
+        "family",
+        "step_family",
+        "anchor_symbol_id",
+        "anchor_path",
+        "terminal_symbol_id",
+        "terminal_path",
+        "closure_target_kind",
+        "summary"
+      ],
+      "optional_fields": [
+        "binding",
+        "stitch",
+        "selected_better_by"
+      ]
+    },
+    "observed_supporting_steps_compact": {
+      "required_fields": [
+        "family",
+        "step_family",
+        "anchor_symbol_id",
+        "anchor_path",
+        "support_role"
+      ],
+      "support_role_vocabulary": [
+        "support",
+        "duplicate",
+        "pruned_alternate"
+      ]
+    },
+    "selected_vs_pruned_chain_reasoning": {
+      "required_fields": [
+        "selected_chain_family",
+        "pruned_chain_family",
+        "selected_better_by",
+        "prune_reason",
+        "summary"
+      ],
+      "selected_better_by_vocabulary": [
+        "closure_rank",
+        "overreach_penalty",
+        "duplicate_penalty",
+        "family_fit",
+        "semantic_support",
+        "primary_evidence_count"
+      ]
+    }
+  },
+  "directly_targets_failure_families": [
+    {
+      "case": "return-looking helper vs alias closer",
+      "schema_value": [
+        "closure-first ranking",
+        "family-fit rank",
+        "final_per_seed_stitched_representatives_max=2"
+      ]
+    },
+    {
+      "case": "competing continuation anchors",
+      "schema_value": [
+        "per-anchor per-family representative",
+        "chain representative compare before final compression"
+      ]
+    },
+    {
+      "case": "same-chain duplicate across different localities",
+      "schema_value": [
+        "duplicate_chain_key",
+        "weaker_same_chain_duplicate",
+        "merged_same_chain_duplicate"
+      ]
+    },
+    {
+      "case": "Ruby mixed-family provenance overstatement",
+      "schema_value": [
+        "winning vs observed-support split",
+        "family-fit rank",
+        "support_role"
+      ]
+    },
+    {
+      "case": "nested multi-input path with noisy alternate",
+      "schema_value": [
+        "binding_quality in closure",
+        "irrelevant_arg_leak penalty",
+        "support_only_not_winner prune"
+      ]
+    }
+  ],
+  "fixed_decisions": [
+    "ranking, budget, and provenance should pivot from raw file candidates toward stitched chain representatives",
+    "closure quality outranks lane-first local heuristics in stitched-chain selection",
+    "same-chain duplicate suppression must exist in addition to same-path duplicate suppression",
+    "budgeting should distinguish per-anchor, per-family, and per-seed stitched representatives",
+    "return and alias-result families must be allowed to coexist long enough for chain-first comparison",
+    "provenance must distinguish the winning chain from merely observed supporting stitched steps",
+    "existing file budgets remain structural guardrails while chain budgets operate above them"
+  ]
+}
