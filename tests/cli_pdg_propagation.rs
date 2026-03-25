@@ -1398,6 +1398,78 @@ end
     (dir, path)
 }
 
+fn setup_ruby_require_relative_alias_closer_vs_return_sibling_repo() -> (TempDir, std::path::PathBuf)
+{
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    git(&path, &["init", "-q"]);
+    git(&path, &["config", "user.email", "tester@example.com"]);
+    git(&path, &["config", "user.name", "Tester"]);
+
+    fs::create_dir_all(path.join("lib")).unwrap();
+    fs::create_dir_all(path.join("app")).unwrap();
+    fs::write(
+        path.join("lib/alias_leaf.rb"),
+        r#"def alias_finish(value)
+  alias_value = value
+  return alias_value
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/final_leaf.rb"),
+        r#"def final_leaf(value)
+  return value.to_s
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("lib/service.rb"),
+        r#"require_relative 'alias_leaf'
+require_relative 'final_leaf'
+
+def bounce(value)
+  alias_value = value
+  wrapped = alias_finish(alias_value)
+  helper = final_leaf(value)
+  return wrapped
+end
+"#,
+    )
+    .unwrap();
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry(seed)
+  prepared = seed + 1
+  reply = bounce(prepared)
+  return reply
+end
+"#,
+    )
+    .unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-m", "init", "-q"]);
+
+    fs::write(
+        path.join("app/runner.rb"),
+        r#"require_relative '../lib/service'
+
+def entry(seed)
+  prepared = seed + 2
+  reply = bounce(prepared)
+  return reply
+end
+"#,
+    )
+    .unwrap();
+
+    (dir, path)
+}
+
 fn setup_ruby_dynamic_send_runtime_noise_repo() -> (TempDir, std::path::PathBuf) {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().to_path_buf();
@@ -3197,6 +3269,116 @@ fn pdg_slice_selection_prefers_ruby_require_relative_leaf_over_later_helper_nois
         prop_dot.contains("\"app/runner.rb:use:prepared:5\" -> \"app/runner.rb:def:reply:5\""),
         "expected propagation to recover the Ruby leaf-backed summary bridge, got:\n{}",
         prop_dot
+    );
+}
+
+#[test]
+fn pdg_slice_selection_prefers_ruby_alias_closer_over_return_looking_required_sibling() {
+    let (_tmp, repo) = setup_ruby_require_relative_alias_closer_vs_return_sibling_repo();
+    let diff = diff_text(&repo);
+
+    let prop = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--format",
+            "json",
+        ],
+    );
+
+    let slice_selection = &prop["summary"]["slice_selection"];
+    let paths: Vec<&str> = slice_selection["files"]
+        .as_array()
+        .expect("slice_selection.files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["app/runner.rb", "lib/alias_leaf.rb", "lib/service.rb"]
+    );
+
+    let alias_leaf = slice_selection_file(slice_selection, "lib/alias_leaf.rb");
+    assert!(
+        alias_leaf["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.iter().any(|reason| {
+                reason["tier"] == 2
+                    && reason["kind"] == "bridge_completion_file"
+                    && reason["via_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && reason["via_path"] == "lib/service.rb"
+                    && reason["bridge_kind"] == "boundary_alias_continuation"
+                    && reason["scoring"]["lane"] == "alias_continuation"
+                    && reason["scoring"]["primary_evidence_kinds"]
+                        .as_array()
+                        .is_some_and(|kinds| {
+                            kinds.iter().any(|kind| kind == "alias_chain")
+                                && kinds.iter().any(|kind| kind == "assigned_result")
+                        })
+            })),
+        "expected lib/alias_leaf.rb to win as the Ruby alias stitched closer: {prop:#}"
+    );
+    assert!(
+        slice_selection["pruned_candidates"]
+            .as_array()
+            .is_some_and(|candidates| candidates.iter().any(|candidate| {
+                candidate["path"] == "lib/final_leaf.rb"
+                    && candidate["prune_reason"] == "ranked_out"
+                    && candidate["bridge_kind"] == "wrapper_return"
+                    && candidate["scoring"]["lane"] == "return_continuation"
+            })),
+        "expected lib/final_leaf.rb to remain only as the ranked-out return-looking sibling: {prop:#}"
+    );
+
+    let grouped = run_impact_json(
+        &repo,
+        &diff,
+        &[
+            "--direction",
+            "callees",
+            "--lang",
+            "ruby",
+            "--with-propagation",
+            "--with-edges",
+            "--per-seed",
+            "--format",
+            "json",
+        ],
+    );
+    let grouped = grouped.as_array().expect("per-seed top-level array");
+    let witness = &grouped[0]["impacts"][0]["output"]["impacted_witnesses"]["ruby:lib/alias_leaf.rb:method:alias_finish:1"];
+    assert_eq!(
+        witness["bridge_execution_family"],
+        serde_json::json!("alias_result_stitch")
+    );
+    assert!(
+        witness["bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "require_relative_load"
+                    && step["family"] == "require_relative_continuation"
+                    && step["anchor_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && step["anchor_path"] == "lib/service.rb"
+                    && step["bridge_kind"] == "require_relative_chain"
+            })),
+        "expected the Ruby alias witness to retain the require_relative support step: {grouped:#?}"
+    );
+    assert!(
+        witness["bridge_execution_chain_compact"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| {
+                step["step_family"] == "alias_result_stitch"
+                    && step["family"] == "alias_result_stitch"
+                    && step["anchor_symbol_id"] == "ruby:lib/service.rb:method:bounce:4"
+                    && step["anchor_path"] == "lib/service.rb"
+                    && step["bridge_kind"] == "boundary_alias_continuation"
+            })),
+        "expected the Ruby alias witness to expose the winning alias-result stitched step: {grouped:#?}"
     );
 }
 

@@ -1788,7 +1788,13 @@ fn tier2_scoring_summary(
         negative_evidence_kinds.push(ImpactSliceNegativeEvidenceKind::NoisyReturnHint);
     }
 
-    let lane = if completion_return_hint
+    let prefer_ruby_alias_stitch_closer = is_ruby_chain_candidate
+        && completion_alias_hint
+        && !completion_noise_hint
+        && (has_semantic_param_to_return_flow || completion_return_hint);
+    let lane = if prefer_ruby_alias_stitch_closer {
+        ImpactSliceCandidateLane::AliasContinuation
+    } else if completion_return_hint
         || has_return_param_to_return_flow
         || (boundary_wrapper_hint
             && !completion_alias_hint
@@ -1920,11 +1926,25 @@ fn candidate_is_lexical_return_continuation(candidate: &Tier2Candidate) -> bool 
         && !candidate_has_helper_noise_signal(candidate)
 }
 
+fn candidate_is_ruby_alias_result_closer_hint(candidate: &Tier2Candidate) -> bool {
+    candidate.path.ends_with(".rb")
+        && candidate.scoring.lane == ImpactSliceCandidateLane::AliasContinuation
+        && candidate_has_primary_evidence(candidate, ImpactSliceEvidenceKind::AliasChain)
+        && candidate_has_primary_evidence(candidate, ImpactSliceEvidenceKind::AssignedResult)
+        && !candidate_has_helper_noise_signal(candidate)
+}
+
 fn compare_tier2_candidates(a: &Tier2Candidate, b: &Tier2Candidate) -> std::cmp::Ordering {
-    if candidate_is_semantic_alias_stitch_closer(a) && candidate_is_lexical_return_continuation(b) {
+    if (candidate_is_semantic_alias_stitch_closer(a)
+        || candidate_is_ruby_alias_result_closer_hint(a))
+        && candidate_is_lexical_return_continuation(b)
+    {
         return std::cmp::Ordering::Less;
     }
-    if candidate_is_semantic_alias_stitch_closer(b) && candidate_is_lexical_return_continuation(a) {
+    if (candidate_is_semantic_alias_stitch_closer(b)
+        || candidate_is_ruby_alias_result_closer_hint(b))
+        && candidate_is_lexical_return_continuation(a)
+    {
         return std::cmp::Ordering::Greater;
     }
 
@@ -5157,6 +5177,114 @@ fn caller() -> i32 {
                 ),
             }],
             "expected later Ruby helper noise to be suppressed before side ranking: {:#?}",
+            plan.slice_selection.pruned_candidates
+        );
+    }
+
+    #[test]
+    fn bounded_slice_plan_prefers_ruby_alias_closer_over_return_looking_required_sibling() {
+        let seed = test_symbol(
+            "ruby:app/runner.rb:method:entry:3",
+            "entry",
+            "app/runner.rb",
+            3,
+        );
+        let service = test_symbol(
+            "ruby:lib/service.rb:method:bounce:4",
+            "bounce",
+            "lib/service.rb",
+            4,
+        );
+        let alias_leaf = test_symbol(
+            "ruby:lib/alias_leaf.rb:method:alias_finish:1",
+            "alias_finish",
+            "lib/alias_leaf.rb",
+            1,
+        );
+        let final_leaf = test_symbol(
+            "ruby:lib/final_leaf.rb:method:final_leaf:1",
+            "final_leaf",
+            "lib/final_leaf.rb",
+            1,
+        );
+        let index = SymbolIndex::build(vec![
+            seed.clone(),
+            service.clone(),
+            alias_leaf.clone(),
+            final_leaf.clone(),
+        ]);
+        let refs = vec![
+            call_ref(
+                seed.id.0.as_str(),
+                service.id.0.as_str(),
+                "app/runner.rb",
+                5,
+            ),
+            call_ref(
+                service.id.0.as_str(),
+                alias_leaf.id.0.as_str(),
+                "lib/service.rb",
+                6,
+            ),
+            call_ref(
+                service.id.0.as_str(),
+                final_leaf.id.0.as_str(),
+                "lib/service.rb",
+                7,
+            ),
+        ];
+
+        let plan = plan_bounded_slice(
+            &[seed.file.clone()],
+            &[seed.file.clone()],
+            std::slice::from_ref(&seed),
+            &index,
+            &refs,
+            ImpactDirection::Callees,
+            ImpactSliceReasonKind::SeedFile,
+        );
+
+        assert_eq!(
+            plan.cache_update_paths,
+            vec![
+                "app/runner.rb".to_string(),
+                "lib/alias_leaf.rb".to_string(),
+                "lib/service.rb".to_string(),
+            ]
+        );
+
+        let alias_leaf_file = slice_selection_file(&plan.slice_selection, "lib/alias_leaf.rb");
+        assert!(alias_leaf_file.reasons.iter().any(|reason| {
+            reason.kind == ImpactSliceReasonKind::BridgeCompletionFile
+                && reason.bridge_kind == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
+                && reason.scoring.as_ref().is_some_and(|scoring| {
+                    scoring.lane == ImpactSliceCandidateLane::AliasContinuation
+                        && scoring
+                            .primary_evidence_kinds
+                            .contains(&ImpactSliceEvidenceKind::AliasChain)
+                        && scoring
+                            .primary_evidence_kinds
+                            .contains(&ImpactSliceEvidenceKind::AssignedResult)
+                })
+        }));
+        assert!(
+            plan.slice_selection
+                .files
+                .iter()
+                .all(|file| file.path != "lib/final_leaf.rb"),
+            "expected return-looking required sibling to stay out of the selected slice: {:#?}",
+            plan.slice_selection.files
+        );
+        assert!(
+            plan.slice_selection
+                .pruned_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.path == "lib/final_leaf.rb"
+                        && candidate.prune_reason == ImpactSlicePruneReason::RankedOut
+                        && candidate.bridge_kind == Some(ImpactSliceBridgeKind::WrapperReturn)
+                }),
+            "expected lib/final_leaf.rb to remain only as the weaker ranked-out return-looking sibling: {:#?}",
             plan.slice_selection.pruned_candidates
         );
     }

@@ -1493,6 +1493,17 @@ fn build_bridge_execution_chain_compact(
     let has_require_relative_step = bridge_steps
         .iter()
         .any(|step| step.family == ImpactBridgeExecutionFamily::RequireRelativeContinuation);
+    let has_selected_alias_reason = slice_context
+        .selected_files_on_path
+        .iter()
+        .flat_map(|file_context| file_context.seed_reasons.iter())
+        .any(|reason| {
+            matches!(
+                reason.kind,
+                ImpactSliceReasonKind::BridgeCompletionFile
+                    | ImpactSliceReasonKind::BridgeContinuationFile
+            ) && reason.bridge_kind == Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
+        });
     let has_nested_step = bridge_steps
         .iter()
         .any(|step| step.step_family == ImpactBridgeExecutionStepFamily::NestedSummaryBridge);
@@ -1504,7 +1515,9 @@ fn build_bridge_execution_chain_compact(
         )
     });
 
-    let representative_family = if has_alias_step && has_require_relative_step {
+    let representative_family = if has_selected_alias_reason {
+        Some(ImpactBridgeExecutionFamily::AliasResultStitch)
+    } else if has_alias_step && has_require_relative_step {
         Some(ImpactBridgeExecutionFamily::MixedRequireRelativeAliasStitch)
     } else if has_alias_step {
         Some(ImpactBridgeExecutionFamily::AliasResultStitch)
