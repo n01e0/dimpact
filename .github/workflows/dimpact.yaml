@@ -19,19 +19,36 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }} && \
           git diff --no-ext-diff origin/${{ github.base_ref }}...HEAD | \
-          docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --direction callers --with-pdg --with-edges -f json | \
-          jq -r ' 
-            "| Changed | Kind | Location |",
-            "| ------- | ---- | -------- |",
-            (.changed_symbols[]
-              | "| \(.name) | \(.kind|ascii_upcase) | \(.file):\(.range.start_line) |"),
-          
-            "",
-            "| Impacted | Kind | Location |",
-            "| -------- | ---- | -------- |",
-            (.impacted_symbols[]
-              | "| \(.name) | \(.kind|ascii_upcase) | \(.file):\(.range.start_line) |")
-          '  > impact-tables.md
+          docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --per-seed -f json | \
+          jq -r '
+          "## Changed Symbols\n",
+          "| Name | Kind | File | Range |",
+          "|------|------|------|-------|",
+          (.[] | .changed_symbol as $c |
+            "| [" + $c.name + "](#"+($c.name|ascii_downcase)+") | " +
+            $c.kind + " | " +
+            $c.file + " | " +
+            ($c.range.start_line|tostring)+"-"+($c.range.end_line|tostring) + " |"
+          ),
+          "\n## Details\n",
+          "<details><summary>Show details</summary>",
+          (.[] | .changed_symbol as $c |
+            "### <a name=\"" + ($c.name|ascii_downcase) + "\"></a>" + $c.name + "\n" +
+            "<details><summary>Show details</summary>\n\n" +
+            "- **ID:** `" + $c.id + "`\n" +
+            "- **Kind:** `" + $c.kind + "`\n" +
+            "- **File:** `" + $c.file + "`\n" +
+            "- **Range:** `" + ($c.range.start_line|tostring) + "-" + ($c.range.end_line|tostring) + "`\n" +
+            "- **Language:** `" + $c.language + "`\n\n" +
+            "#### Impacts\n" +
+            (if (.impacts | length) > 0 then
+               (.impacts[] | "- Direction: " + .direction + "\n" +
+                 "  - Impacted Symbols: " + ((.output.impacted_symbols[]?.name) | tostring)? + "\n" +
+                 "  - Impacted Files: " + ((.output.impacted_files[])? // "None")
+               )
+             else "- None" end) + "\n\n</details>\n"
+          ),
+          "</details>"' > impact-tables.md
 
       - name: comment
         if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
