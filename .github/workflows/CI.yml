@@ -50,10 +50,10 @@ jobs:
           restore-keys: ${{ runner.os }}
       - name: Install cargo-make
         run: cargo install cargo-make
-      - name: Run cargo check --all-targets
+      - name: Run cargo check --locked --all-targets
         run: |
-          echo "::group::cargo check --all-targets"
-          if cargo check --all-targets > cargo-check.log 2>&1; then
+          echo "::group::cargo check --locked --all-targets"
+          if cargo check --locked --all-targets > cargo-check.log 2>&1; then
             cat cargo-check.log
           else
             cat cargo-check.log
@@ -61,10 +61,10 @@ jobs:
             exit 1
           fi
           echo "::endgroup::"
-      - name: Run cargo clippy
+      - name: Run cargo clippy --locked
         run: |
-          echo "::group::cargo clippy"
-          if cargo clippy > cargo-clippy.log 2>&1; then
+          echo "::group::cargo clippy --locked"
+          if cargo clippy --locked > cargo-clippy.log 2>&1; then
             cat cargo-clippy.log
           else
             cat cargo-clippy.log
@@ -120,10 +120,10 @@ jobs:
           path: ~/.cargo
           key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}
-      - name: Run cargo test -q
+      - name: Run cargo test -q --locked
         run: |
-          echo "::group::cargo test -q"
-          if cargo test -q > cargo-test.log 2>&1; then
+          echo "::group::cargo test -q --locked"
+          if cargo test -q --locked > cargo-test.log 2>&1; then
             cat cargo-test.log
           else
             cat cargo-test.log
@@ -242,7 +242,7 @@ jobs:
           key: ${{ runner.os }}-cargo-home-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}
       - name: Run engine_lsp regression test suite
-        run: cargo test -q --test engine_lsp
+        run: cargo test -q --locked --test engine_lsp
       - name: Summarize strict real-LSP migration status + residual trend
         if: always()
         run: |

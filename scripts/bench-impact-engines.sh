@@ -196,7 +196,7 @@ fi
 BIN="./target/release/dimpact"
 if [[ ! -x "$BIN" ]]; then
   echo "building release binary..." >&2
-  cargo build --release -q
+  cargo build --release --locked -q
 fi
 
 DIFF_FILE="$(mktemp)"

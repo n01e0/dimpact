@@ -12,9 +12,9 @@
    - Phase A 仕様に従い、env/server 起因は fail-fast 基本、残る skip-safe は理由付きで追跡されている
 
 2. **統合回帰の継続安定**
-   - `cargo test -q --test engine_lsp` が継続的に green
-   - `cargo test -q` が継続的に green
-   - `cargo clippy -q --all-targets -- -D warnings` が継続的に green
+   - `cargo test -q --locked --test engine_lsp` が継続的に green
+   - `cargo test -q --locked` が継続的に green
+   - `cargo clippy --locked -q --all-targets -- -D warnings` が継続的に green
 
 3. **bench guardrail の安定運用**
    - Rust baseline + Go/Java/Python strict-LSP bench ジョブが有効
@@ -105,9 +105,9 @@ fail-fast 化したレーンで以下が連続した場合は一時的に skip-s
   - `PASS=62 FAIL=0`
 
 ### 補足（同実行内で確認された統合回帰）
-- `cargo test -q --test engine_lsp` ✅
-- `cargo test -q` ✅
-- `cargo clippy -q --all-targets -- -D warnings` ✅
+- `cargo test -q --locked --test engine_lsp` ✅
+- `cargo test -q --locked` ✅
+- `cargo clippy --locked -q --all-targets -- -D warnings` ✅
 
 ### 判定
 - 現時点の GA 判定チェックはすべて pass。
