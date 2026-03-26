@@ -22,11 +22,24 @@ cargo build --release
 ./target/release/dimpact --help
 ```
 
-### Install into your Cargo bin directory
+### Install with cargo
 
 ```bash
-cargo install --path .
+cargo install --locked --path .
 dimpact --help
+```
+
+### Install with Docker
+
+```bash
+docker pull ghcr.io/n01e0/dimpact:latest
+docker run --rm ghcr.io/n01e0/dimpact:latest --help
+```
+
+If you want to analyze the current repository from the container, mount the working tree at `/work` and pipe the diff on stdin:
+
+```bash
+git diff --no-ext-diff | docker run -i --rm -v "$PWD":/work ghcr.io/n01e0/dimpact:latest impact --direction callers --with-edges -f json
 ```
 
 ## Basic usage
