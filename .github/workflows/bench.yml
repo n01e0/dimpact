@@ -29,7 +29,7 @@ jobs:
         run: rustup component add rust-analyzer
 
       - name: Build release binary
-        run: cargo build --release -q
+        run: cargo build --release --locked -q
 
       - name: Run TS vs Auto(strict-if-available) benchmark
         id: bench
@@ -98,7 +98,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build release binary
-        run: cargo build --release -q
+        run: cargo build --release --locked -q
 
       - name: Run Go strict-LSP benchmark
         timeout-minutes: 12
@@ -174,7 +174,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build release binary
-        run: cargo build --release -q
+        run: cargo build --release --locked -q
 
       - name: Run Java strict-LSP benchmark
         timeout-minutes: 12
@@ -295,7 +295,7 @@ jobs:
           exit 1
 
       - name: Build release binary
-        run: cargo build --release -q
+        run: cargo build --release --locked -q
 
       - name: Run Python strict-LSP benchmark
         timeout-minutes: 12
@@ -378,7 +378,7 @@ jobs:
           typescript-language-server --help >/dev/null
 
       - name: Build release binary
-        run: cargo build --release -q
+        run: cargo build --release --locked -q
 
       - name: Run TypeScript strict-LSP benchmark
         timeout-minutes: 12
@@ -443,7 +443,7 @@ jobs:
           typescript-language-server --help >/dev/null
 
       - name: Build release binary
-        run: cargo build --release -q
+        run: cargo build --release --locked -q
 
       - name: Run JavaScript strict-LSP benchmark
         timeout-minutes: 12
@@ -508,7 +508,7 @@ jobs:
           ruby-lsp --help >/dev/null
 
       - name: Build release binary
-        run: cargo build --release -q
+        run: cargo build --release --locked -q
 
       - name: Run Ruby strict-LSP benchmark
         timeout-minutes: 12

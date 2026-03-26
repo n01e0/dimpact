@@ -87,14 +87,14 @@ done
 
 echo
 printf "== checklist-2: integration regression green gate ==\n"
-check_contains "$CI_YML" "cargo test -q --test engine_lsp" "CI has engine_lsp regression job"
-check_contains "$CI_YML" "cargo test -q" "CI has cargo test job"
-check_contains "$CI_YML" "cargo clippy" "CI has clippy in check path"
+check_contains "$CI_YML" "cargo test -q --locked --test engine_lsp" "CI has locked engine_lsp regression job"
+check_contains "$CI_YML" "cargo test -q --locked" "CI has locked cargo test job"
+check_contains "$CI_YML" "cargo clippy --locked" "CI has locked clippy in check path"
 
 if [[ "$RUN_REGRESSION" -eq 1 ]]; then
-  run_check "local cargo test -q --test engine_lsp" cargo test -q --test engine_lsp
-  run_check "local cargo test -q" cargo test -q
-  run_check "local cargo clippy -q --all-targets -- -D warnings" cargo clippy -q --all-targets -- -D warnings
+  run_check "local cargo test -q --locked --test engine_lsp" cargo test -q --locked --test engine_lsp
+  run_check "local cargo test -q --locked" cargo test -q --locked
+  run_check "local cargo clippy --locked -q --all-targets -- -D warnings" cargo clippy --locked -q --all-targets -- -D warnings
 else
   echo "[SKIP] local cargo regression commands (requested --skip-regression)"
 fi

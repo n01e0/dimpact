@@ -492,9 +492,9 @@ jobs:
           exec > >(tee -a "$LOG") 2>&1
 
           STRICT_E2E_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-e2e.log"
-          echo "::group::cargo test -q --test engine_lsp (strict real-LSP, env-gated)"
+          echo "::group::cargo test -q --locked --test engine_lsp (strict real-LSP, env-gated)"
           set +e
-          cargo test -q --test engine_lsp 2>&1 | tee "$STRICT_E2E_LOG"
+          cargo test -q --locked --test engine_lsp 2>&1 | tee "$STRICT_E2E_LOG"
           status=${PIPESTATUS[0]}
           set -e
           echo "::endgroup::"
@@ -713,9 +713,9 @@ jobs:
           echo "[retry] lane gates after setup: ts=${DIMPACT_E2E_STRICT_LSP_TYPESCRIPT:-unset} js=${DIMPACT_E2E_STRICT_LSP_JAVASCRIPT:-unset} py=${DIMPACT_E2E_STRICT_LSP_PYTHON:-unset} go=${DIMPACT_E2E_STRICT_LSP_GO:-unset} java=${DIMPACT_E2E_STRICT_LSP_JAVA:-unset} ruby=${DIMPACT_E2E_STRICT_LSP_RUBY:-unset}"
 
           STRICT_E2E_RETRY_LOG="$NIGHTLY_LOG_DIR/engine-lsp-strict-e2e-retry.log"
-          echo "::group::cargo test -q --test engine_lsp (strict real-LSP retry)"
+          echo "::group::cargo test -q --locked --test engine_lsp (strict real-LSP retry)"
           set +e
-          cargo test -q --test engine_lsp 2>&1 | tee "$STRICT_E2E_RETRY_LOG"
+          cargo test -q --locked --test engine_lsp 2>&1 | tee "$STRICT_E2E_RETRY_LOG"
           status=${PIPESTATUS[0]}
           set -e
           echo "::endgroup::"
