@@ -30,8 +30,6 @@ ENGINE_LSP_TEST="tests/engine_lsp.rs"
 CI_YML=".github/workflows/CI.yml"
 BENCH_YML=".github/workflows/bench.yml"
 BENCH_SCRIPT="scripts/bench-impact-engines.sh"
-README_EN="README.md"
-README_JA="README_ja.md"
 
 PASS=0
 FAIL=0
@@ -77,8 +75,6 @@ check_file "$ENGINE_LSP_TEST" || true
 check_file "$CI_YML" || true
 check_file "$BENCH_YML" || true
 check_file "$BENCH_SCRIPT" || true
-check_file "$README_EN" || true
-check_file "$README_JA" || true
 
 echo
 printf "== checklist-1: strict E2E 6 languages x 3 directions ==\n"
@@ -124,7 +120,7 @@ check_contains "$BENCH_SCRIPT" "[threshold-check] RESULT=FAIL" "threshold fail s
 check_contains "$BENCH_SCRIPT" "::error::THRESHOLD FAILED:" "GitHub error annotation is emitted"
 
 echo
-printf "== checklist-4: README / README_ja strict E2E sync ==\n"
+printf "== checklist-4: graduation doc strict E2E sync ==\n"
 for var in \
   DIMPACT_E2E_STRICT_LSP_TYPESCRIPT \
   DIMPACT_E2E_STRICT_LSP_JAVASCRIPT \
@@ -132,11 +128,9 @@ for var in \
   DIMPACT_E2E_STRICT_LSP_GO \
   DIMPACT_E2E_STRICT_LSP_JAVA \
   DIMPACT_E2E_STRICT_LSP_PYTHON; do
-  check_contains "$README_EN" "$var" "README.md includes $var"
-  check_contains "$README_JA" "$var" "README_ja.md includes $var"
+  check_contains "$DOC" "$var" "graduation doc includes $var"
 done
-check_contains "$README_EN" "strict real-LSP target languages" "README.md target language section exists"
-check_contains "$README_JA" "strict real-LSP の対象言語" "README_ja.md target language section exists"
+check_contains "$DOC" "strict real-LSP target languages" "graduation doc target language section exists"
 
 echo
 printf "== summary ==\n"
