@@ -22,9 +22,21 @@
    - 閾値更新ポリシー（段階的調整 + safety floor）に従って運用されている
 
 4. **運用ドキュメント整備**
-   - README / README_ja に strict E2E 実行条件（言語サーバー + env gate）が反映済み
+   - `docs/lsp-experimental-graduation.md` を strict E2E 実行条件（言語サーバー + env gate）の source of truth とする
+   - README / README_ja は詳細を複製せず、このドキュメントへの入口として保つ
    - bench 実行手順と注意点（既存 TS/Rust 運用との整合）が反映済み
    - nightly / CI summary で `skip-safe 残件` と `fail-fast 昇格済み` が明示される
+
+### strict real-LSP target languages / env gates
+
+The graduation check uses this document, not README, as the source of truth for strict real-LSP target-language env gates.
+
+- `DIMPACT_E2E_STRICT_LSP_TYPESCRIPT`
+- `DIMPACT_E2E_STRICT_LSP_JAVASCRIPT`
+- `DIMPACT_E2E_STRICT_LSP_RUBY`
+- `DIMPACT_E2E_STRICT_LSP_GO`
+- `DIMPACT_E2E_STRICT_LSP_JAVA`
+- `DIMPACT_E2E_STRICT_LSP_PYTHON`
 
 ## 卒業判定時の確認チェックリスト
 

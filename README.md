@@ -171,19 +171,6 @@ dimpact id --help
 - PDG / propagation is currently strongest in Rust and Ruby
 - `summary.affected_processes` is not implemented
 
-## strict real-LSP target languages
-
-The README keeps this section intentionally short, but CI expects the target-language env gates to stay discoverable here.
-
-- `DIMPACT_E2E_STRICT_LSP_TYPESCRIPT`
-- `DIMPACT_E2E_STRICT_LSP_JAVASCRIPT`
-- `DIMPACT_E2E_STRICT_LSP_RUBY`
-- `DIMPACT_E2E_STRICT_LSP_GO`
-- `DIMPACT_E2E_STRICT_LSP_JAVA`
-- `DIMPACT_E2E_STRICT_LSP_PYTHON`
-
-For the full strict LSP / graduation details, see `docs/` and `scripts/verify-lsp-graduation.sh`.
-
 ## Docs
 
 Long-form design notes, rollups, evaluation docs, and implementation details live in `docs/`.
