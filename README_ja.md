@@ -1,180 +1,116 @@
 # dimpact
 
-変更差分から影響範囲を抽出するための、高速な多言語対応 impact analysis ツール。
+`dimpact` は、git diff や明示的なシンボル指定を入力として、変更の影響範囲を解析する CLI ツールです。
+変更行をシンボルへ対応付けし、参照関係をたどって、どのコードが影響を受けそうかを出力します。
 
-`git diff` あるいは seed symbol を入力すると、変更されたシンボル、影響を受けるシンボル、影響ファイル、必要に応じてエッジを返します。主目的は **「この diff でどこが影響を受けるか」** を出すことです。
+## できること
 
-## Installation
+- unified diff を stdin から解析
+- Rust / Ruby / Python / JavaScript / TypeScript / TSX / Go / Java の変更シンボルを検出
+- diff またはシードシンボルから callers / callees の影響解析を実行
+- JSON / YAML / DOT / HTML で出力
+- ファイル / 行 / 名前から Symbol ID を生成
+- SQLite ベースのローカルキャッシュで解析を高速化
+- 既定では Tree-Sitter、必要に応じて LSP エンジンも利用可能
+
+## インストール
 
 ### ソースからビルド
 
 ```bash
 cargo build --release
+./target/release/dimpact --help
 ```
 
-生成バイナリ:
+### Cargo の bin ディレクトリへインストール
 
 ```bash
-./target/release/dimpact
+cargo install --path .
+dimpact --help
 ```
 
-### シェル補完
+## 基本的な使い方
 
-```bash
-dimpact completions bash > /tmp/dimpact.bash
-source /tmp/dimpact.bash
-```
-
-## Usage
-
-### 1. diff をパース
+### 1. diff をパースする
 
 ```bash
 git diff --no-ext-diff | dimpact diff -f json
 ```
 
-### 2. changed symbols を出す
+### 2. 変更されたシンボルを出す
 
 ```bash
-git diff --no-ext-diff | dimpact changed -f json
+git diff --no-ext-diff | dimpact changed --lang auto -f json
 ```
 
-### 3. diff から impact analysis
+### 3. diff から影響解析する
 
 ```bash
 git diff --no-ext-diff | dimpact impact --direction callers --with-edges -f json
 ```
 
-### 4. seed symbol から impact analysis
+### 4. シードシンボルから影響解析する
 
 ```bash
-dimpact impact --seed-symbol 'rust:src/lib.rs:fn:foo:12' --direction callers -f json
-dimpact impact --seed-json '["typescript:src/a.ts:fn:run:10"]' -f json
+dimpact impact \
+  --seed-symbol 'rust:src/lib.rs:fn:foo:12' \
+  --direction callers \
+  -f json
 ```
 
-### 5. changed / seed ごとに分けて見る
+### 5. Symbol ID を生成する
 
 ```bash
-git diff --no-ext-diff | dimpact impact --per-seed --direction both --with-edges -f json
-```
-
-### 6. Symbol ID を生成
-
-```bash
-# ファイル内の id を列挙
-dimpact id --path src/lib.rs --raw
-
-# 行で絞る
-dimpact id --path src/lib.rs --line 120 -f json
-
-# 名前 + kind で絞る
 dimpact id --path src/lib.rs --name foo --kind fn --raw
 ```
 
-## 主な機能
+## 主なコマンド
 
-- **diff ベースの impact analysis**
-  - changed symbols / impacted symbols / impacted files / optional edges
-- **seed ベースの impact analysis**
-  - diff なしでも Symbol ID や JSON で解析可能
-- **per-seed grouping**
-  - changed / seed ごとの波及を個別に確認できる
-- **summary 出力**
-  - `summary.by_depth`
-  - `summary.risk`
-  - `summary.affected_modules`
-- **PDG / propagation 補強**
-  - `--with-pdg`
-  - `--with-propagation`
-- **複数出力形式**
-  - `json`, `yaml`, `dot`, `html`
-- **engine 選択**
-  - `--engine auto|ts|lsp`
-
-## summary 出力
-
-`impact` の JSON/YAML には、一次判断用の `summary` が入ります。
-
-- `summary.by_depth`
-  - direct / transitive の分離
-- `summary.risk`
-  - 軽量な triage ヒント
-- `summary.affected_modules`
-  - impacted symbol の path-based grouping
-
-例:
-
-```json
-{
-  "changed_symbols": [...],
-  "impacted_symbols": [...],
-  "impacted_files": [...],
-  "edges": [...],
-  "summary": {
-    "by_depth": [
-      { "depth": 1, "symbol_count": 3, "file_count": 2 },
-      { "depth": 2, "symbol_count": 7, "file_count": 4 }
-    ],
-    "risk": {
-      "level": "medium",
-      "direct_hits": 3,
-      "transitive_hits": 7,
-      "impacted_files": 4,
-      "impacted_symbols": 10
-    },
-    "affected_modules": [
-      { "module": "src/engine", "symbol_count": 4, "file_count": 2 }
-    ]
-  }
-}
-```
-
-## PDG / propagation
-
-- `--with-pdg`
-  - 通常の impact traversal に、ローカルな PDG/DFG 風の文脈を足す
-- `--with-propagation`
-  - PDG の上に propagation bridge を足す
-- `--per-seed`
-  - 通常 impact でも PDG / propagation でも使える
-
-現在の実用レンジ:
-
-- いま特に強いのは **Rust** と **Ruby**
-- まだ **bounded** で、完全な project-wide PDG ではない
-- 実態としては **通常 impact traversal + bounded PDG / propagation augmentation** に近い
+| コマンド | 役割 |
+| --- | --- |
+| `diff` | stdin から unified diff をパース |
+| `changed` | 変更行をシンボルへ対応付け |
+| `impact` | diff またはシードから callers / callees / both を解析 |
+| `id` | ファイル・行・名前から Symbol ID を生成 |
+| `cache` | キャッシュの build / update / stats / clear |
+| `completions` | シェル補完スクリプトを生成 |
 
 ## よく使うオプション
 
-```text
---direction callers|callees|both
---with-edges
---per-seed
---with-pdg
---with-propagation
---engine auto|ts|lsp
---min-confidence confirmed|inferred|dynamic-fallback
--f json|yaml|dot|html
-```
+- `--direction callers|callees|both`
+- `--with-edges`
+- `--max-depth N`
+- `--engine auto|ts|lsp`
+- `--seed-symbol LANG:PATH:KIND:NAME:LINE`
+- `--seed-json <json|path|->`
+- `-f json|yaml|dot|html`
 
-CLI 全体はこれで確認できます。
+## キャッシュ
+
+解析済みのシンボルと参照エッジを SQLite に保存して、繰り返し実行を高速化できます。
 
 ```bash
-dimpact --help
-dimpact impact --help
-dimpact id --help
+dimpact cache build --scope local
+dimpact cache stats --scope local
 ```
 
-## Limitations
+既定のローカルキャッシュ保存先:
 
-- PDG / propagation は full project-wide whole-program analysis ではない
-- PDG / propagation が特に強いのは現在 Rust / Ruby
-- `summary.affected_processes` は未実装
+```text
+.dimpact/cache/v1/index.db
+```
 
-## Docs
+## 補足
 
-長い設計メモ、rollup、評価ドキュメント、実装詳細は `docs/` に置いてあります。
+- `diff` / `changed` / diff ベースの `impact` は stdin の unified diff を前提とします。
+- シードベースの `impact` は stdin 不要です。
+- 既定エンジンは Tree-Sitter です。
+- LSP モードは `--engine lsp` で利用できます。
 
-## License
+## 詳細ドキュメント
 
-MIT
+strict-LSP 運用や設計メモなど、詳細な資料は [`docs/`](docs/) を参照してください。
+
+## ライセンス
+
+MIT. 詳細は [LICENSE](LICENSE) を参照してください。
