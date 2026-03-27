@@ -17,38 +17,42 @@ jobs:
       - id: impact
         name: Run impact & format tables
         run: |
+          MAX_CHANGED=50
+          MAX_IMPACTED=5
           git fetch origin ${{ github.base_ref }} && \
           git diff --no-ext-diff origin/${{ github.base_ref }}...HEAD | \
           docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --per-seed -f json | \
-          jq -r '
+          jq -r --argjson max_changed "$MAX_CHANGED" --argjson max_impacted "$MAX_IMPACTED" '
           "## Changed Symbols\n",
-          "| Name | Kind | File | Range |",
-          "|------|------|------|-------|",
-          (.[] | .changed_symbol as $c |
-            "| [" + $c.name + "](#"+($c.name|ascii_downcase)+") | " +
+          "| Name | Kind | File | Range | Impacted Preview |",
+          "|------|------|------|-------|------------------|",
+          (.[:$max_changed][] | .changed_symbol as $c |
+            "| `" + $c.name + "` | " +
             $c.kind + " | " +
             $c.file + " | " +
-            ($c.range.start_line|tostring)+"-"+($c.range.end_line|tostring) + " |"
+            ($c.range.start_line|tostring)+"-"+($c.range.end_line|tostring) + " | " +
+            (
+              [
+                .impacts[]?.output.impacted_symbols[]?.name
+              ]
+              | unique as $names
+              | if ($names | length) == 0 then
+                  "None"
+                else
+                  (($names[:$max_impacted] | join(", "))
+                   + if ($names | length) > $max_impacted then
+                       ", ... (+" + (($names | length) - $max_impacted | tostring) + " more)"
+                     else
+                       ""
+                     end)
+                end
+            ) +
+            " |"
           ),
-          "\n## Details\n",
-          "<details><summary>Show details</summary>",
-          (.[] | .changed_symbol as $c |
-            "### <a name=\"" + ($c.name|ascii_downcase) + "\"></a>" + $c.name + "\n" +
-            "<details><summary>Show details</summary>\n\n" +
-            "- **ID:** `" + $c.id + "`\n" +
-            "- **Kind:** `" + $c.kind + "`\n" +
-            "- **File:** `" + $c.file + "`\n" +
-            "- **Range:** `" + ($c.range.start_line|tostring) + "-" + ($c.range.end_line|tostring) + "`\n" +
-            "- **Language:** `" + $c.language + "`\n\n" +
-            "#### Impacts\n" +
-            (if (.impacts | length) > 0 then
-               (.impacts[] | "- Direction: " + .direction + "\n" +
-                 "  - Impacted Symbols: " + ((.output.impacted_symbols[]?.name) | tostring)? + "\n" +
-                 "  - Impacted Files: " + ((.output.impacted_files[])? // "None")
-               )
-             else "- None" end) + "\n\n</details>\n"
-          ),
-          "</details>"' > impact-tables.md
+          (if length > $max_changed then
+             "\n_Showing first " + ($max_changed|tostring) + " of " + (length|tostring) + " changed symbols._"
+           else empty end)
+          ' > impact-tables.md
 
       - name: comment
         if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
