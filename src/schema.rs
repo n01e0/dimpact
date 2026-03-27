@@ -418,12 +418,13 @@ mod tests {
     }
 
     #[test]
-    fn read_schema_document_loads_registered_placeholder_file() {
+    fn read_schema_document_loads_registered_concrete_file() {
         let document =
-            read_schema_document("dimpact:json/v1/diff/default").expect("read placeholder schema");
+            read_schema_document("dimpact:json/v1/diff/default").expect("read concrete schema");
 
         assert!(document.contains("\"$id\": \"dimpact:json/v1/diff/default\""));
-        assert!(document.contains("placeholder schema document"));
+        assert!(document.contains("\"status\": \"concrete\""));
+        assert!(document.contains("\"change_kind\""));
     }
 
     #[test]
