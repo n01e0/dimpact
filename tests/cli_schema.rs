@@ -52,6 +52,55 @@ fn schema_id_json_returns_registered_document() {
 }
 
 #[test]
+fn impact_default_schema_is_concrete_and_models_summary_only_shape() {
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .arg("schema")
+        .arg("--id")
+        .arg("dimpact:json/v1/impact/default/summary_only/call_graph")
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref()).to_string();
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("valid schema document");
+
+    assert_eq!(
+        value.pointer("/x-dimpact/status"),
+        Some(&serde_json::Value::String("concrete".to_string()))
+    );
+    assert_eq!(
+        value.pointer("/properties/edges/maxItems"),
+        Some(&serde_json::Value::Number(0.into()))
+    );
+    assert_eq!(
+        value.pointer("/$defs/edge_provenance/enum"),
+        Some(&serde_json::json!(["call_graph"]))
+    );
+    assert_eq!(
+        value.pointer("/$defs/reference/required"),
+        Some(&serde_json::json!([
+            "from",
+            "to",
+            "kind",
+            "file",
+            "line",
+            "certainty",
+            "confidence",
+            "provenance"
+        ]))
+    );
+    assert_eq!(
+        value.pointer("/$defs/impact_summary/required"),
+        Some(&serde_json::json!(["by_depth", "affected_modules", "risk"]))
+    );
+    assert!(
+        value
+            .pointer("/$defs/impact_witness/properties/bridge_execution_family")
+            .is_none()
+    );
+}
+
+#[test]
 fn schema_id_rejects_unknown_schema_ids() {
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     cmd.arg("schema")
