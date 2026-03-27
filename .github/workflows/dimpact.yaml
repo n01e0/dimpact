@@ -23,10 +23,11 @@ jobs:
           git diff --no-ext-diff origin/${{ github.base_ref }}...HEAD | \
           docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --per-seed -f json | \
           jq -r --argjson max_changed "$MAX_CHANGED" --argjson max_impacted "$MAX_IMPACTED" '
+          (.data // .) as $payload |
           "## Changed Symbols\n",
           "| Name | Kind | File | Range | Impacted Preview |",
           "|------|------|------|-------|------------------|",
-          (.[:$max_changed][] | .changed_symbol as $c |
+          ($payload[:$max_changed][] | .changed_symbol as $c |
             "| `" + $c.name + "` | " +
             $c.kind + " | " +
             $c.file + " | " +
@@ -49,8 +50,8 @@ jobs:
             ) +
             " |"
           ),
-          (if length > $max_changed then
-             "\n_Showing first " + ($max_changed|tostring) + " of " + (length|tostring) + " changed symbols._"
+          (if ($payload | length) > $max_changed then
+             "\n_Showing first " + ($max_changed|tostring) + " of " + (($payload | length)|tostring) + " changed symbols._"
            else empty end)
           ' > impact-tables.md
 
