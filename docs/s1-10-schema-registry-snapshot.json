@@ -1,0 +1,268 @@
+{
+  "generated_by": "scripts/collect-schema-snapshot.py",
+  "schema_count": 15,
+  "schema_list": [
+    {
+      "profile": "diff/default",
+      "schema_id": "dimpact:json/v1/diff/default",
+      "schema_path": "resources/schemas/json/v1/diff/default.schema.json"
+    },
+    {
+      "profile": "changed/default",
+      "schema_id": "dimpact:json/v1/changed/default",
+      "schema_path": "resources/schemas/json/v1/changed/default.schema.json"
+    },
+    {
+      "profile": "id/default",
+      "schema_id": "dimpact:json/v1/id/default",
+      "schema_path": "resources/schemas/json/v1/id/default.schema.json"
+    },
+    {
+      "profile": "impact/default/summary_only/call_graph",
+      "schema_id": "dimpact:json/v1/impact/default/summary_only/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json"
+    },
+    {
+      "profile": "impact/default/summary_only/pdg",
+      "schema_id": "dimpact:json/v1/impact/default/summary_only/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/default/summary_only/pdg.schema.json"
+    },
+    {
+      "profile": "impact/default/summary_only/propagation",
+      "schema_id": "dimpact:json/v1/impact/default/summary_only/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/default/summary_only/propagation.schema.json"
+    },
+    {
+      "profile": "impact/default/with_edges/call_graph",
+      "schema_id": "dimpact:json/v1/impact/default/with_edges/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/default/with_edges/call_graph.schema.json"
+    },
+    {
+      "profile": "impact/default/with_edges/pdg",
+      "schema_id": "dimpact:json/v1/impact/default/with_edges/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/default/with_edges/pdg.schema.json"
+    },
+    {
+      "profile": "impact/default/with_edges/propagation",
+      "schema_id": "dimpact:json/v1/impact/default/with_edges/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/default/with_edges/propagation.schema.json"
+    },
+    {
+      "profile": "impact/per_seed/summary_only/call_graph",
+      "schema_id": "dimpact:json/v1/impact/per_seed/summary_only/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/summary_only/call_graph.schema.json"
+    },
+    {
+      "profile": "impact/per_seed/summary_only/pdg",
+      "schema_id": "dimpact:json/v1/impact/per_seed/summary_only/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/summary_only/pdg.schema.json"
+    },
+    {
+      "profile": "impact/per_seed/summary_only/propagation",
+      "schema_id": "dimpact:json/v1/impact/per_seed/summary_only/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/summary_only/propagation.schema.json"
+    },
+    {
+      "profile": "impact/per_seed/with_edges/call_graph",
+      "schema_id": "dimpact:json/v1/impact/per_seed/with_edges/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/call_graph.schema.json"
+    },
+    {
+      "profile": "impact/per_seed/with_edges/pdg",
+      "schema_id": "dimpact:json/v1/impact/per_seed/with_edges/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/pdg.schema.json"
+    },
+    {
+      "profile": "impact/per_seed/with_edges/propagation",
+      "schema_id": "dimpact:json/v1/impact/per_seed/with_edges/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/propagation.schema.json"
+    }
+  ],
+  "resolve_cases": [
+    {
+      "argv": [
+        "diff"
+      ],
+      "result": {
+        "profile": "diff/default",
+        "schema_id": "dimpact:json/v1/diff/default",
+        "schema_path": "resources/schemas/json/v1/diff/default.schema.json"
+      }
+    },
+    {
+      "argv": [
+        "changed",
+        "--lang",
+        "rust"
+      ],
+      "result": {
+        "profile": "changed/default",
+        "schema_id": "dimpact:json/v1/changed/default",
+        "schema_path": "resources/schemas/json/v1/changed/default.schema.json"
+      }
+    },
+    {
+      "argv": [
+        "impact"
+      ],
+      "result": {
+        "profile": "impact/default/summary_only/call_graph",
+        "schema_id": "dimpact:json/v1/impact/default/summary_only/call_graph",
+        "schema_path": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json"
+      }
+    },
+    {
+      "argv": [
+        "impact",
+        "--with-edges"
+      ],
+      "result": {
+        "profile": "impact/default/with_edges/call_graph",
+        "schema_id": "dimpact:json/v1/impact/default/with_edges/call_graph",
+        "schema_path": "resources/schemas/json/v1/impact/default/with_edges/call_graph.schema.json"
+      }
+    },
+    {
+      "argv": [
+        "impact",
+        "--per-seed",
+        "--with-pdg"
+      ],
+      "result": {
+        "profile": "impact/per_seed/summary_only/pdg",
+        "schema_id": "dimpact:json/v1/impact/per_seed/summary_only/pdg",
+        "schema_path": "resources/schemas/json/v1/impact/per_seed/summary_only/pdg.schema.json"
+      }
+    },
+    {
+      "argv": [
+        "impact",
+        "--per-seed",
+        "--with-edges",
+        "--with-propagation"
+      ],
+      "result": {
+        "profile": "impact/per_seed/with_edges/propagation",
+        "schema_id": "dimpact:json/v1/impact/per_seed/with_edges/propagation",
+        "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/propagation.schema.json"
+      }
+    },
+    {
+      "argv": [
+        "id"
+      ],
+      "result": {
+        "profile": "id/default",
+        "schema_id": "dimpact:json/v1/id/default",
+        "schema_path": "resources/schemas/json/v1/id/default.schema.json"
+      }
+    }
+  ],
+  "documents": [
+    {
+      "schema_id": "dimpact:json/v1/diff/default",
+      "schema_path": "resources/schemas/json/v1/diff/default.schema.json",
+      "title": "dimpact diff schema: default",
+      "status": "concrete",
+      "sha256": "f042f3a0894e886e2782d8944fb645336d44f1f05175cc8773cab4d9f24a308f"
+    },
+    {
+      "schema_id": "dimpact:json/v1/changed/default",
+      "schema_path": "resources/schemas/json/v1/changed/default.schema.json",
+      "title": "dimpact changed schema: default",
+      "status": "concrete",
+      "sha256": "3d9aefe567d83de85f19552574201a53b125221a101c3406b7f4eac0608cb466"
+    },
+    {
+      "schema_id": "dimpact:json/v1/id/default",
+      "schema_path": "resources/schemas/json/v1/id/default.schema.json",
+      "title": "dimpact id schema: default",
+      "status": "concrete",
+      "sha256": "1ee062f3efeabf2a597c1e5df6a22a1d4230c4f3cfcd2c01477153477fd9e2d7"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/default/summary_only/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json",
+      "title": "dimpact impact schema: default/summary_only/call_graph",
+      "status": "concrete",
+      "sha256": "24bfea4f63b425275641ff92cce88d06ddab5eda4e6ef6fd8b87d2665500850c"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/default/summary_only/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/default/summary_only/pdg.schema.json",
+      "title": "dimpact impact schema: default/summary_only/pdg",
+      "status": "concrete",
+      "sha256": "f803b3fce10b49732bf623386dd222388a32ea759b8d20349dfb708a72536f43"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/default/summary_only/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/default/summary_only/propagation.schema.json",
+      "title": "dimpact impact schema: default/summary_only/propagation",
+      "status": "concrete",
+      "sha256": "ad42bc919c5daa330cb14f62d76ac3ab088cbaf1c44754af960943dafa2f983d"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/default/with_edges/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/default/with_edges/call_graph.schema.json",
+      "title": "dimpact impact schema: default/with_edges/call_graph",
+      "status": "concrete",
+      "sha256": "df8f52593705196ab4893ce23743ff881f12996406186a5b95a8906e37b7d199"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/default/with_edges/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/default/with_edges/pdg.schema.json",
+      "title": "dimpact impact schema: default/with_edges/pdg",
+      "status": "concrete",
+      "sha256": "2417577d02a1815a36509e67b4daa36d36d57e1b0b21bc797f5759d453a3ac4f"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/default/with_edges/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/default/with_edges/propagation.schema.json",
+      "title": "dimpact impact schema: default/with_edges/propagation",
+      "status": "concrete",
+      "sha256": "c7eb35c41f498df717795f7971a1c0c6e558ec4a8083afd4c38c66eec61d2c62"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/per_seed/summary_only/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/summary_only/call_graph.schema.json",
+      "title": "dimpact impact schema: per_seed/summary_only/call_graph",
+      "status": "concrete",
+      "sha256": "9a2d17508d684d549dea2347a3520c94d531d8e6bab3a1ad99de6fb6ffc51366"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/per_seed/summary_only/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/summary_only/pdg.schema.json",
+      "title": "dimpact impact schema: per_seed/summary_only/pdg",
+      "status": "concrete",
+      "sha256": "8d8c9110119c0590c3221e706cb480836bc9ace211f9226882fea08791aea94f"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/per_seed/summary_only/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/summary_only/propagation.schema.json",
+      "title": "dimpact impact schema: per_seed/summary_only/propagation",
+      "status": "concrete",
+      "sha256": "1f8ff924467d6a450f9b2bdc9fd08bd77c306554f9673172866096dbe516d62f"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/per_seed/with_edges/call_graph",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/call_graph.schema.json",
+      "title": "dimpact impact schema: per_seed/with_edges/call_graph",
+      "status": "concrete",
+      "sha256": "ce649159708f16a72f559be4fce8e98c89d8eb55c6dc0f066cee1e4e4a204eee"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/per_seed/with_edges/pdg",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/pdg.schema.json",
+      "title": "dimpact impact schema: per_seed/with_edges/pdg",
+      "status": "concrete",
+      "sha256": "ee922b6b0599f0e06bd0ba20e395d931aea7902db984ea10182f9bb141f000d2"
+    },
+    {
+      "schema_id": "dimpact:json/v1/impact/per_seed/with_edges/propagation",
+      "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/propagation.schema.json",
+      "title": "dimpact impact schema: per_seed/with_edges/propagation",
+      "status": "concrete",
+      "sha256": "a81bc3a3575d641b3513b0063e310ea234cddbcc16cd2984eda6387730e5e6e9"
+    }
+  ]
+}
