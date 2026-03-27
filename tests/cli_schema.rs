@@ -2,6 +2,19 @@
 
 use predicates::prelude::*;
 
+fn fetch_schema_document(schema_id: &str) -> serde_json::Value {
+    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
+    let assert = cmd
+        .arg("schema")
+        .arg("--id")
+        .arg(schema_id)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref()).to_string();
+    serde_json::from_str(&stdout).expect("valid schema document")
+}
+
 #[test]
 fn schema_list_json_reports_registered_ids() {
     let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
@@ -28,16 +41,7 @@ fn schema_list_json_reports_registered_ids() {
 
 #[test]
 fn schema_id_json_returns_registered_document() {
-    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert = cmd
-        .arg("schema")
-        .arg("--id")
-        .arg("dimpact:json/v1/diff/default")
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref()).to_string();
-    let value: serde_json::Value = serde_json::from_str(&stdout).expect("valid schema document");
+    let value = fetch_schema_document("dimpact:json/v1/diff/default");
 
     assert_eq!(
         value.get("$id"),
@@ -53,16 +57,7 @@ fn schema_id_json_returns_registered_document() {
 
 #[test]
 fn impact_default_schema_is_concrete_and_models_summary_only_shape() {
-    let mut cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
-    let assert = cmd
-        .arg("schema")
-        .arg("--id")
-        .arg("dimpact:json/v1/impact/default/summary_only/call_graph")
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref()).to_string();
-    let value: serde_json::Value = serde_json::from_str(&stdout).expect("valid schema document");
+    let value = fetch_schema_document("dimpact:json/v1/impact/default/summary_only/call_graph");
 
     assert_eq!(
         value.pointer("/x-dimpact/status"),
@@ -96,6 +91,82 @@ fn impact_default_schema_is_concrete_and_models_summary_only_shape() {
     assert!(
         value
             .pointer("/$defs/impact_witness/properties/bridge_execution_family")
+            .is_none()
+    );
+}
+
+#[test]
+fn impact_variant_schemas_are_concrete_and_capture_profile_specific_constraints() {
+    let per_seed = fetch_schema_document("dimpact:json/v1/impact/per_seed/summary_only/call_graph");
+    assert_eq!(
+        per_seed.pointer("/x-dimpact/status"),
+        Some(&serde_json::Value::String("concrete".to_string()))
+    );
+    assert_eq!(
+        per_seed.get("type"),
+        Some(&serde_json::Value::String("array".to_string()))
+    );
+    assert_eq!(
+        per_seed.pointer("/items/properties/impacts/maxItems"),
+        Some(&serde_json::Value::Number(2.into()))
+    );
+    assert_eq!(
+        per_seed.pointer("/items/properties/impacts/items/properties/direction/enum"),
+        Some(&serde_json::json!(["callers", "callees"]))
+    );
+    assert_eq!(
+        per_seed
+            .pointer("/items/properties/impacts/items/properties/output/properties/edges/maxItems"),
+        Some(&serde_json::Value::Number(0.into()))
+    );
+
+    let with_edges = fetch_schema_document("dimpact:json/v1/impact/default/with_edges/call_graph");
+    assert_eq!(
+        with_edges.pointer("/x-dimpact/status"),
+        Some(&serde_json::Value::String("concrete".to_string()))
+    );
+    assert!(with_edges.pointer("/properties/edges/maxItems").is_none());
+    assert_eq!(
+        with_edges.pointer("/$defs/edge_provenance/enum"),
+        Some(&serde_json::json!(["call_graph"]))
+    );
+
+    let pdg = fetch_schema_document("dimpact:json/v1/impact/default/summary_only/pdg");
+    assert_eq!(
+        pdg.pointer("/$defs/ref_kind/enum"),
+        Some(&serde_json::json!(["call", "data", "control"]))
+    );
+    assert_eq!(
+        pdg.pointer("/$defs/edge_provenance/enum"),
+        Some(&serde_json::json!(["call_graph", "local_dfg"]))
+    );
+    assert_eq!(
+        pdg.pointer("/$defs/impact_summary/required"),
+        Some(&serde_json::json!([
+            "by_depth",
+            "affected_modules",
+            "risk",
+            "slice_selection"
+        ]))
+    );
+    assert!(
+        pdg.pointer("/$defs/impact_witness/properties/bridge_execution_family")
+            .is_some()
+    );
+
+    let propagation =
+        fetch_schema_document("dimpact:json/v1/impact/per_seed/with_edges/propagation");
+    assert_eq!(
+        propagation.pointer("/$defs/edge_provenance/enum"),
+        Some(&serde_json::json!([
+            "call_graph",
+            "local_dfg",
+            "symbolic_propagation"
+        ]))
+    );
+    assert!(
+        propagation
+            .pointer("/items/properties/impacts/items/properties/output/properties/edges/maxItems")
             .is_none()
     );
 }

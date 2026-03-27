@@ -1,12 +1,990 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dimpact:json/v1/impact/default/with_edges/propagation",
-  "title": "dimpact placeholder schema: impact/default/with_edges/propagation",
-  "description": "Minimal placeholder schema document registered in S1-4. Concrete payload contracts will be tightened in later S1 tasks.",
-  "$comment": "This placeholder schema document is intentionally permissive until the concrete output contracts land.",
+  "title": "dimpact impact schema: default/with_edges/propagation",
+  "description": "Concrete schema for the impact JSON output variant selected by `impact/default/with_edges/propagation`.",
+  "$comment": "S1-7 concrete schema for impact/default/with_edges/propagation.",
+  "$defs": {
+    "text_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_line",
+        "end_line"
+      ],
+      "properties": {
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "symbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "file",
+        "range",
+        "language"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "function",
+            "method",
+            "struct",
+            "enum",
+            "trait",
+            "module"
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/text_range"
+        },
+        "language": {
+          "type": "string"
+        }
+      }
+    },
+    "ref_kind": {
+      "type": "string",
+      "enum": [
+        "call",
+        "data",
+        "control"
+      ]
+    },
+    "edge_certainty": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "inferred",
+        "dynamic_fallback"
+      ]
+    },
+    "edge_provenance": {
+      "type": "string",
+      "enum": [
+        "call_graph",
+        "local_dfg",
+        "symbolic_propagation"
+      ]
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "kind",
+        "file",
+        "line",
+        "certainty",
+        "confidence",
+        "provenance"
+      ],
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ref_kind"
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "certainty": {
+          "$ref": "#/$defs/edge_certainty"
+        },
+        "confidence": {
+          "$ref": "#/$defs/edge_certainty"
+        },
+        "provenance": {
+          "$ref": "#/$defs/edge_provenance"
+        }
+      }
+    },
+    "impact_witness_hop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_symbol_id",
+        "to_symbol_id",
+        "edge"
+      ],
+      "properties": {
+        "from_symbol_id": {
+          "type": "string"
+        },
+        "to_symbol_id": {
+          "type": "string"
+        },
+        "edge": {
+          "$ref": "#/$defs/reference"
+        }
+      }
+    },
+    "impact_witness_compact_hop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_symbol_id",
+        "to_symbol_id",
+        "edge",
+        "collapsed_hops"
+      ],
+      "properties": {
+        "from_symbol_id": {
+          "type": "string"
+        },
+        "to_symbol_id": {
+          "type": "string"
+        },
+        "edge": {
+          "$ref": "#/$defs/reference"
+        },
+        "collapsed_hops": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "impact_depth_bucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "depth",
+        "symbol_count",
+        "file_count"
+      ],
+      "properties": {
+        "depth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "symbol_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "impact_affected_module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "module",
+        "symbol_count",
+        "file_count"
+      ],
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "symbol_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "impact_risk_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "direct_hits",
+        "transitive_hits",
+        "impacted_files",
+        "impacted_symbols"
+      ],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "direct_hits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transitive_hits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "impacted_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "impacted_symbols": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "confidence_filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_confidence",
+        "exclude_dynamic_fallback",
+        "input_edge_count",
+        "kept_edge_count"
+      ],
+      "properties": {
+        "min_confidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "confirmed",
+            "inferred",
+            "dynamic_fallback",
+            null
+          ]
+        },
+        "exclude_dynamic_fallback": {
+          "type": "boolean"
+        },
+        "input_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kept_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "impact_slice_bridge_kind": {
+      "type": "string",
+      "enum": [
+        "wrapper_return",
+        "boundary_alias_continuation",
+        "require_relative_chain"
+      ]
+    },
+    "impact_slice_reason_kind": {
+      "type": "string",
+      "enum": [
+        "seed_file",
+        "changed_file",
+        "direct_caller_file",
+        "direct_callee_file",
+        "bridge_completion_file",
+        "bridge_continuation_file",
+        "module_companion_file"
+      ]
+    },
+    "impact_slice_evidence_kind": {
+      "type": "string",
+      "enum": [
+        "return_flow",
+        "assigned_result",
+        "alias_chain",
+        "param_to_return_flow",
+        "require_relative_edge",
+        "explicit_require_relative_load",
+        "module_companion",
+        "companion_file_match",
+        "dynamic_dispatch_literal_target",
+        "callsite_position_hint",
+        "name_path_hint"
+      ]
+    },
+    "impact_slice_negative_evidence_kind": {
+      "type": "string",
+      "enum": [
+        "noisy_return_hint"
+      ]
+    },
+    "impact_slice_candidate_source_kind": {
+      "type": "string",
+      "enum": [
+        "graph_second_hop",
+        "narrow_fallback"
+      ]
+    },
+    "impact_slice_candidate_lane": {
+      "type": "string",
+      "enum": [
+        "return_continuation",
+        "alias_continuation",
+        "require_relative_continuation",
+        "module_companion_fallback"
+      ]
+    },
+    "impact_slice_prune_reason": {
+      "type": "string",
+      "enum": [
+        "already_selected",
+        "bridge_budget_exhausted",
+        "cache_update_budget_exhausted",
+        "local_dfg_budget_exhausted",
+        "suppressed_before_admit",
+        "weaker_same_path_duplicate",
+        "weaker_same_family_sibling",
+        "ranked_out"
+      ]
+    },
+    "impact_witness_slice_ranking_basis": {
+      "type": "string",
+      "enum": [
+        "source_kind",
+        "lane",
+        "primary_evidence_count",
+        "negative_evidence_count",
+        "semantic_support_rank",
+        "secondary_evidence_count",
+        "callsite_position",
+        "lexical_tiebreak"
+      ]
+    },
+    "impact_bridge_execution_family": {
+      "type": "string",
+      "enum": [
+        "return_continuation",
+        "alias_result_stitch",
+        "require_relative_continuation",
+        "mixed_require_relative_alias_stitch",
+        "nested_multi_input_continuation"
+      ]
+    },
+    "impact_bridge_execution_step_family": {
+      "type": "string",
+      "enum": [
+        "callsite_input_binding",
+        "summary_return_bridge",
+        "nested_summary_bridge",
+        "alias_result_stitch",
+        "require_relative_load"
+      ]
+    },
+    "impact_slice_support_edge_certainty": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "inferred",
+        "dynamic_fallback"
+      ]
+    },
+    "impact_slice_scopes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cache_update",
+        "local_dfg",
+        "explanation"
+      ],
+      "properties": {
+        "cache_update": {
+          "type": "boolean"
+        },
+        "local_dfg": {
+          "type": "boolean"
+        },
+        "explanation": {
+          "type": "boolean"
+        }
+      }
+    },
+    "impact_slice_score_tuple": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_rank",
+        "lane_rank",
+        "primary_evidence_count",
+        "secondary_evidence_count",
+        "call_position_rank",
+        "lexical_tiebreak"
+      ],
+      "properties": {
+        "source_rank": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lane_rank": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "primary_evidence_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "secondary_evidence_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "negative_evidence_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "semantic_support_rank": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "call_position_rank": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lexical_tiebreak": {
+          "type": "string"
+        }
+      }
+    },
+    "impact_slice_candidate_support": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "call_graph_support": {
+          "type": "boolean"
+        },
+        "local_dfg_support": {
+          "type": "boolean"
+        },
+        "symbolic_propagation_support": {
+          "type": "boolean"
+        },
+        "edge_certainty": {
+          "$ref": "#/$defs/impact_slice_support_edge_certainty"
+        }
+      }
+    },
+    "impact_slice_candidate_scoring_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_kind",
+        "lane",
+        "primary_evidence_kinds",
+        "secondary_evidence_kinds",
+        "score_tuple"
+      ],
+      "properties": {
+        "source_kind": {
+          "$ref": "#/$defs/impact_slice_candidate_source_kind"
+        },
+        "lane": {
+          "$ref": "#/$defs/impact_slice_candidate_lane"
+        },
+        "primary_evidence_kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_evidence_kind"
+          }
+        },
+        "secondary_evidence_kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_evidence_kind"
+          }
+        },
+        "negative_evidence_kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_negative_evidence_kind"
+          }
+        },
+        "score_tuple": {
+          "$ref": "#/$defs/impact_slice_score_tuple"
+        },
+        "support": {
+          "$ref": "#/$defs/impact_slice_candidate_support"
+        }
+      }
+    },
+    "impact_slice_reason_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed_symbol_id",
+        "tier",
+        "kind"
+      ],
+      "properties": {
+        "seed_symbol_id": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "$ref": "#/$defs/impact_slice_reason_kind"
+        },
+        "via_symbol_id": {
+          "type": "string"
+        },
+        "via_path": {
+          "type": "string"
+        },
+        "bridge_kind": {
+          "$ref": "#/$defs/impact_slice_bridge_kind"
+        },
+        "scoring": {
+          "$ref": "#/$defs/impact_slice_candidate_scoring_summary"
+        }
+      }
+    },
+    "impact_witness_slice_selected_vs_pruned_reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pruned_path",
+        "prune_reason",
+        "selected_better_by",
+        "summary"
+      ],
+      "properties": {
+        "via_symbol_id": {
+          "type": "string"
+        },
+        "via_path": {
+          "type": "string"
+        },
+        "selected_bridge_kind": {
+          "$ref": "#/$defs/impact_slice_bridge_kind"
+        },
+        "pruned_path": {
+          "type": "string"
+        },
+        "prune_reason": {
+          "$ref": "#/$defs/impact_slice_prune_reason"
+        },
+        "pruned_bridge_kind": {
+          "$ref": "#/$defs/impact_slice_bridge_kind"
+        },
+        "selected_better_by": {
+          "$ref": "#/$defs/impact_witness_slice_ranking_basis"
+        },
+        "winning_primary_evidence_kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_evidence_kind"
+          }
+        },
+        "winning_support": {
+          "$ref": "#/$defs/impact_slice_candidate_support"
+        },
+        "losing_side_reason": {
+          "type": "string"
+        },
+        "compact_explanation": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "impact_witness_slice_file_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "witness_hops",
+        "selection_reasons"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "witness_hops": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "selection_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_reason_metadata"
+          }
+        },
+        "seed_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_reason_metadata"
+          }
+        },
+        "selected_vs_pruned_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_witness_slice_selected_vs_pruned_reason"
+          }
+        }
+      }
+    },
+    "impact_witness_slice_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed_symbol_id",
+        "selected_files_on_path"
+      ],
+      "properties": {
+        "seed_symbol_id": {
+          "type": "string"
+        },
+        "selected_files_on_path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_witness_slice_file_context"
+          }
+        }
+      }
+    },
+    "impact_bridge_execution_step_compact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "step_family",
+        "anchor_symbol_id"
+      ],
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/impact_bridge_execution_family"
+        },
+        "step_family": {
+          "$ref": "#/$defs/impact_bridge_execution_step_family"
+        },
+        "anchor_symbol_id": {
+          "type": "string"
+        },
+        "anchor_path": {
+          "type": "string"
+        },
+        "bridge_kind": {
+          "$ref": "#/$defs/impact_slice_bridge_kind"
+        },
+        "reason_kind": {
+          "$ref": "#/$defs/impact_slice_reason_kind"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "impact_slice_file_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "scopes",
+        "reasons"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "scopes": {
+          "$ref": "#/$defs/impact_slice_scopes"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_reason_metadata"
+          }
+        }
+      }
+    },
+    "impact_slice_pruned_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed_symbol_id",
+        "path",
+        "tier",
+        "kind",
+        "prune_reason"
+      ],
+      "properties": {
+        "seed_symbol_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "$ref": "#/$defs/impact_slice_reason_kind"
+        },
+        "via_symbol_id": {
+          "type": "string"
+        },
+        "via_path": {
+          "type": "string"
+        },
+        "bridge_kind": {
+          "$ref": "#/$defs/impact_slice_bridge_kind"
+        },
+        "prune_reason": {
+          "$ref": "#/$defs/impact_slice_prune_reason"
+        },
+        "scoring": {
+          "$ref": "#/$defs/impact_slice_candidate_scoring_summary"
+        },
+        "compact_explanation": {
+          "type": "string"
+        }
+      }
+    },
+    "impact_slice_selection_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planner",
+        "files",
+        "pruned_candidates"
+      ],
+      "properties": {
+        "planner": {
+          "type": "string",
+          "enum": [
+            "bounded_slice"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_file_metadata"
+          }
+        },
+        "pruned_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_slice_pruned_candidate"
+          }
+        }
+      }
+    },
+    "impact_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol_id",
+        "depth",
+        "root_symbol_id",
+        "via_symbol_id",
+        "edge",
+        "path",
+        "provenance_chain",
+        "kind_chain",
+        "path_compact",
+        "provenance_chain_compact",
+        "kind_chain_compact"
+      ],
+      "properties": {
+        "symbol_id": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "root_symbol_id": {
+          "type": "string"
+        },
+        "via_symbol_id": {
+          "type": "string"
+        },
+        "edge": {
+          "$ref": "#/$defs/reference"
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_witness_hop"
+          }
+        },
+        "provenance_chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge_provenance"
+          }
+        },
+        "kind_chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref_kind"
+          }
+        },
+        "path_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_witness_compact_hop"
+          }
+        },
+        "provenance_chain_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge_provenance"
+          }
+        },
+        "kind_chain_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref_kind"
+          }
+        },
+        "bridge_execution_family": {
+          "$ref": "#/$defs/impact_bridge_execution_family"
+        },
+        "bridge_execution_chain_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_bridge_execution_step_compact"
+          }
+        },
+        "winning_bridge_execution_chain_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_bridge_execution_step_compact"
+          }
+        },
+        "observed_supporting_steps_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_bridge_execution_step_compact"
+          }
+        },
+        "slice_context": {
+          "$ref": "#/$defs/impact_witness_slice_context"
+        }
+      }
+    },
+    "impact_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "by_depth",
+        "affected_modules",
+        "risk",
+        "slice_selection"
+      ],
+      "properties": {
+        "by_depth": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_depth_bucket"
+          }
+        },
+        "affected_modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_affected_module"
+          }
+        },
+        "risk": {
+          "$ref": "#/$defs/impact_risk_summary"
+        },
+        "slice_selection": {
+          "$ref": "#/$defs/impact_slice_selection_summary"
+        }
+      }
+    }
+  },
   "x-dimpact": {
-    "status": "placeholder",
+    "status": "concrete",
     "profile": "impact/default/with_edges/propagation",
     "schema_path": "resources/schemas/json/v1/impact/default/with_edges/propagation.schema.json"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "changed_symbols",
+    "impacted_symbols",
+    "impacted_files",
+    "edges",
+    "impacted_by_file",
+    "impacted_witnesses",
+    "summary"
+  ],
+  "properties": {
+    "changed_symbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/symbol"
+      }
+    },
+    "impacted_symbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/symbol"
+      }
+    },
+    "impacted_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reference"
+      }
+    },
+    "impacted_by_file": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/symbol"
+        }
+      }
+    },
+    "impacted_witnesses": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/impact_witness"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/impact_summary"
+    },
+    "confidence_filter": {
+      "$ref": "#/$defs/confidence_filter"
+    }
   }
 }
