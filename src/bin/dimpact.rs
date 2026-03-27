@@ -23,7 +23,7 @@ use dimpact::{
 };
 use dimpact::{
     ResolvedSchemaProfile, SchemaCommand, SchemaOutputFormat, SchemaProfileInput,
-    resolve_schema_profile,
+    list_registered_schemas, read_schema_document, resolve_schema_profile,
 };
 use env_logger::Env;
 use is_terminal::IsTerminal;
@@ -433,6 +433,15 @@ enum Command {
         #[arg(long = "raw", default_value_t = false)]
         raw: bool,
     },
+    /// List or fetch registered JSON schema documents
+    Schema {
+        /// List registered schema ids
+        #[arg(long = "list", default_value_t = false, conflicts_with = "schema_id")]
+        list: bool,
+        /// Fetch a schema document by canonical schema id
+        #[arg(long = "id", value_name = "SCHEMA_ID", conflicts_with = "list")]
+        schema_id: Option<String>,
+    },
     /// Manage incremental analysis cache
     Cache {
         #[command(subcommand)]
@@ -521,6 +530,11 @@ fn resolve_schema_profile_for_args(
             format: schema_output_format(args.format),
             command: SchemaCommand::Id { raw: *raw },
         },
+        Some(Command::Schema { .. }) => {
+            return Err(dimpact::SchemaProfileResolveError::UnsupportedCommand {
+                subcommand: "schema",
+            });
+        }
         Some(Command::Cache { .. }) => {
             return Err(dimpact::SchemaProfileResolveError::UnsupportedCommand {
                 subcommand: "cache",
@@ -553,6 +567,57 @@ fn resolve_schema_profile_for_args(
     };
 
     resolve_schema_profile(input)
+}
+
+fn run_schema(fmt: OutputFormat, list: bool, schema_id: Option<&str>) -> anyhow::Result<()> {
+    #[derive(Debug, Serialize)]
+    struct SchemaListItem {
+        profile: String,
+        schema_id: String,
+        schema_path: String,
+    }
+
+    match (list, schema_id) {
+        (true, None) => {
+            let items: Vec<_> = list_registered_schemas()
+                .into_iter()
+                .map(|schema| SchemaListItem {
+                    profile: schema.profile_slug,
+                    schema_id: schema.schema_id,
+                    schema_path: schema.schema_path,
+                })
+                .collect();
+            match fmt {
+                OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&items)?),
+                OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&items)?),
+                OutputFormat::Dot | OutputFormat::Html => {
+                    anyhow::bail!("schema --list supports only json or yaml output")
+                }
+            }
+        }
+        (false, Some(schema_id)) => {
+            let document = read_schema_document(schema_id)?;
+            match fmt {
+                OutputFormat::Json => {
+                    print!("{document}");
+                    if !document.ends_with('\n') {
+                        println!();
+                    }
+                }
+                OutputFormat::Yaml => {
+                    let value: serde_json::Value = serde_json::from_str(&document)?;
+                    print!("{}", serde_yaml::to_string(&value)?);
+                }
+                OutputFormat::Dot | OutputFormat::Html => {
+                    anyhow::bail!("schema --id supports only json or yaml output")
+                }
+            }
+        }
+        (true, Some(_)) => anyhow::bail!("choose exactly one of --list or --id"),
+        (false, None) => anyhow::bail!("schema requires either --list or --id <schema-id>"),
+    }
+
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -649,6 +714,9 @@ fn main() -> anyhow::Result<()> {
                 kind,
                 raw,
             ),
+            Command::Schema { list, schema_id } => {
+                run_schema(args.format, list, schema_id.as_deref())
+            }
             Command::Cache { cmd } => run_cache(cmd),
             Command::Completions { shell } => run_completions(shell),
         }?;

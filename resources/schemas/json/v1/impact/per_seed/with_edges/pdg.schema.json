@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dimpact:json/v1/impact/per_seed/with_edges/pdg",
+  "title": "dimpact placeholder schema: impact/per_seed/with_edges/pdg",
+  "description": "Minimal placeholder schema document registered in S1-4. Concrete payload contracts will be tightened in later S1 tasks.",
+  "$comment": "This placeholder schema document is intentionally permissive until the concrete output contracts land.",
+  "x-dimpact": {
+    "status": "placeholder",
+    "profile": "impact/per_seed/with_edges/pdg",
+    "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/pdg.schema.json"
+  }
+}

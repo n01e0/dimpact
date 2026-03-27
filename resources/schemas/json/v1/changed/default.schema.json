@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dimpact:json/v1/changed/default",
+  "title": "dimpact placeholder schema: changed/default",
+  "description": "Minimal placeholder schema document registered in S1-4. Concrete payload contracts will be tightened in later S1 tasks.",
+  "$comment": "This placeholder schema document is intentionally permissive until the concrete output contracts land.",
+  "x-dimpact": {
+    "status": "placeholder",
+    "profile": "changed/default",
+    "schema_path": "resources/schemas/json/v1/changed/default.schema.json"
+  }
+}
