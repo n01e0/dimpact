@@ -433,7 +433,7 @@ enum Command {
         #[arg(long = "raw", default_value_t = false)]
         raw: bool,
     },
-    /// List or fetch registered JSON schema documents
+    /// List, fetch, or resolve registered JSON schema documents
     Schema {
         /// List registered schema ids
         #[arg(long = "list", default_value_t = false, conflicts_with = "schema_id")]
@@ -441,6 +441,8 @@ enum Command {
         /// Fetch a schema document by canonical schema id
         #[arg(long = "id", value_name = "SCHEMA_ID", conflicts_with = "list")]
         schema_id: Option<String>,
+        #[command(subcommand)]
+        cmd: Option<SchemaCliCmd>,
     },
     /// Manage incremental analysis cache
     Cache {
@@ -452,6 +454,78 @@ enum Command {
         /// Target shell (bash, zsh, fish, powershell, elvish)
         #[arg(value_enum)]
         shell: CompletionShell,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SchemaCliCmd {
+    /// Resolve a canonical schema profile/id/path for a JSON surface
+    Resolve {
+        #[command(subcommand)]
+        target: SchemaResolveTarget,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SchemaResolveTarget {
+    Diff,
+    Changed {
+        #[arg(long = "lang", value_enum, default_value_t = LangOpt::Auto)]
+        lang: LangOpt,
+        #[arg(long = "engine", value_enum, default_value_t = EngineOpt::Auto)]
+        engine: EngineOpt,
+        #[arg(long = "engine-lsp-strict", default_value_t = false)]
+        engine_lsp_strict: bool,
+        #[arg(long = "engine-dump-capabilities", default_value_t = false)]
+        engine_dump_capabilities: bool,
+    },
+    Impact {
+        #[arg(long = "lang", value_enum, default_value_t = LangOpt::Auto)]
+        lang: LangOpt,
+        #[arg(long = "direction", value_enum, default_value_t = DirectionOpt::Callers)]
+        direction: DirectionOpt,
+        #[arg(long = "max-depth")]
+        max_depth: Option<usize>,
+        #[arg(long = "with-edges", default_value_t = false)]
+        with_edges: bool,
+        #[arg(long = "min-confidence", value_enum)]
+        min_confidence: Option<ConfidenceOpt>,
+        #[arg(long = "exclude-dynamic-fallback", default_value_t = false)]
+        exclude_dynamic_fallback: bool,
+        #[arg(long = "op-profile", value_enum)]
+        op_profile: Option<OperationalProfileOpt>,
+        #[arg(long = "with-pdg", default_value_t = false)]
+        with_pdg: bool,
+        #[arg(long = "with-propagation", default_value_t = false)]
+        with_propagation: bool,
+        #[arg(long = "engine", value_enum, default_value_t = EngineOpt::Auto)]
+        engine: EngineOpt,
+        #[arg(long = "engine-lsp-strict", default_value_t = false)]
+        engine_lsp_strict: bool,
+        #[arg(long = "engine-dump-capabilities", default_value_t = false)]
+        engine_dump_capabilities: bool,
+        #[arg(long = "seed-symbol")]
+        seed_symbols: Vec<String>,
+        #[arg(long = "seed-json")]
+        seed_json: Option<String>,
+        #[arg(long = "ignore-dir")]
+        ignore_dir: Vec<String>,
+        #[arg(long = "per-seed", default_value_t = false)]
+        per_seed: bool,
+    },
+    Id {
+        #[arg(long = "path")]
+        path: Option<String>,
+        #[arg(long = "line")]
+        line: Option<u32>,
+        #[arg(long = "name")]
+        name: Option<String>,
+        #[arg(long = "lang", value_enum, default_value_t = LangOpt::Auto)]
+        lang: LangOpt,
+        #[arg(long = "kind", value_enum)]
+        kind: Option<KindOpt>,
+        #[arg(long = "raw", default_value_t = false)]
+        raw: bool,
     },
 }
 
@@ -497,6 +571,34 @@ fn schema_output_format(fmt: OutputFormat) -> SchemaOutputFormat {
         OutputFormat::Dot => SchemaOutputFormat::Dot,
         OutputFormat::Html => SchemaOutputFormat::Html,
     }
+}
+
+fn resolve_schema_profile_for_target(
+    fmt: OutputFormat,
+    target: &SchemaResolveTarget,
+) -> Result<ResolvedSchemaProfile, dimpact::SchemaProfileResolveError> {
+    let command = match target {
+        SchemaResolveTarget::Diff => SchemaCommand::Diff,
+        SchemaResolveTarget::Changed { .. } => SchemaCommand::Changed,
+        SchemaResolveTarget::Impact {
+            per_seed,
+            with_edges,
+            with_pdg,
+            with_propagation,
+            ..
+        } => SchemaCommand::Impact {
+            per_seed: *per_seed,
+            with_edges: *with_edges,
+            with_pdg: *with_pdg,
+            with_propagation: *with_propagation,
+        },
+        SchemaResolveTarget::Id { raw, .. } => SchemaCommand::Id { raw: *raw },
+    };
+
+    resolve_schema_profile(SchemaProfileInput {
+        format: schema_output_format(fmt),
+        command,
+    })
 }
 
 fn resolve_schema_profile_for_args(
@@ -569,7 +671,12 @@ fn resolve_schema_profile_for_args(
     resolve_schema_profile(input)
 }
 
-fn run_schema(fmt: OutputFormat, list: bool, schema_id: Option<&str>) -> anyhow::Result<()> {
+fn run_schema(
+    fmt: OutputFormat,
+    list: bool,
+    schema_id: Option<&str>,
+    cmd: Option<&SchemaCliCmd>,
+) -> anyhow::Result<()> {
     #[derive(Debug, Serialize)]
     struct SchemaListItem {
         profile: String,
@@ -577,8 +684,8 @@ fn run_schema(fmt: OutputFormat, list: bool, schema_id: Option<&str>) -> anyhow:
         schema_path: String,
     }
 
-    match (list, schema_id) {
-        (true, None) => {
+    match (list, schema_id, cmd) {
+        (true, None, None) => {
             let items: Vec<_> = list_registered_schemas()
                 .into_iter()
                 .map(|schema| SchemaListItem {
@@ -595,7 +702,7 @@ fn run_schema(fmt: OutputFormat, list: bool, schema_id: Option<&str>) -> anyhow:
                 }
             }
         }
-        (false, Some(schema_id)) => {
+        (false, Some(schema_id), None) => {
             let document = read_schema_document(schema_id)?;
             match fmt {
                 OutputFormat::Json => {
@@ -613,8 +720,30 @@ fn run_schema(fmt: OutputFormat, list: bool, schema_id: Option<&str>) -> anyhow:
                 }
             }
         }
-        (true, Some(_)) => anyhow::bail!("choose exactly one of --list or --id"),
-        (false, None) => anyhow::bail!("schema requires either --list or --id <schema-id>"),
+        (false, None, Some(SchemaCliCmd::Resolve { target })) => {
+            #[derive(Debug, Serialize)]
+            struct SchemaResolveResult {
+                profile: String,
+                schema_id: String,
+                schema_path: String,
+            }
+
+            let resolved = resolve_schema_profile_for_target(fmt, target)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&SchemaResolveResult {
+                    profile: resolved.profile_slug,
+                    schema_id: resolved.schema_id,
+                    schema_path: resolved.schema_path,
+                })?
+            );
+        }
+        (true, Some(_), _) | (true, _, Some(_)) | (false, Some(_), Some(_)) => {
+            anyhow::bail!("choose exactly one of --list, --id, or resolve")
+        }
+        (false, None, None) => {
+            anyhow::bail!("schema requires --list, --id <schema-id>, or resolve <subcommand>")
+        }
     }
 
     Ok(())
@@ -714,9 +843,11 @@ fn main() -> anyhow::Result<()> {
                 kind,
                 raw,
             ),
-            Command::Schema { list, schema_id } => {
-                run_schema(args.format, list, schema_id.as_deref())
-            }
+            Command::Schema {
+                list,
+                schema_id,
+                cmd,
+            } => run_schema(args.format, list, schema_id.as_deref(), cmd.as_ref()),
             Command::Cache { cmd } => run_cache(cmd),
             Command::Completions { shell } => run_completions(shell),
         }?;
