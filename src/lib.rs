@@ -7,6 +7,7 @@ pub mod ir;
 pub mod languages;
 pub mod mapping;
 pub mod render;
+pub mod schema;
 pub mod ts_core;
 
 pub use dfg::{DataFlowGraph, DependencyKind, DfgBuilder, DfgEdge, DfgNode};
@@ -30,3 +31,9 @@ pub use ir::{Symbol, SymbolId, SymbolKind, TextRange};
 pub use languages::LanguageKind;
 pub use mapping::{ChangedOutput, LanguageMode, compute_changed_symbols};
 pub use render::{dfg_to_dot, to_dot, to_html};
+pub use schema::{
+    ImpactSchemaEdgeDetail, ImpactSchemaGraphMode, ImpactSchemaLayout, ImpactSchemaProfile,
+    JSON_SCHEMA_FORMAT, JSON_SCHEMA_MAJOR_VERSION, JSON_SCHEMA_NAMESPACE, JSON_SCHEMA_ROOT,
+    ResolvedSchemaProfile, SchemaCommand, SchemaOutputFormat, SchemaProfile, SchemaProfileInput,
+    SchemaProfileResolveError, resolve_schema_profile,
+};
