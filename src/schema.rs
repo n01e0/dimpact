@@ -1,9 +1,13 @@
+use std::fs;
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 pub const JSON_SCHEMA_MAJOR_VERSION: u32 = 1;
 pub const JSON_SCHEMA_NAMESPACE: &str = "dimpact";
 pub const JSON_SCHEMA_FORMAT: &str = "json";
 pub const JSON_SCHEMA_ROOT: &str = "resources/schemas/json";
+pub const JSON_SCHEMA_DRAFT_URL: &str = "https://json-schema.org/draft/2020-12/schema";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaOutputFormat {
@@ -95,6 +99,18 @@ pub enum SchemaProfileResolveError {
     UnsupportedCommand { subcommand: &'static str },
     #[error("schema profile is not available for raw id output")]
     RawIdOutput,
+}
+
+#[derive(Debug, Error)]
+pub enum SchemaRegistryError {
+    #[error("unknown schema id '{schema_id}'")]
+    UnknownSchemaId { schema_id: String },
+    #[error("failed to read schema document at '{schema_path}': {source}")]
+    ReadSchemaDocument {
+        schema_path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 impl SchemaProfile {
@@ -212,6 +228,65 @@ pub fn resolve_schema_profile(
     Ok(profile.resolved())
 }
 
+pub fn registered_schema_profiles() -> Vec<SchemaProfile> {
+    let mut profiles = vec![
+        SchemaProfile::DiffDefault,
+        SchemaProfile::ChangedDefault,
+        SchemaProfile::IdDefault,
+    ];
+
+    for layout in [ImpactSchemaLayout::Default, ImpactSchemaLayout::PerSeed] {
+        for edge_detail in [
+            ImpactSchemaEdgeDetail::SummaryOnly,
+            ImpactSchemaEdgeDetail::WithEdges,
+        ] {
+            for graph_mode in [
+                ImpactSchemaGraphMode::CallGraph,
+                ImpactSchemaGraphMode::Pdg,
+                ImpactSchemaGraphMode::Propagation,
+            ] {
+                profiles.push(SchemaProfile::Impact(ImpactSchemaProfile {
+                    layout,
+                    edge_detail,
+                    graph_mode,
+                }));
+            }
+        }
+    }
+
+    profiles
+}
+
+pub fn list_registered_schemas() -> Vec<ResolvedSchemaProfile> {
+    registered_schema_profiles()
+        .into_iter()
+        .map(SchemaProfile::resolved)
+        .collect()
+}
+
+pub fn find_registered_schema(schema_id: &str) -> Option<ResolvedSchemaProfile> {
+    list_registered_schemas()
+        .into_iter()
+        .find(|schema| schema.schema_id == schema_id)
+}
+
+fn schema_fs_path(schema: &ResolvedSchemaProfile) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&schema.schema_path)
+}
+
+pub fn read_schema_document(schema_id: &str) -> Result<String, SchemaRegistryError> {
+    let schema =
+        find_registered_schema(schema_id).ok_or_else(|| SchemaRegistryError::UnknownSchemaId {
+            schema_id: schema_id.to_string(),
+        })?;
+    let fs_path = schema_fs_path(&schema);
+
+    fs::read_to_string(&fs_path).map_err(|source| SchemaRegistryError::ReadSchemaDocument {
+        schema_path: schema.schema_path,
+        source,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +391,46 @@ mod tests {
         .expect_err("raw id should be unsupported");
 
         assert_eq!(err, SchemaProfileResolveError::RawIdOutput);
+    }
+
+    #[test]
+    fn registry_lists_all_expected_schema_profiles() {
+        let schemas = list_registered_schemas();
+        assert_eq!(schemas.len(), 15);
+        assert_eq!(schemas[0].schema_id, "dimpact:json/v1/diff/default");
+        assert_eq!(schemas[1].schema_id, "dimpact:json/v1/changed/default");
+        assert_eq!(schemas[2].schema_id, "dimpact:json/v1/id/default");
+        assert!(schemas.iter().any(|schema| {
+            schema.schema_id == "dimpact:json/v1/impact/per_seed/with_edges/propagation"
+        }));
+    }
+
+    #[test]
+    fn registry_lookup_round_trips_known_schema_id() {
+        let schema_id = "dimpact:json/v1/impact/default/summary_only/pdg";
+        let resolved = find_registered_schema(schema_id).expect("schema should be registered");
+
+        assert_eq!(resolved.schema_id, schema_id);
+        assert_eq!(
+            resolved.schema_path,
+            "resources/schemas/json/v1/impact/default/summary_only/pdg.schema.json"
+        );
+    }
+
+    #[test]
+    fn read_schema_document_loads_registered_placeholder_file() {
+        let document =
+            read_schema_document("dimpact:json/v1/diff/default").expect("read placeholder schema");
+
+        assert!(document.contains("\"$id\": \"dimpact:json/v1/diff/default\""));
+        assert!(document.contains("placeholder schema document"));
+    }
+
+    #[test]
+    fn read_schema_document_rejects_unknown_schema_id() {
+        let err = read_schema_document("dimpact:json/v1/nope")
+            .expect_err("unknown schema id should fail");
+
+        assert!(matches!(err, SchemaRegistryError::UnknownSchemaId { .. }));
     }
 }

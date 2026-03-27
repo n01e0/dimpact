@@ -33,7 +33,9 @@ pub use mapping::{ChangedOutput, LanguageMode, compute_changed_symbols};
 pub use render::{dfg_to_dot, to_dot, to_html};
 pub use schema::{
     ImpactSchemaEdgeDetail, ImpactSchemaGraphMode, ImpactSchemaLayout, ImpactSchemaProfile,
-    JSON_SCHEMA_FORMAT, JSON_SCHEMA_MAJOR_VERSION, JSON_SCHEMA_NAMESPACE, JSON_SCHEMA_ROOT,
-    ResolvedSchemaProfile, SchemaCommand, SchemaOutputFormat, SchemaProfile, SchemaProfileInput,
-    SchemaProfileResolveError, resolve_schema_profile,
+    JSON_SCHEMA_DRAFT_URL, JSON_SCHEMA_FORMAT, JSON_SCHEMA_MAJOR_VERSION, JSON_SCHEMA_NAMESPACE,
+    JSON_SCHEMA_ROOT, ResolvedSchemaProfile, SchemaCommand, SchemaOutputFormat, SchemaProfile,
+    SchemaProfileInput, SchemaProfileResolveError, SchemaRegistryError, find_registered_schema,
+    list_registered_schemas, read_schema_document, registered_schema_profiles,
+    resolve_schema_profile,
 };
