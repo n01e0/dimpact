@@ -48,6 +48,7 @@ assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3.23"
 serial_test = "3.2"
+sha2 = "0.10"
 
 [profile.release]
 lto = true

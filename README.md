@@ -77,6 +77,54 @@ dimpact impact \
 dimpact id --path src/lib.rs --name foo --kind fn --raw
 ```
 
+### 6. Inspect registered JSON schemas
+
+```bash
+dimpact schema --list
+dimpact schema --id dimpact:json/v1/impact/default/summary_only/call_graph
+dimpact schema resolve impact --per-seed --with-edges --with-propagation
+```
+
+## JSON schema surface
+
+JSON outputs for `diff`, `changed`, `impact`, and JSON-mode `id` are wrapped in a common envelope:
+
+```json
+{
+  "_schema": {
+    "id": "dimpact:json/v1/impact/default/summary_only/call_graph"
+  },
+  "json_schema": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json",
+  "data": {
+    "changed_symbols": [],
+    "impacted_symbols": [],
+    "impacted_files": [],
+    "edges": [],
+    "impacted_by_file": {},
+    "impacted_witnesses": {},
+    "summary": {
+      "by_depth": [],
+      "affected_modules": [],
+      "risk": {
+        "level": "low",
+        "direct_hits": 0,
+        "transitive_hits": 0,
+        "impacted_files": 0,
+        "impacted_symbols": 0
+      }
+    }
+  }
+}
+```
+
+Use these commands to work with the schema layer directly:
+
+- `dimpact schema --list` — list the registered canonical schema ids and document paths
+- `dimpact schema --id <schema-id>` — fetch the concrete JSON Schema document for one id
+- `dimpact schema resolve <subcommand> ...` — resolve the canonical profile/id/path that a JSON command will emit
+
+Schema documents live under [`resources/schemas/json/v1/`](resources/schemas/json/v1/).
+
 ## Main commands
 
 | Command | Purpose |
@@ -85,6 +133,7 @@ dimpact id --path src/lib.rs --name foo --kind fn --raw
 | `changed` | Resolve changed lines to symbols |
 | `impact` | Compute callers / callees / both from diff or seeds |
 | `id` | Generate Symbol IDs from file, line, and name |
+| `schema` | List, resolve, and fetch registered JSON schemas |
 | `cache` | Build, update, inspect, or clear the local cache |
 | `completions` | Generate shell completion scripts |
 
