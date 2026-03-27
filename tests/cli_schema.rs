@@ -51,7 +51,62 @@ fn schema_id_json_returns_registered_document() {
     );
     assert_eq!(
         value.pointer("/x-dimpact/status"),
-        Some(&serde_json::Value::String("placeholder".to_string()))
+        Some(&serde_json::Value::String("concrete".to_string()))
+    );
+}
+
+#[test]
+fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
+    let changed = fetch_schema_document("dimpact:json/v1/changed/default");
+    assert_eq!(
+        changed.pointer("/x-dimpact/status"),
+        Some(&serde_json::Value::String("concrete".to_string()))
+    );
+    assert_eq!(
+        changed.pointer("/required"),
+        Some(&serde_json::json!(["changed_files", "changed_symbols"]))
+    );
+    assert_eq!(
+        changed.pointer("/$defs/symbol/properties/kind/enum"),
+        Some(&serde_json::json!([
+            "function", "method", "struct", "enum", "trait", "module"
+        ]))
+    );
+
+    let diff = fetch_schema_document("dimpact:json/v1/diff/default");
+    assert_eq!(
+        diff.pointer("/x-dimpact/status"),
+        Some(&serde_json::Value::String("concrete".to_string()))
+    );
+    assert_eq!(
+        diff.get("type"),
+        Some(&serde_json::Value::String("array".to_string()))
+    );
+    assert_eq!(
+        diff.pointer("/$defs/change_kind/enum"),
+        Some(&serde_json::json!(["added", "removed", "context"]))
+    );
+    assert_eq!(
+        diff.pointer("/$defs/file_changes/required"),
+        Some(&serde_json::json!(["old_path", "new_path", "changes"]))
+    );
+
+    let id = fetch_schema_document("dimpact:json/v1/id/default");
+    assert_eq!(
+        id.pointer("/x-dimpact/status"),
+        Some(&serde_json::Value::String("concrete".to_string()))
+    );
+    assert_eq!(
+        id.get("type"),
+        Some(&serde_json::Value::String("array".to_string()))
+    );
+    assert_eq!(
+        id.pointer("/items/required"),
+        Some(&serde_json::json!(["id", "symbol"]))
+    );
+    assert_eq!(
+        id.pointer("/$defs/text_range/required"),
+        Some(&serde_json::json!(["start_line", "end_line"]))
     );
 }
 

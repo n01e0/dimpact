@@ -1,11 +1,88 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dimpact:json/v1/id/default",
-  "title": "dimpact placeholder schema: id/default",
-  "description": "Minimal placeholder schema document registered in S1-4. Concrete payload contracts will be tightened in later S1 tasks.",
-  "$comment": "This placeholder schema document is intentionally permissive until the concrete output contracts land.",
+  "title": "dimpact id schema: default",
+  "description": "Concrete schema for the `id -f json` output surface.",
+  "$comment": "S1-8 concrete schema for id/default.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "symbol"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "symbol": {
+        "$ref": "#/$defs/symbol"
+      }
+    }
+  },
+  "$defs": {
+    "text_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_line",
+        "end_line"
+      ],
+      "properties": {
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "symbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "file",
+        "range",
+        "language"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "function",
+            "method",
+            "struct",
+            "enum",
+            "trait",
+            "module"
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/text_range"
+        },
+        "language": {
+          "type": "string"
+        }
+      }
+    }
+  },
   "x-dimpact": {
-    "status": "placeholder",
+    "status": "concrete",
     "profile": "id/default",
     "schema_path": "resources/schemas/json/v1/id/default.schema.json"
   }
