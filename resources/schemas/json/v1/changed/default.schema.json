@@ -7,22 +7,56 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "changed_files",
-    "changed_symbols"
+    "_schema",
+    "json_schema",
+    "data"
   ],
   "properties": {
-    "changed_files": {
-      "type": "array",
-      "items": {
-        "type": "string"
+    "_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "const": "dimpact:json/v1/changed/default"
+        }
       }
     },
-    "changed_symbols": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/symbol"
-      }
+    "json_schema": {
+      "type": "string",
+      "const": "resources/schemas/json/v1/changed/default.schema.json"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changed_files",
+        "changed_symbols"
+      ],
+      "properties": {
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "changed_symbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/symbol"
+          }
+        }
+      },
+      "description": "Concrete schema for the `changed -f json` output surface."
     }
+  },
+  "x-dimpact": {
+    "status": "concrete",
+    "profile": "changed/default",
+    "schema_path": "resources/schemas/json/v1/changed/default.schema.json"
   },
   "$defs": {
     "text_range": {
@@ -83,10 +117,5 @@
         }
       }
     }
-  },
-  "x-dimpact": {
-    "status": "concrete",
-    "profile": "changed/default",
-    "schema_path": "resources/schemas/json/v1/changed/default.schema.json"
   }
 }

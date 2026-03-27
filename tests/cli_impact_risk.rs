@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -80,7 +82,7 @@ fn cli_impact_risk_json_reports_fixture_summary() {
         .assert()
         .success();
 
-    let v: serde_json::Value = serde_json::from_slice(assert.get_output().stdout.as_ref()).unwrap();
+    let v = json_output::parse_payload_slice(assert.get_output().stdout.as_ref());
     let risk = &v["summary"]["risk"];
     assert_eq!(risk["level"], "medium");
     assert_eq!(risk["direct_hits"].as_u64(), Some(1));
@@ -173,7 +175,7 @@ fn cli_impact_risk_json_promotes_direct_plus_three_transitive_to_high() {
         .assert()
         .success();
 
-    let v: serde_json::Value = serde_json::from_slice(assert.get_output().stdout.as_ref()).unwrap();
+    let v = json_output::parse_payload_slice(assert.get_output().stdout.as_ref());
     let risk = &v["summary"]["risk"];
     assert_eq!(risk["level"], "high");
     assert_eq!(risk["direct_hits"].as_u64(), Some(1));

@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
@@ -155,7 +157,7 @@ fn cli_mode_changed_reports_java_symbol() {
         .stdout(predicate::str::contains("Main.java"));
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("b")));
 }
@@ -180,7 +182,7 @@ fn cli_impact_direction_callees_java() {
     let assert = cmd.assert().success();
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("b")));
 
@@ -212,7 +214,7 @@ fn cli_mode_changed_reports_java_hard_case_symbol() {
         .stdout(predicate::str::contains("demo/Ops.java"));
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("pick")));
 }
@@ -237,7 +239,7 @@ fn cli_impact_direction_callers_java_hard_cases() {
     let assert = cmd.assert().success();
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("pick")));
 

@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -51,7 +53,7 @@ fn edges_are_included_when_flag_set() {
         .write_stdin(diff);
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     assert!(v["edges"].is_array());
     assert!(!v["edges"].as_array().unwrap().is_empty());
 }

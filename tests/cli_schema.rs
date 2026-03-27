@@ -64,6 +64,10 @@ fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
     );
     assert_eq!(
         changed.pointer("/required"),
+        Some(&serde_json::json!(["_schema", "json_schema", "data"]))
+    );
+    assert_eq!(
+        changed.pointer("/properties/data/required"),
         Some(&serde_json::json!(["changed_files", "changed_symbols"]))
     );
     assert_eq!(
@@ -80,6 +84,10 @@ fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
     );
     assert_eq!(
         diff.get("type"),
+        Some(&serde_json::Value::String("object".to_string()))
+    );
+    assert_eq!(
+        diff.pointer("/properties/data/type"),
         Some(&serde_json::Value::String("array".to_string()))
     );
     assert_eq!(
@@ -98,10 +106,14 @@ fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
     );
     assert_eq!(
         id.get("type"),
+        Some(&serde_json::Value::String("object".to_string()))
+    );
+    assert_eq!(
+        id.pointer("/properties/data/type"),
         Some(&serde_json::Value::String("array".to_string()))
     );
     assert_eq!(
-        id.pointer("/items/required"),
+        id.pointer("/properties/data/items/required"),
         Some(&serde_json::json!(["id", "symbol"]))
     );
     assert_eq!(
@@ -119,7 +131,7 @@ fn impact_default_schema_is_concrete_and_models_summary_only_shape() {
         Some(&serde_json::Value::String("concrete".to_string()))
     );
     assert_eq!(
-        value.pointer("/properties/edges/maxItems"),
+        value.pointer("/properties/data/properties/edges/maxItems"),
         Some(&serde_json::Value::Number(0.into()))
     );
     assert_eq!(
@@ -159,19 +171,25 @@ fn impact_variant_schemas_are_concrete_and_capture_profile_specific_constraints(
     );
     assert_eq!(
         per_seed.get("type"),
+        Some(&serde_json::Value::String("object".to_string()))
+    );
+    assert_eq!(
+        per_seed.pointer("/properties/data/type"),
         Some(&serde_json::Value::String("array".to_string()))
     );
     assert_eq!(
-        per_seed.pointer("/items/properties/impacts/maxItems"),
+        per_seed.pointer("/properties/data/items/properties/impacts/maxItems"),
         Some(&serde_json::Value::Number(2.into()))
     );
     assert_eq!(
-        per_seed.pointer("/items/properties/impacts/items/properties/direction/enum"),
+        per_seed
+            .pointer("/properties/data/items/properties/impacts/items/properties/direction/enum"),
         Some(&serde_json::json!(["callers", "callees"]))
     );
     assert_eq!(
-        per_seed
-            .pointer("/items/properties/impacts/items/properties/output/properties/edges/maxItems"),
+        per_seed.pointer(
+            "/properties/data/items/properties/impacts/items/properties/output/properties/edges/maxItems"
+        ),
         Some(&serde_json::Value::Number(0.into()))
     );
 
@@ -180,7 +198,11 @@ fn impact_variant_schemas_are_concrete_and_capture_profile_specific_constraints(
         with_edges.pointer("/x-dimpact/status"),
         Some(&serde_json::Value::String("concrete".to_string()))
     );
-    assert!(with_edges.pointer("/properties/edges/maxItems").is_none());
+    assert!(
+        with_edges
+            .pointer("/properties/data/properties/edges/maxItems")
+            .is_none()
+    );
     assert_eq!(
         with_edges.pointer("/$defs/edge_provenance/enum"),
         Some(&serde_json::json!(["call_graph"]))
@@ -221,7 +243,9 @@ fn impact_variant_schemas_are_concrete_and_capture_profile_specific_constraints(
     );
     assert!(
         propagation
-            .pointer("/items/properties/impacts/items/properties/output/properties/edges/maxItems")
+            .pointer(
+                "/properties/data/items/properties/impacts/items/properties/output/properties/edges/maxItems"
+            )
             .is_none()
     );
 }

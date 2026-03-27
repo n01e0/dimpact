@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -64,7 +66,7 @@ fn cli_changed_python_fixture_reports_bar() {
         .success();
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("bar")));
 }
@@ -93,7 +95,7 @@ fn cli_impact_python_fixture_reports_callers_chain() {
         .success();
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
 
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("bar")));

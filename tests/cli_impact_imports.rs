@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -65,7 +67,7 @@ fn impact_resolves_imported_function() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let impacted = v["impacted_symbols"].as_array().unwrap();
     let names: Vec<&str> = impacted
         .iter()
@@ -105,7 +107,7 @@ fn impact_resolves_qualified_call() {
         .write_stdin(diff);
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let names: Vec<&str> = v["impacted_symbols"]
         .as_array()
         .unwrap()

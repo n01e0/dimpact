@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
@@ -85,7 +87,7 @@ fn cli_mode_changed_reports_go_symbol() {
         .stdout(predicate::str::contains("main.go"));
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("b")));
 }
@@ -110,7 +112,7 @@ fn cli_impact_direction_callees_go() {
     let assert = cmd.assert().success();
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("b")));
 

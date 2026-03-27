@@ -4,9 +4,43 @@
   "title": "dimpact diff schema: default",
   "description": "Concrete schema for the `diff -f json` output surface.",
   "$comment": "S1-8 concrete schema for diff/default.",
-  "type": "array",
-  "items": {
-    "$ref": "#/$defs/file_changes"
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "_schema",
+    "json_schema",
+    "data"
+  ],
+  "properties": {
+    "_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "const": "dimpact:json/v1/diff/default"
+        }
+      }
+    },
+    "json_schema": {
+      "type": "string",
+      "const": "resources/schemas/json/v1/diff/default.schema.json"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file_changes"
+      },
+      "description": "Concrete schema for the `diff -f json` output surface."
+    }
+  },
+  "x-dimpact": {
+    "status": "concrete",
+    "profile": "diff/default",
+    "schema_path": "resources/schemas/json/v1/diff/default.schema.json"
   },
   "$defs": {
     "change_kind": {
@@ -78,10 +112,5 @@
         }
       }
     }
-  },
-  "x-dimpact": {
-    "status": "concrete",
-    "profile": "diff/default",
-    "schema_path": "resources/schemas/json/v1/diff/default.schema.json"
   }
 }

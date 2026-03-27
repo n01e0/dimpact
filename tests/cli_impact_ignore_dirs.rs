@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -83,7 +85,7 @@ fn ignore_dir_drops_seeds_in_ignored_path() {
         .assert()
         .success();
     let out2 = String::from_utf8_lossy(assert2.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&out2).unwrap();
+    let v = json_output::parse_payload(&out2);
     let impacted = v["impacted_symbols"].as_array().unwrap();
     assert!(
         impacted.is_empty(),

@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use predicates::prelude::*;
 use std::fs;
 use std::io::Write;
@@ -63,10 +65,18 @@ fn e2e_git_diff_into_dimpact_json() {
         .success()
         .stdout(predicate::str::contains("a.txt"));
 
-    // additionally, parse JSON to ensure schema is valid
+    // additionally, parse JSON to ensure the output is schema-tagged and payload-valid
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref()).to_string();
+    assert_eq!(
+        json_output::schema_id(&stdout).as_deref(),
+        Some("dimpact:json/v1/diff/default")
+    );
+    assert_eq!(
+        json_output::schema_path(&stdout).as_deref(),
+        Some("resources/schemas/json/v1/diff/default.schema.json")
+    );
     let files: Vec<dimpact::FileChanges> =
-        serde_json::from_str(&stdout).expect("valid json schema");
+        serde_json::from_value(json_output::parse_payload(&stdout)).expect("valid diff payload");
     assert_eq!(files.len(), 1);
     let f = &files[0];
     assert_eq!(f.old_path.as_deref(), Some("a.txt"));

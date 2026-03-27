@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
@@ -82,7 +84,7 @@ fn cli_impact_direction_callees() {
         .write_stdin(diff.clone());
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let impacted = v["impacted_symbols"].as_array().unwrap();
     let names: Vec<&str> = impacted
         .iter()
@@ -113,7 +115,7 @@ fn cli_impact_max_depth_limits() {
         .write_stdin(diff);
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let impacted = v["impacted_symbols"].as_array().unwrap();
     let names: Vec<&str> = impacted
         .iter()
@@ -143,7 +145,7 @@ fn cli_impact_min_confidence_filters_inferred_edges() {
         .write_stdin(diff.clone())
         .assert()
         .success();
-    let v: serde_json::Value = serde_json::from_slice(assert.get_output().stdout.as_ref()).unwrap();
+    let v = json_output::parse_payload_slice(assert.get_output().stdout.as_ref());
     let impacted = v["impacted_symbols"].as_array().unwrap();
     assert!(!impacted.is_empty());
 
@@ -164,8 +166,7 @@ fn cli_impact_min_confidence_filters_inferred_edges() {
         .write_stdin(diff)
         .assert()
         .success();
-    let v2: serde_json::Value =
-        serde_json::from_slice(strict_assert.get_output().stdout.as_ref()).unwrap();
+    let v2 = json_output::parse_payload_slice(strict_assert.get_output().stdout.as_ref());
     let impacted2 = v2["impacted_symbols"].as_array().unwrap();
     let edges2 = v2["edges"].as_array().unwrap();
 
@@ -196,7 +197,7 @@ fn cli_impact_exclude_dynamic_fallback_matches_min_confidence_inferred() {
         .write_stdin(diff.clone())
         .assert()
         .success();
-    let va: serde_json::Value = serde_json::from_slice(a_out.get_output().stdout.as_ref()).unwrap();
+    let va = json_output::parse_payload_slice(a_out.get_output().stdout.as_ref());
 
     let mut b = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let b_out = b
@@ -214,7 +215,7 @@ fn cli_impact_exclude_dynamic_fallback_matches_min_confidence_inferred() {
         .write_stdin(diff)
         .assert()
         .success();
-    let vb: serde_json::Value = serde_json::from_slice(b_out.get_output().stdout.as_ref()).unwrap();
+    let vb = json_output::parse_payload_slice(b_out.get_output().stdout.as_ref());
 
     let impacted_a: std::collections::BTreeSet<&str> = va["impacted_symbols"]
         .as_array()
@@ -259,7 +260,7 @@ fn cli_impact_json_reports_confidence_filter_summary() {
         .success()
         .stderr(predicate::str::contains("confidence filter applied"));
 
-    let v: serde_json::Value = serde_json::from_slice(assert.get_output().stdout.as_ref()).unwrap();
+    let v = json_output::parse_payload_slice(assert.get_output().stdout.as_ref());
     let cf = &v["confidence_filter"];
     assert_eq!(cf["exclude_dynamic_fallback"], true);
     assert!(
@@ -330,8 +331,7 @@ fn cli_impact_confidence_fixture_compares_confirmed_vs_inferred() {
         .write_stdin(diff.clone())
         .assert()
         .success();
-    let inferred_v: serde_json::Value =
-        serde_json::from_slice(inferred_assert.get_output().stdout.as_ref()).unwrap();
+    let inferred_v = json_output::parse_payload_slice(inferred_assert.get_output().stdout.as_ref());
 
     let mut confirmed_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let confirmed_assert = confirmed_cmd
@@ -350,8 +350,8 @@ fn cli_impact_confidence_fixture_compares_confirmed_vs_inferred() {
         .write_stdin(diff)
         .assert()
         .success();
-    let confirmed_v: serde_json::Value =
-        serde_json::from_slice(confirmed_assert.get_output().stdout.as_ref()).unwrap();
+    let confirmed_v =
+        json_output::parse_payload_slice(confirmed_assert.get_output().stdout.as_ref());
 
     let inferred_impacted: std::collections::BTreeSet<&str> = inferred_v["impacted_symbols"]
         .as_array()
@@ -399,8 +399,7 @@ fn cli_impact_op_profile_balanced_matches_min_confidence_inferred() {
         .write_stdin(diff.clone())
         .assert()
         .success();
-    let prof_v: serde_json::Value =
-        serde_json::from_slice(prof_assert.get_output().stdout.as_ref()).unwrap();
+    let prof_v = json_output::parse_payload_slice(prof_assert.get_output().stdout.as_ref());
 
     let mut explicit_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let explicit_assert = explicit_cmd
@@ -419,8 +418,7 @@ fn cli_impact_op_profile_balanced_matches_min_confidence_inferred() {
         .write_stdin(diff)
         .assert()
         .success();
-    let explicit_v: serde_json::Value =
-        serde_json::from_slice(explicit_assert.get_output().stdout.as_ref()).unwrap();
+    let explicit_v = json_output::parse_payload_slice(explicit_assert.get_output().stdout.as_ref());
 
     let prof_impacted: std::collections::BTreeSet<&str> = prof_v["impacted_symbols"]
         .as_array()
@@ -468,8 +466,7 @@ fn cli_impact_op_profile_precision_first_matches_confirmed_plus_exclude_dynamic_
         .write_stdin(diff.clone())
         .assert()
         .success();
-    let prof_v: serde_json::Value =
-        serde_json::from_slice(prof_assert.get_output().stdout.as_ref()).unwrap();
+    let prof_v = json_output::parse_payload_slice(prof_assert.get_output().stdout.as_ref());
 
     let mut explicit_cmd = assert_cmd::Command::cargo_bin("dimpact").unwrap();
     let explicit_assert = explicit_cmd
@@ -489,8 +486,7 @@ fn cli_impact_op_profile_precision_first_matches_confirmed_plus_exclude_dynamic_
         .write_stdin(diff)
         .assert()
         .success();
-    let explicit_v: serde_json::Value =
-        serde_json::from_slice(explicit_assert.get_output().stdout.as_ref()).unwrap();
+    let explicit_v = json_output::parse_payload_slice(explicit_assert.get_output().stdout.as_ref());
 
     let prof_impacted: std::collections::BTreeSet<&str> = prof_v["impacted_symbols"]
         .as_array()
