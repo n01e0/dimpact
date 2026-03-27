@@ -22,10 +22,10 @@ cargo build --release
 ./target/release/dimpact --help
 ```
 
-### Install with cargo
+### Install from crates.io with cargo
 
 ```bash
-cargo install --locked --path .
+cargo install --locked dimpact
 dimpact --help
 ```
 

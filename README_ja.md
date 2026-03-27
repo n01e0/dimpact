@@ -22,11 +22,24 @@ cargo build --release
 ./target/release/dimpact --help
 ```
 
-### Cargo の bin ディレクトリへインストール
+### crates.io から Cargo でインストール
 
 ```bash
-cargo install --path .
+cargo install --locked dimpact
 dimpact --help
+```
+
+### Docker でインストール
+
+```bash
+docker pull ghcr.io/n01e0/dimpact:latest
+docker run --rm ghcr.io/n01e0/dimpact:latest --help
+```
+
+カレントリポジトリをコンテナから解析したいときは、作業ツリーを `/work` にマウントして diff を stdin で流します。
+
+```bash
+git diff --no-ext-diff | docker run -i --rm -v "$PWD":/work ghcr.io/n01e0/dimpact:latest impact --direction callers --with-edges -f json
 ```
 
 ## 基本的な使い方
