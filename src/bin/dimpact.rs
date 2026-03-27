@@ -21,6 +21,10 @@ use dimpact::{
     ImpactSliceReasonKind, ImpactSliceReasonMetadata, ImpactSliceScopes, ImpactSliceScoreTuple,
     ImpactSliceSelectionSummary,
 };
+use dimpact::{
+    ResolvedSchemaProfile, SchemaCommand, SchemaOutputFormat, SchemaProfileInput,
+    resolve_schema_profile,
+};
 use env_logger::Env;
 use is_terminal::IsTerminal;
 use serde::Serialize;
@@ -477,6 +481,80 @@ enum CacheCmd {
     },
 }
 
+fn schema_output_format(fmt: OutputFormat) -> SchemaOutputFormat {
+    match fmt {
+        OutputFormat::Json => SchemaOutputFormat::Json,
+        OutputFormat::Yaml => SchemaOutputFormat::Yaml,
+        OutputFormat::Dot => SchemaOutputFormat::Dot,
+        OutputFormat::Html => SchemaOutputFormat::Html,
+    }
+}
+
+fn resolve_schema_profile_for_args(
+    args: &Args,
+) -> Result<ResolvedSchemaProfile, dimpact::SchemaProfileResolveError> {
+    let input = match &args.cmd {
+        Some(Command::Diff) => SchemaProfileInput {
+            format: schema_output_format(args.format),
+            command: SchemaCommand::Diff,
+        },
+        Some(Command::Changed { .. }) => SchemaProfileInput {
+            format: schema_output_format(args.format),
+            command: SchemaCommand::Changed,
+        },
+        Some(Command::Impact {
+            per_seed,
+            with_edges,
+            with_pdg,
+            with_propagation,
+            ..
+        }) => SchemaProfileInput {
+            format: schema_output_format(args.format),
+            command: SchemaCommand::Impact {
+                per_seed: *per_seed,
+                with_edges: *with_edges,
+                with_pdg: *with_pdg,
+                with_propagation: *with_propagation,
+            },
+        },
+        Some(Command::Id { raw, .. }) => SchemaProfileInput {
+            format: schema_output_format(args.format),
+            command: SchemaCommand::Id { raw: *raw },
+        },
+        Some(Command::Cache { .. }) => {
+            return Err(dimpact::SchemaProfileResolveError::UnsupportedCommand {
+                subcommand: "cache",
+            });
+        }
+        Some(Command::Completions { .. }) => {
+            return Err(dimpact::SchemaProfileResolveError::UnsupportedCommand {
+                subcommand: "completions",
+            });
+        }
+        None => match args.mode {
+            Mode::Diff => SchemaProfileInput {
+                format: schema_output_format(args.format),
+                command: SchemaCommand::Diff,
+            },
+            Mode::Changed => SchemaProfileInput {
+                format: schema_output_format(args.format),
+                command: SchemaCommand::Changed,
+            },
+            Mode::Impact => SchemaProfileInput {
+                format: schema_output_format(args.format),
+                command: SchemaCommand::Impact {
+                    per_seed: args.per_seed,
+                    with_edges: args.with_edges,
+                    with_pdg: false,
+                    with_propagation: false,
+                },
+            },
+        },
+    };
+
+    resolve_schema_profile(input)
+}
+
 fn main() -> anyhow::Result<()> {
     // Initialize logger once; default level comes from RUST_LOG
     let _ = env_logger::Builder::from_env(Env::default().default_filter_or(""))
@@ -492,6 +570,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     let args = Args::parse();
+
+    if let Ok(resolved) = resolve_schema_profile_for_args(&args) {
+        log::debug!(
+            "resolved_schema_profile={} schema_id={}",
+            resolved.profile_slug,
+            resolved.schema_id
+        );
+    }
 
     // Prefer subcommands if provided; fallback to deprecated --mode
     if let Some(cmd) = args.cmd {
@@ -6258,6 +6344,102 @@ fn caller() -> i32 {
         );
         assert!(matches!(min_c, Some(ConfidenceOpt::DynamicFallback)));
         assert!(excl_c);
+    }
+
+    fn resolved_schema_slug(argv: &[&str]) -> String {
+        let args = Args::try_parse_from(argv).expect("cli args should parse");
+        resolve_schema_profile_for_args(&args)
+            .expect("schema profile should resolve")
+            .profile_slug
+    }
+
+    #[test]
+    fn cli_schema_profile_resolves_impact_axes_from_subcommand_flags() {
+        let slug = resolved_schema_slug(&[
+            "dimpact",
+            "impact",
+            "--per-seed",
+            "--with-edges",
+            "--with-pdg",
+            "--with-propagation",
+        ]);
+
+        assert_eq!(slug, "impact/per_seed/with_edges/propagation");
+    }
+
+    #[test]
+    fn cli_schema_profile_ignores_content_only_impact_flags() {
+        let slug = resolved_schema_slug(&[
+            "dimpact",
+            "impact",
+            "--direction",
+            "both",
+            "--max-depth",
+            "2",
+            "--min-confidence",
+            "confirmed",
+            "--exclude-dynamic-fallback",
+            "--op-profile",
+            "precision-first",
+            "--seed-symbol",
+            "rust:src/lib.rs:fn:foo:12",
+            "--ignore-dir",
+            "vendor",
+        ]);
+
+        assert_eq!(slug, "impact/default/summary_only/call_graph");
+    }
+
+    #[test]
+    fn cli_schema_profile_resolves_deprecated_mode_without_pdg_axes() {
+        let slug =
+            resolved_schema_slug(&["dimpact", "--mode", "impact", "--per-seed", "--with-edges"]);
+
+        assert_eq!(slug, "impact/per_seed/with_edges/call_graph");
+    }
+
+    #[test]
+    fn cli_schema_profile_prefers_subcommand_over_deprecated_mode() {
+        let slug = resolved_schema_slug(&["dimpact", "--mode", "diff", "impact", "--with-edges"]);
+
+        assert_eq!(slug, "impact/default/with_edges/call_graph");
+    }
+
+    #[test]
+    fn cli_schema_profile_rejects_non_json_formats() {
+        let args = Args::try_parse_from(["dimpact", "changed", "-f", "yaml"])
+            .expect("yaml args should still parse");
+        let err = resolve_schema_profile_for_args(&args).expect_err("yaml should be unsupported");
+
+        assert_eq!(
+            err,
+            dimpact::SchemaProfileResolveError::UnsupportedFormat { format: "yaml" }
+        );
+    }
+
+    #[test]
+    fn cli_schema_profile_rejects_raw_id_output() {
+        let args =
+            Args::try_parse_from(["dimpact", "id", "--raw"]).expect("raw id args should parse");
+        let err = resolve_schema_profile_for_args(&args)
+            .expect_err("raw id output should be unsupported");
+
+        assert_eq!(err, dimpact::SchemaProfileResolveError::RawIdOutput);
+    }
+
+    #[test]
+    fn cli_schema_profile_rejects_non_schema_subcommands() {
+        let args =
+            Args::try_parse_from(["dimpact", "cache", "stats"]).expect("cache args should parse");
+        let err = resolve_schema_profile_for_args(&args)
+            .expect_err("cache subcommand should be unsupported");
+
+        assert_eq!(
+            err,
+            dimpact::SchemaProfileResolveError::UnsupportedCommand {
+                subcommand: "cache"
+            }
+        );
     }
 
     #[test]
