@@ -1,11 +1,451 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dimpact:json/v1/impact/default/summary_only/call_graph",
-  "title": "dimpact placeholder schema: impact/default/summary_only/call_graph",
-  "description": "Minimal placeholder schema document registered in S1-4. Concrete payload contracts will be tightened in later S1 tasks.",
-  "$comment": "This placeholder schema document is intentionally permissive until the concrete output contracts land.",
+  "title": "dimpact impact schema: default/summary_only/call_graph",
+  "description": "Concrete schema for the default impact JSON output. This models the current call-graph, summary-only surface emitted by `dimpact impact -f json` without `--per-seed`, `--with-edges`, `--with-pdg`, or `--with-propagation`.",
+  "$comment": "S1-6 concrete schema for the default impact JSON surface.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "changed_symbols",
+    "impacted_symbols",
+    "impacted_files",
+    "edges",
+    "impacted_by_file",
+    "impacted_witnesses",
+    "summary"
+  ],
+  "properties": {
+    "changed_symbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/symbol"
+      }
+    },
+    "impacted_symbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/symbol"
+      }
+    },
+    "impacted_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "maxItems": 0,
+      "items": {
+        "$ref": "#/$defs/reference"
+      },
+      "description": "Default summary-only impact output always emits an empty edge list. `--with-edges` uses a different schema profile."
+    },
+    "impacted_by_file": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/symbol"
+        }
+      }
+    },
+    "impacted_witnesses": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/impact_witness"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/impact_summary"
+    },
+    "confidence_filter": {
+      "$ref": "#/$defs/confidence_filter"
+    }
+  },
+  "$defs": {
+    "text_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_line",
+        "end_line"
+      ],
+      "properties": {
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "symbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "file",
+        "range",
+        "language"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "function",
+            "method",
+            "struct",
+            "enum",
+            "trait",
+            "module"
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/text_range"
+        },
+        "language": {
+          "type": "string"
+        }
+      }
+    },
+    "ref_kind": {
+      "type": "string",
+      "enum": [
+        "call"
+      ]
+    },
+    "edge_certainty": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "inferred",
+        "dynamic_fallback"
+      ]
+    },
+    "edge_provenance": {
+      "type": "string",
+      "enum": [
+        "call_graph"
+      ]
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "kind",
+        "file",
+        "line",
+        "certainty",
+        "confidence",
+        "provenance"
+      ],
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ref_kind"
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "certainty": {
+          "$ref": "#/$defs/edge_certainty"
+        },
+        "confidence": {
+          "$ref": "#/$defs/edge_certainty"
+        },
+        "provenance": {
+          "$ref": "#/$defs/edge_provenance"
+        }
+      }
+    },
+    "impact_witness_hop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_symbol_id",
+        "to_symbol_id",
+        "edge"
+      ],
+      "properties": {
+        "from_symbol_id": {
+          "type": "string"
+        },
+        "to_symbol_id": {
+          "type": "string"
+        },
+        "edge": {
+          "$ref": "#/$defs/reference"
+        }
+      }
+    },
+    "impact_witness_compact_hop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_symbol_id",
+        "to_symbol_id",
+        "edge",
+        "collapsed_hops"
+      ],
+      "properties": {
+        "from_symbol_id": {
+          "type": "string"
+        },
+        "to_symbol_id": {
+          "type": "string"
+        },
+        "edge": {
+          "$ref": "#/$defs/reference"
+        },
+        "collapsed_hops": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "impact_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol_id",
+        "depth",
+        "root_symbol_id",
+        "via_symbol_id",
+        "edge",
+        "path",
+        "provenance_chain",
+        "kind_chain",
+        "path_compact",
+        "provenance_chain_compact",
+        "kind_chain_compact"
+      ],
+      "properties": {
+        "symbol_id": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "root_symbol_id": {
+          "type": "string"
+        },
+        "via_symbol_id": {
+          "type": "string"
+        },
+        "edge": {
+          "$ref": "#/$defs/reference"
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_witness_hop"
+          }
+        },
+        "provenance_chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge_provenance"
+          }
+        },
+        "kind_chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref_kind"
+          }
+        },
+        "path_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_witness_compact_hop"
+          }
+        },
+        "provenance_chain_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge_provenance"
+          }
+        },
+        "kind_chain_compact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref_kind"
+          }
+        }
+      }
+    },
+    "impact_depth_bucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "depth",
+        "symbol_count",
+        "file_count"
+      ],
+      "properties": {
+        "depth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "symbol_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "impact_affected_module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "module",
+        "symbol_count",
+        "file_count"
+      ],
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "symbol_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "impact_risk_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "direct_hits",
+        "transitive_hits",
+        "impacted_files",
+        "impacted_symbols"
+      ],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "direct_hits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transitive_hits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "impacted_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "impacted_symbols": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "impact_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "by_depth",
+        "affected_modules",
+        "risk"
+      ],
+      "properties": {
+        "by_depth": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_depth_bucket"
+          }
+        },
+        "affected_modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impact_affected_module"
+          }
+        },
+        "risk": {
+          "$ref": "#/$defs/impact_risk_summary"
+        }
+      }
+    },
+    "confidence_filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_confidence",
+        "exclude_dynamic_fallback",
+        "input_edge_count",
+        "kept_edge_count"
+      ],
+      "properties": {
+        "min_confidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "confirmed",
+            "inferred",
+            "dynamic_fallback",
+            null
+          ]
+        },
+        "exclude_dynamic_fallback": {
+          "type": "boolean"
+        },
+        "input_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kept_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
   "x-dimpact": {
-    "status": "placeholder",
+    "status": "concrete",
     "profile": "impact/default/summary_only/call_graph",
     "schema_path": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json"
   }
