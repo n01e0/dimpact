@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
@@ -1566,7 +1568,7 @@ fn run_impact_json(repo: &std::path::Path, diff: &str, args: &[&str]) -> serde_j
         .write_stdin(diff.to_string())
         .assert()
         .success();
-    serde_json::from_slice(&assert.get_output().stdout).expect("json output")
+    json_output::parse_payload_slice(&assert.get_output().stdout)
 }
 
 fn run_impact_yaml(repo: &std::path::Path, diff: &str, args: &[&str]) -> serde_json::Value {
@@ -1740,7 +1742,7 @@ fn pdg_path_assigns_confirmed_or_inferred_confidence_only() {
         .success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 output");
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect("json output");
+    let v = json_output::parse_payload(&stdout);
     let edges = v["edges"].as_array().expect("edges array");
     assert!(!edges.is_empty(), "expected non-empty edges");
 

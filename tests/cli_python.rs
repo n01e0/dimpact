@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
@@ -78,7 +80,7 @@ fn cli_changed_lang_python_uses_python_analyzer() {
         .stdout(predicate::str::contains("main.py"));
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("bar")));
 }
@@ -109,7 +111,7 @@ fn cli_impact_lang_python_engine_ts_uses_non_lsp_analyzer() {
         .stdout(predicate::str::contains("\"impacted_symbols\""));
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
 
     let changed = v["changed_symbols"].as_array().unwrap();
     assert!(changed.iter().any(|s| s["name"].as_str() == Some("bar")));

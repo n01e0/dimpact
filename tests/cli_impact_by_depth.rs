@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::process::Command;
@@ -63,7 +65,7 @@ fn run_impact_json(repo: &std::path::Path, diff: &str, extra_args: &[&str]) -> s
         cmd.arg(arg);
     }
     let assert = cmd.write_stdin(diff.to_owned()).assert().success();
-    serde_json::from_slice(assert.get_output().stdout.as_ref()).unwrap()
+    json_output::parse_payload_slice(assert.get_output().stdout.as_ref())
 }
 
 fn by_depth_tuples(output: &serde_json::Value) -> Vec<(u64, u64, u64)> {

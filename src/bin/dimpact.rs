@@ -130,6 +130,33 @@ struct ImpactOutputRendered<'a> {
     confidence_filter: Option<&'a ConfidenceFilterSummary>,
 }
 
+#[derive(Debug, Serialize)]
+struct JsonSchemaTag<'a> {
+    id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonOutputEnvelope<'a, T> {
+    #[serde(rename = "_schema")]
+    schema: JsonSchemaTag<'a>,
+    json_schema: &'a str,
+    data: T,
+}
+
+fn print_json_output<T: Serialize>(schema: &ResolvedSchemaProfile, data: T) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&JsonOutputEnvelope {
+            schema: JsonSchemaTag {
+                id: &schema.schema_id,
+            },
+            json_schema: &schema.schema_path,
+            data,
+        })?
+    );
+    Ok(())
+}
+
 fn certainty_rank(certainty: EdgeCertainty) -> u8 {
     match certainty {
         EdgeCertainty::DynamicFallback => 0,
@@ -214,6 +241,7 @@ fn apply_confidence_filter(
 
 fn print_impact_output(
     fmt: OutputFormat,
+    schema: Option<&ResolvedSchemaProfile>,
     out: &ImpactOutput,
     confidence_filter: Option<&ConfidenceFilterSummary>,
 ) -> anyhow::Result<()> {
@@ -227,13 +255,14 @@ fn print_impact_output(
         );
     }
     match fmt {
-        OutputFormat::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(&ImpactOutputRendered {
+        OutputFormat::Json => {
+            let rendered = ImpactOutputRendered {
                 output: out,
                 confidence_filter,
-            })?
-        ),
+            };
+            let schema = schema.expect("json output should always provide schema metadata");
+            print_json_output(schema, rendered)?;
+        }
         OutputFormat::Yaml => print!(
             "{}",
             serde_yaml::to_string(&ImpactOutputRendered {
@@ -573,6 +602,16 @@ fn schema_output_format(fmt: OutputFormat) -> SchemaOutputFormat {
     }
 }
 
+fn resolve_schema_profile_for_command(
+    fmt: OutputFormat,
+    command: SchemaCommand,
+) -> Result<ResolvedSchemaProfile, dimpact::SchemaProfileResolveError> {
+    resolve_schema_profile(SchemaProfileInput {
+        format: schema_output_format(fmt),
+        command,
+    })
+}
+
 fn resolve_schema_profile_for_target(
     fmt: OutputFormat,
     target: &SchemaResolveTarget,
@@ -595,10 +634,7 @@ fn resolve_schema_profile_for_target(
         SchemaResolveTarget::Id { raw, .. } => SchemaCommand::Id { raw: *raw },
     };
 
-    resolve_schema_profile(SchemaProfileInput {
-        format: schema_output_format(fmt),
-        command,
-    })
+    resolve_schema_profile_for_command(fmt, command)
 }
 
 fn resolve_schema_profile_for_args(
@@ -1123,7 +1159,10 @@ fn run_diff(fmt: OutputFormat) -> anyhow::Result<()> {
         Err(e) => return Err(anyhow::anyhow!(e)),
     };
     match fmt {
-        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&files)?),
+        OutputFormat::Json => {
+            let schema = resolve_schema_profile_for_command(fmt, SchemaCommand::Diff)?;
+            print_json_output(&schema, &files)?;
+        }
         OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&files)?),
         OutputFormat::Dot | OutputFormat::Html => {
             anyhow::bail!("format not supported for 'diff': use json|yaml")
@@ -1190,7 +1229,10 @@ fn run_changed(
     );
     let report: ChangedOutput = engine.changed_symbols(&files, lang)?;
     match fmt {
-        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        OutputFormat::Json => {
+            let schema = resolve_schema_profile_for_command(fmt, SchemaCommand::Changed)?;
+            print_json_output(&schema, &report)?;
+        }
         OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&report)?),
         OutputFormat::Dot | OutputFormat::Html => {
             anyhow::bail!("format not supported for 'changed': use json|yaml")
@@ -3415,6 +3457,19 @@ fn run_impact(
         mock_caps: None,
     };
     let engine = make_engine_with_auto_policy(ekind, ecfg, auto_policy.map(map_auto_policy));
+    let json_schema = if matches!(fmt, OutputFormat::Json) {
+        Some(resolve_schema_profile_for_command(
+            fmt,
+            SchemaCommand::Impact {
+                per_seed,
+                with_edges,
+                with_pdg,
+                with_propagation,
+            },
+        )?)
+    } else {
+        None
+    };
     if dump_caps && !matches!(engine_opt, EngineOpt::Lsp) {
         eprintln!(
             "{}",
@@ -3459,7 +3514,18 @@ fn run_impact(
                     with_edges,
                     Some(&pdg.per_seed_slice_selection),
                 );
-                println!("{}", serde_json::to_string_pretty(&grouped)?);
+                match fmt {
+                    OutputFormat::Json => {
+                        let schema = json_schema
+                            .as_ref()
+                            .expect("json impact output should include schema metadata");
+                        print_json_output(schema, &grouped)?;
+                    }
+                    OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&grouped)?),
+                    OutputFormat::Dot | OutputFormat::Html => {
+                        anyhow::bail!("format not supported for 'impact --per-seed': use json|yaml")
+                    }
+                }
                 return Ok(());
             }
 
@@ -3484,7 +3550,18 @@ fn run_impact(
                 with_edges,
                 None,
             );
-            println!("{}", serde_json::to_string_pretty(&grouped)?);
+            match fmt {
+                OutputFormat::Json => {
+                    let schema = json_schema
+                        .as_ref()
+                        .expect("json impact output should include schema metadata");
+                    print_json_output(schema, &grouped)?;
+                }
+                OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&grouped)?),
+                OutputFormat::Dot | OutputFormat::Html => {
+                    anyhow::bail!("format not supported for 'impact --per-seed': use json|yaml")
+                }
+            }
             return Ok(());
         }
         // Seed-based grouping: group per provided seed
@@ -3510,7 +3587,18 @@ fn run_impact(
                 with_edges,
                 Some(&pdg.per_seed_slice_selection),
             );
-            println!("{}", serde_json::to_string_pretty(&grouped)?);
+            match fmt {
+                OutputFormat::Json => {
+                    let schema = json_schema
+                        .as_ref()
+                        .expect("json impact output should include schema metadata");
+                    print_json_output(schema, &grouped)?;
+                }
+                OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&grouped)?),
+                OutputFormat::Dot | OutputFormat::Html => {
+                    anyhow::bail!("format not supported for 'impact --per-seed': use json|yaml")
+                }
+            }
             return Ok(());
         }
 
@@ -3531,7 +3619,18 @@ fn run_impact(
             with_edges,
             None,
         );
-        println!("{}", serde_json::to_string_pretty(&grouped)?);
+        match fmt {
+            OutputFormat::Json => {
+                let schema = json_schema
+                    .as_ref()
+                    .expect("json impact output should include schema metadata");
+                print_json_output(schema, &grouped)?;
+            }
+            OutputFormat::Yaml => print!("{}", serde_yaml::to_string(&grouped)?),
+            OutputFormat::Dot | OutputFormat::Html => {
+                anyhow::bail!("format not supported for 'impact --per-seed': use json|yaml")
+            }
+        }
         return Ok(());
     }
 
@@ -3580,7 +3679,7 @@ fn run_impact(
                 with_edges,
             );
             attach_slice_selection_summary(&mut out, &pdg.slice_selection);
-            print_impact_output(fmt, &out, confidence_filter.as_ref())?;
+            print_impact_output(fmt, json_schema.as_ref(), &out, confidence_filter.as_ref())?;
             return Ok(());
         }
         let (out, confidence_filter) = apply_confidence_filter(
@@ -3590,7 +3689,7 @@ fn run_impact(
             exclude_dynamic_fallback,
             with_edges,
         );
-        print_impact_output(fmt, &out, confidence_filter.as_ref())?;
+        print_impact_output(fmt, json_schema.as_ref(), &out, confidence_filter.as_ref())?;
         return Ok(());
     }
 
@@ -3627,7 +3726,7 @@ fn run_impact(
             with_edges,
         );
         attach_slice_selection_summary(&mut out, &pdg.slice_selection);
-        print_impact_output(fmt, &out, confidence_filter.as_ref())?;
+        print_impact_output(fmt, json_schema.as_ref(), &out, confidence_filter.as_ref())?;
         return Ok(());
     }
 
@@ -3638,7 +3737,7 @@ fn run_impact(
         exclude_dynamic_fallback,
         with_edges,
     );
-    print_impact_output(fmt, &out, confidence_filter.as_ref())?;
+    print_impact_output(fmt, json_schema.as_ref(), &out, confidence_filter.as_ref())?;
     Ok(())
 }
 
@@ -3758,7 +3857,8 @@ fn run_id(
                     })
                 })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&items)?);
+            let schema = resolve_schema_profile_for_command(fmt, SchemaCommand::Id { raw: false })?;
+            print_json_output(&schema, &items)?;
         }
         OutputFormat::Yaml => {
             print!("{}", serde_yaml::to_string(&sorted)?);

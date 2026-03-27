@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
@@ -65,6 +67,14 @@ fn cli_mode_impact_basic_callers() {
         .stdout(predicate::str::contains("\"foo\""));
 
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        json_output::schema_id(&stdout).as_deref(),
+        Some("dimpact:json/v1/impact/default/summary_only/call_graph")
+    );
+    assert_eq!(
+        json_output::schema_path(&stdout).as_deref(),
+        Some("resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json")
+    );
+    let v = json_output::parse_payload(&stdout);
     assert!(v["impacted_symbols"].is_array());
 }

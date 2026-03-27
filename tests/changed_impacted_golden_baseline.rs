@@ -1,5 +1,7 @@
 #![allow(deprecated)]
 #![allow(unused)]
+
+mod json_output;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -61,7 +63,7 @@ fn run_changed_and_impacted(
         .assert()
         .success();
     let changed_json: Value =
-        serde_json::from_slice(changed_assert.get_output().stdout.as_ref()).unwrap();
+        json_output::parse_payload_slice(changed_assert.get_output().stdout.as_ref());
 
     let changed_names: BTreeSet<String> = changed_json["changed_symbols"]
         .as_array()
@@ -87,7 +89,7 @@ fn run_changed_and_impacted(
         .assert()
         .success();
     let impact_json: Value =
-        serde_json::from_slice(impact_assert.get_output().stdout.as_ref()).unwrap();
+        json_output::parse_payload_slice(impact_assert.get_output().stdout.as_ref());
 
     let impacted_names: BTreeSet<String> = impact_json["impacted_symbols"]
         .as_array()
@@ -185,8 +187,10 @@ fn changed_impacted_golden_baseline_matrix_v73() {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/python/analyzer_hard_cases_dynamic_monkeypatch_metaclass_protocol_v4.py"
     ));
-    let python_monkey_v4_after = python_monkey_v4_before
-        .replace("return payload.strip().lower()", "return payload.strip().upper()");
+    let python_monkey_v4_after = python_monkey_v4_before.replace(
+        "return payload.strip().lower()",
+        "return payload.strip().upper()",
+    );
 
     let go_fp_v4_before = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),

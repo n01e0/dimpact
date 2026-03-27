@@ -1,4 +1,6 @@
 #![allow(deprecated)]
+mod json_output;
+
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -46,7 +48,7 @@ fn resolves_module_in_mod_rs() {
         .write_stdin(String::from_utf8(diff.stdout).unwrap());
     let assert = cmd.assert().success();
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let v = json_output::parse_payload(&stdout);
     let names: Vec<&str> = v["impacted_symbols"]
         .as_array()
         .unwrap()
