@@ -75,16 +75,8 @@ fn cli_mode_changed_reports_rust_symbol() {
         .stdout(predicate::str::contains("\"foo\""))
         .stdout(predicate::str::contains("main.rs"));
 
-    // parse json to ensure structure and embedded schema metadata
+    // parse json to ensure the legacy top-level structure is preserved
     let stdout = String::from_utf8_lossy(assert.get_output().stdout.as_ref());
-    assert_eq!(
-        json_output::schema_id(&stdout).as_deref(),
-        Some("dimpact:json/v1/changed/default")
-    );
-    assert_eq!(
-        json_output::schema_path(&stdout).as_deref(),
-        Some("resources/schemas/json/v1/changed/default.schema.json")
-    );
     let v = json_output::parse_payload(&stdout);
     assert!(v["changed_symbols"].is_array());
 }
