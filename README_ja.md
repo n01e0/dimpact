@@ -77,6 +77,36 @@ dimpact impact \
 dimpact id --path src/lib.rs --name foo --kind fn --raw
 ```
 
+### 6. 登録済み JSON schema を調べる
+
+```bash
+dimpact schema --list
+dimpact schema --id dimpact:json/v1/impact/default/summary_only/call_graph
+dimpact schema resolve impact --per-seed --with-edges --with-propagation
+```
+
+## JSON schema surface
+
+`schema` サブコマンド群は、JSON contract を調べるための help / lookup layer です。通常の JSON 出力 shape 自体は変えません。
+
+つまり:
+
+- `dimpact diff -f json` は従来どおり top-level array を返す
+- `dimpact changed -f json` は従来どおり top-level object を返す
+- `dimpact impact -f json` は従来どおり top-level object を返す
+- `dimpact impact --per-seed -f json` は従来どおり top-level array を返す
+- `dimpact id -f json` は従来どおり top-level array を返す
+
+通常の JSON 出力には `_schema` / `json_schema` / `data` の wrapper は埋め込みません。
+
+schema layer を直接使うときは次を使います。
+
+- `dimpact schema --list` — 登録済みの canonical schema id と document path を列挙
+- `dimpact schema --id <schema-id>` — 1 つの id に対応する concrete JSON Schema document を取得
+- `dimpact schema resolve <subcommand> ...` — その JSON command が対応する canonical profile / id / path を解決
+
+Schema document は [`resources/schemas/json/v1/`](resources/schemas/json/v1/) 配下にあります。
+
 ## 主なコマンド
 
 | コマンド | 役割 |
@@ -85,6 +115,7 @@ dimpact id --path src/lib.rs --name foo --kind fn --raw
 | `changed` | 変更行をシンボルへ対応付け |
 | `impact` | diff またはシードから callers / callees / both を解析 |
 | `id` | ファイル・行・名前から Symbol ID を生成 |
+| `schema` | 登録済み JSON schema の list / resolve / fetch |
 | `cache` | キャッシュの build / update / stats / clear |
 | `completions` | シェル補完スクリプトを生成 |
 
