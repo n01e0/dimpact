@@ -7,96 +7,62 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "_schema",
-    "json_schema",
-    "data"
+    "changed_symbols",
+    "impacted_symbols",
+    "impacted_files",
+    "edges",
+    "impacted_by_file",
+    "impacted_witnesses",
+    "summary"
   ],
   "properties": {
-    "_schema": {
+    "changed_symbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/symbol"
+      }
+    },
+    "impacted_symbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/symbol"
+      }
+    },
+    "impacted_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "maxItems": 0,
+      "items": {
+        "$ref": "#/$defs/reference"
+      },
+      "description": "Default summary-only impact output always emits an empty edge list. `--with-edges` uses a different schema profile."
+    },
+    "impacted_by_file": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id"
-      ],
-      "properties": {
-        "id": {
-          "type": "string",
-          "const": "dimpact:json/v1/impact/default/summary_only/call_graph"
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/symbol"
         }
       }
     },
-    "json_schema": {
-      "type": "string",
-      "const": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json"
-    },
-    "data": {
+    "impacted_witnesses": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "changed_symbols",
-        "impacted_symbols",
-        "impacted_files",
-        "edges",
-        "impacted_by_file",
-        "impacted_witnesses",
-        "summary"
-      ],
-      "properties": {
-        "changed_symbols": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/symbol"
-          }
-        },
-        "impacted_symbols": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/symbol"
-          }
-        },
-        "impacted_files": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "edges": {
-          "type": "array",
-          "maxItems": 0,
-          "items": {
-            "$ref": "#/$defs/reference"
-          },
-          "description": "Default summary-only impact output always emits an empty edge list. `--with-edges` uses a different schema profile."
-        },
-        "impacted_by_file": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/symbol"
-            }
-          }
-        },
-        "impacted_witnesses": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/impact_witness"
-          }
-        },
-        "summary": {
-          "$ref": "#/$defs/impact_summary"
-        },
-        "confidence_filter": {
-          "$ref": "#/$defs/confidence_filter"
-        }
-      },
-      "description": "Concrete schema for the default impact JSON output. This models the current call-graph, summary-only surface emitted by `dimpact impact -f json` without `--per-seed`, `--with-edges`, `--with-pdg`, or `--with-propagation`."
+      "additionalProperties": {
+        "$ref": "#/$defs/impact_witness"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/impact_summary"
+    },
+    "confidence_filter": {
+      "$ref": "#/$defs/confidence_filter"
     }
-  },
-  "x-dimpact": {
-    "status": "concrete",
-    "profile": "impact/default/summary_only/call_graph",
-    "schema_path": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json"
   },
   "$defs": {
     "text_range": {
@@ -477,5 +443,10 @@
         }
       }
     }
+  },
+  "x-dimpact": {
+    "status": "concrete",
+    "profile": "impact/default/summary_only/call_graph",
+    "schema_path": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json"
   }
 }

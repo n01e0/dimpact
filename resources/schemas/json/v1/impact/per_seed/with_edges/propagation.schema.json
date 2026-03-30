@@ -4,136 +4,6 @@
   "title": "dimpact impact schema: per_seed/with_edges/propagation",
   "description": "Concrete schema for the impact JSON output variant selected by `impact/per_seed/with_edges/propagation`.",
   "$comment": "S1-7 concrete schema for impact/per_seed/with_edges/propagation.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "_schema",
-    "json_schema",
-    "data"
-  ],
-  "properties": {
-    "_schema": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id"
-      ],
-      "properties": {
-        "id": {
-          "type": "string",
-          "const": "dimpact:json/v1/impact/per_seed/with_edges/propagation"
-        }
-      }
-    },
-    "json_schema": {
-      "type": "string",
-      "const": "resources/schemas/json/v1/impact/per_seed/with_edges/propagation.schema.json"
-    },
-    "data": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "changed_symbol",
-          "impacts"
-        ],
-        "properties": {
-          "changed_symbol": {
-            "$ref": "#/$defs/symbol"
-          },
-          "impacts": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 2,
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "direction",
-                "output"
-              ],
-              "properties": {
-                "direction": {
-                  "type": "string",
-                  "enum": [
-                    "callers",
-                    "callees"
-                  ]
-                },
-                "output": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "changed_symbols",
-                    "impacted_symbols",
-                    "impacted_files",
-                    "edges",
-                    "impacted_by_file",
-                    "impacted_witnesses",
-                    "summary"
-                  ],
-                  "properties": {
-                    "changed_symbols": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/$defs/symbol"
-                      }
-                    },
-                    "impacted_symbols": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/$defs/symbol"
-                      }
-                    },
-                    "impacted_files": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "edges": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/$defs/reference"
-                      }
-                    },
-                    "impacted_by_file": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                          "$ref": "#/$defs/symbol"
-                        }
-                      }
-                    },
-                    "impacted_witnesses": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "$ref": "#/$defs/impact_witness"
-                      }
-                    },
-                    "summary": {
-                      "$ref": "#/$defs/impact_summary"
-                    }
-                  }
-                },
-                "confidence_filter": {
-                  "$ref": "#/$defs/confidence_filter"
-                }
-              }
-            }
-          }
-        }
-      },
-      "description": "Concrete schema for the impact JSON output variant selected by `impact/per_seed/with_edges/propagation`."
-    }
-  },
-  "x-dimpact": {
-    "status": "concrete",
-    "profile": "impact/per_seed/with_edges/propagation",
-    "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/propagation.schema.json"
-  },
   "$defs": {
     "text_range": {
       "type": "object",
@@ -1050,6 +920,107 @@
         },
         "slice_selection": {
           "$ref": "#/$defs/impact_slice_selection_summary"
+        }
+      }
+    }
+  },
+  "x-dimpact": {
+    "status": "concrete",
+    "profile": "impact/per_seed/with_edges/propagation",
+    "schema_path": "resources/schemas/json/v1/impact/per_seed/with_edges/propagation.schema.json"
+  },
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "changed_symbol",
+      "impacts"
+    ],
+    "properties": {
+      "changed_symbol": {
+        "$ref": "#/$defs/symbol"
+      },
+      "impacts": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 2,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "direction",
+            "output"
+          ],
+          "properties": {
+            "direction": {
+              "type": "string",
+              "enum": [
+                "callers",
+                "callees"
+              ]
+            },
+            "output": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "changed_symbols",
+                "impacted_symbols",
+                "impacted_files",
+                "edges",
+                "impacted_by_file",
+                "impacted_witnesses",
+                "summary"
+              ],
+              "properties": {
+                "changed_symbols": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/symbol"
+                  }
+                },
+                "impacted_symbols": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/symbol"
+                  }
+                },
+                "impacted_files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "edges": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/reference"
+                  }
+                },
+                "impacted_by_file": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/symbol"
+                    }
+                  }
+                },
+                "impacted_witnesses": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/$defs/impact_witness"
+                  }
+                },
+                "summary": {
+                  "$ref": "#/$defs/impact_summary"
+                }
+              }
+            },
+            "confidence_filter": {
+              "$ref": "#/$defs/confidence_filter"
+            }
+          }
         }
       }
     }
