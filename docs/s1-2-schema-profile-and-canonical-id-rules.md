@@ -4,6 +4,8 @@
 後続の `schema resolve` / `schema --id` / `_schema.id` 埋め込みで共有するための
 **`SchemaProfile` の定義** と **canonical schema id の命名規則** を固定する。
 
+> Historical note: C1 の JSON compatibility restore 以降、通常の `diff` / `changed` / `impact` / `id` の JSON 出力は payload-only のままで、`_schema.id` / `json_schema` / `data` wrapper を runtime に埋め込まない。ここでの `_schema.id` / `json_schema` / envelope に関する議論は、schema layer をどう設計していたかを示す設計メモとして読むこと。
+
 対象:
 
 - `diff -f json`

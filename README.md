@@ -87,41 +87,23 @@ dimpact schema resolve impact --per-seed --with-edges --with-propagation
 
 ## JSON schema surface
 
-JSON outputs for `diff`, `changed`, `impact`, and JSON-mode `id` are wrapped in a common envelope:
+The `schema` subcommand family is an inspection/help layer for JSON contracts. It does **not** rewrite the normal JSON payload shape.
 
-```json
-{
-  "_schema": {
-    "id": "dimpact:json/v1/impact/default/summary_only/call_graph"
-  },
-  "json_schema": "resources/schemas/json/v1/impact/default/summary_only/call_graph.schema.json",
-  "data": {
-    "changed_symbols": [],
-    "impacted_symbols": [],
-    "impacted_files": [],
-    "edges": [],
-    "impacted_by_file": {},
-    "impacted_witnesses": {},
-    "summary": {
-      "by_depth": [],
-      "affected_modules": [],
-      "risk": {
-        "level": "low",
-        "direct_hits": 0,
-        "transitive_hits": 0,
-        "impacted_files": 0,
-        "impacted_symbols": 0
-      }
-    }
-  }
-}
-```
+That means:
+
+- `dimpact diff -f json` still returns its top-level array payload
+- `dimpact changed -f json` still returns its top-level object payload
+- `dimpact impact -f json` still returns its top-level object payload
+- `dimpact impact --per-seed -f json` still returns its top-level array payload
+- `dimpact id -f json` still returns its top-level array payload
+
+Normal JSON output does **not** embed `_schema`, `json_schema`, or `data` wrapper fields.
 
 Use these commands to work with the schema layer directly:
 
 - `dimpact schema --list` — list the registered canonical schema ids and document paths
 - `dimpact schema --id <schema-id>` — fetch the concrete JSON Schema document for one id
-- `dimpact schema resolve <subcommand> ...` — resolve the canonical profile/id/path that a JSON command will emit
+- `dimpact schema resolve <subcommand> ...` — resolve the canonical profile/id/path that a JSON command corresponds to
 
 Schema documents live under [`resources/schemas/json/v1/`](resources/schemas/json/v1/).
 
