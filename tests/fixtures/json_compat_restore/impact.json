@@ -1,0 +1,133 @@
+{
+  "changed_symbols": [
+    {
+      "id": "rust:main.rs:fn:leaf:5",
+      "name": "leaf",
+      "kind": "function",
+      "file": "main.rs",
+      "range": {
+        "start_line": 5,
+        "end_line": 8
+      },
+      "language": "rust"
+    }
+  ],
+  "impacted_symbols": [
+    {
+      "id": "rust:main.rs:fn:root:1",
+      "name": "root",
+      "kind": "function",
+      "file": "main.rs",
+      "range": {
+        "start_line": 1,
+        "end_line": 3
+      },
+      "language": "rust"
+    }
+  ],
+  "impacted_files": [
+    "main.rs"
+  ],
+  "edges": [],
+  "impacted_by_file": {
+    "main.rs": [
+      {
+        "id": "rust:main.rs:fn:root:1",
+        "name": "root",
+        "kind": "function",
+        "file": "main.rs",
+        "range": {
+          "start_line": 1,
+          "end_line": 3
+        },
+        "language": "rust"
+      }
+    ]
+  },
+  "impacted_witnesses": {
+    "rust:main.rs:fn:root:1": {
+      "symbol_id": "rust:main.rs:fn:root:1",
+      "depth": 1,
+      "root_symbol_id": "rust:main.rs:fn:leaf:5",
+      "via_symbol_id": "rust:main.rs:fn:leaf:5",
+      "edge": {
+        "from": "rust:main.rs:fn:root:1",
+        "to": "rust:main.rs:fn:leaf:5",
+        "kind": "call",
+        "file": "main.rs",
+        "line": 2,
+        "certainty": "inferred",
+        "confidence": "inferred",
+        "provenance": "call_graph"
+      },
+      "path": [
+        {
+          "from_symbol_id": "rust:main.rs:fn:leaf:5",
+          "to_symbol_id": "rust:main.rs:fn:root:1",
+          "edge": {
+            "from": "rust:main.rs:fn:root:1",
+            "to": "rust:main.rs:fn:leaf:5",
+            "kind": "call",
+            "file": "main.rs",
+            "line": 2,
+            "certainty": "inferred",
+            "confidence": "inferred",
+            "provenance": "call_graph"
+          }
+        }
+      ],
+      "provenance_chain": [
+        "call_graph"
+      ],
+      "kind_chain": [
+        "call"
+      ],
+      "path_compact": [
+        {
+          "from_symbol_id": "rust:main.rs:fn:leaf:5",
+          "to_symbol_id": "rust:main.rs:fn:root:1",
+          "edge": {
+            "from": "rust:main.rs:fn:root:1",
+            "to": "rust:main.rs:fn:leaf:5",
+            "kind": "call",
+            "file": "main.rs",
+            "line": 2,
+            "certainty": "inferred",
+            "confidence": "inferred",
+            "provenance": "call_graph"
+          },
+          "collapsed_hops": 1
+        }
+      ],
+      "provenance_chain_compact": [
+        "call_graph"
+      ],
+      "kind_chain_compact": [
+        "call"
+      ]
+    }
+  },
+  "summary": {
+    "by_depth": [
+      {
+        "depth": 1,
+        "symbol_count": 1,
+        "file_count": 1
+      }
+    ],
+    "affected_modules": [
+      {
+        "module": "(root)",
+        "symbol_count": 1,
+        "file_count": 1
+      }
+    ],
+    "risk": {
+      "level": "medium",
+      "direct_hits": 1,
+      "transitive_hits": 0,
+      "impacted_files": 1,
+      "impacted_symbols": 1
+    }
+  }
+}

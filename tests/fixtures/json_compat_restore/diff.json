@@ -1,0 +1,14 @@
+[
+  {
+    "old_path": "main.rs",
+    "new_path": "main.rs",
+    "changes": [
+      {
+        "kind": "added",
+        "old_line": null,
+        "new_line": 7,
+        "content": "    println!(\"two\");"
+      }
+    ]
+  }
+]
