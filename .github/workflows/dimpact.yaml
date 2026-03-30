@@ -23,7 +23,7 @@ jobs:
           git diff --no-ext-diff origin/${{ github.base_ref }}...HEAD | \
           docker run -i --rm -v ${{ github.workspace }}:/work ghcr.io/n01e0/dimpact:latest impact --per-seed -f json | \
           jq -r --argjson max_changed "$MAX_CHANGED" --argjson max_impacted "$MAX_IMPACTED" '
-          (. as $root | if (($root | type) == "object" and ($root | has("data"))) then $root.data else $root end) as $payload |
+          . as $payload |
           "## Changed Symbols\n",
           "| Name | Kind | File | Range | Impacted Preview |",
           "|------|------|------|-------|------------------|",

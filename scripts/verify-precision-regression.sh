@@ -88,13 +88,6 @@ def run(cmd, cwd=None, input_text=None):
     )
 
 
-def parse_json_payload(text: str):
-    value = json.loads(text)
-    if isinstance(value, dict) and "data" in value and isinstance(value.get("_schema"), dict):
-        return value["data"]
-    return value
-
-
 def git(cwd, *args, input_text=None):
     return run(["git", *args], cwd=cwd, input_text=input_text)
 
@@ -268,7 +261,7 @@ def run_case(case):
             cwd=d,
             input_text=diff,
         )
-        ch = parse_json_payload(changed.stdout)
+        ch = json.loads(changed.stdout)
         changed_names = {
             s.get("name")
             for s in ch.get("changed_symbols", [])
@@ -292,7 +285,7 @@ def run_case(case):
             cwd=d,
             input_text=diff2,
         )
-        im = parse_json_payload(impacted.stdout)
+        im = json.loads(impacted.stdout)
         impacted_names = {
             s.get("name")
             for s in im.get("impacted_symbols", [])
