@@ -1,0 +1,16 @@
+[
+  {
+    "id": "rust:main.rs:fn:leaf:5",
+    "symbol": {
+      "file": "main.rs",
+      "id": "rust:main.rs:fn:leaf:5",
+      "kind": "function",
+      "language": "rust",
+      "name": "leaf",
+      "range": {
+        "end_line": 8,
+        "start_line": 5
+      }
+    }
+  }
+]

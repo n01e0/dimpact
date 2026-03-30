@@ -1,0 +1,18 @@
+{
+  "changed_files": [
+    "main.rs"
+  ],
+  "changed_symbols": [
+    {
+      "id": "rust:main.rs:fn:leaf:5",
+      "name": "leaf",
+      "kind": "function",
+      "file": "main.rs",
+      "range": {
+        "start_line": 5,
+        "end_line": 8
+      },
+      "language": "rust"
+    }
+  ]
+}
