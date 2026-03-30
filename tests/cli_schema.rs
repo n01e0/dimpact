@@ -56,7 +56,7 @@ fn schema_id_json_returns_registered_document() {
 }
 
 #[test]
-fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
+fn changed_diff_and_id_schemas_are_concrete_and_model_payload_shapes() {
     let changed = fetch_schema_document("dimpact:json/v1/changed/default");
     assert_eq!(
         changed.pointer("/x-dimpact/status"),
@@ -64,10 +64,6 @@ fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
     );
     assert_eq!(
         changed.pointer("/required"),
-        Some(&serde_json::json!(["_schema", "json_schema", "data"]))
-    );
-    assert_eq!(
-        changed.pointer("/properties/data/required"),
         Some(&serde_json::json!(["changed_files", "changed_symbols"]))
     );
     assert_eq!(
@@ -84,10 +80,6 @@ fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
     );
     assert_eq!(
         diff.get("type"),
-        Some(&serde_json::Value::String("object".to_string()))
-    );
-    assert_eq!(
-        diff.pointer("/properties/data/type"),
         Some(&serde_json::Value::String("array".to_string()))
     );
     assert_eq!(
@@ -106,14 +98,10 @@ fn changed_diff_and_id_schemas_are_concrete_and_model_current_shapes() {
     );
     assert_eq!(
         id.get("type"),
-        Some(&serde_json::Value::String("object".to_string()))
-    );
-    assert_eq!(
-        id.pointer("/properties/data/type"),
         Some(&serde_json::Value::String("array".to_string()))
     );
     assert_eq!(
-        id.pointer("/properties/data/items/required"),
+        id.pointer("/items/required"),
         Some(&serde_json::json!(["id", "symbol"]))
     );
     assert_eq!(

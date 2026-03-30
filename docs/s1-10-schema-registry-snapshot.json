@@ -164,21 +164,21 @@
       "schema_path": "resources/schemas/json/v1/diff/default.schema.json",
       "title": "dimpact diff schema: default",
       "status": "concrete",
-      "sha256": "f042f3a0894e886e2782d8944fb645336d44f1f05175cc8773cab4d9f24a308f"
+      "sha256": "754e7962771e370f185edbfd829c5b0506f2ae147e6fb969a23c4d68c783c266"
     },
     {
       "schema_id": "dimpact:json/v1/changed/default",
       "schema_path": "resources/schemas/json/v1/changed/default.schema.json",
       "title": "dimpact changed schema: default",
       "status": "concrete",
-      "sha256": "3d9aefe567d83de85f19552574201a53b125221a101c3406b7f4eac0608cb466"
+      "sha256": "1f70751e8db5f1949971a526c08e616ad1ab597a0ac73e649036404e7cbc04ee"
     },
     {
       "schema_id": "dimpact:json/v1/id/default",
       "schema_path": "resources/schemas/json/v1/id/default.schema.json",
       "title": "dimpact id schema: default",
       "status": "concrete",
-      "sha256": "1ee062f3efeabf2a597c1e5df6a22a1d4230c4f3cfcd2c01477153477fd9e2d7"
+      "sha256": "e5c022cc724ae0eaae02c71e5698808cb146151e8b6c077cf757c5c4528fecfa"
     },
     {
       "schema_id": "dimpact:json/v1/impact/default/summary_only/call_graph",
