@@ -119,7 +119,7 @@ fn impact_default_schema_is_concrete_and_models_summary_only_shape() {
         Some(&serde_json::Value::String("concrete".to_string()))
     );
     assert_eq!(
-        value.pointer("/properties/data/properties/edges/maxItems"),
+        value.pointer("/properties/edges/maxItems"),
         Some(&serde_json::Value::Number(0.into()))
     );
     assert_eq!(
@@ -159,24 +159,20 @@ fn impact_variant_schemas_are_concrete_and_capture_profile_specific_constraints(
     );
     assert_eq!(
         per_seed.get("type"),
-        Some(&serde_json::Value::String("object".to_string()))
-    );
-    assert_eq!(
-        per_seed.pointer("/properties/data/type"),
         Some(&serde_json::Value::String("array".to_string()))
     );
     assert_eq!(
-        per_seed.pointer("/properties/data/items/properties/impacts/maxItems"),
+        per_seed.pointer("/items/properties/impacts/maxItems"),
         Some(&serde_json::Value::Number(2.into()))
     );
     assert_eq!(
         per_seed
-            .pointer("/properties/data/items/properties/impacts/items/properties/direction/enum"),
+            .pointer("/items/properties/impacts/items/properties/direction/enum"),
         Some(&serde_json::json!(["callers", "callees"]))
     );
     assert_eq!(
         per_seed.pointer(
-            "/properties/data/items/properties/impacts/items/properties/output/properties/edges/maxItems"
+            "/items/properties/impacts/items/properties/output/properties/edges/maxItems"
         ),
         Some(&serde_json::Value::Number(0.into()))
     );
@@ -187,9 +183,7 @@ fn impact_variant_schemas_are_concrete_and_capture_profile_specific_constraints(
         Some(&serde_json::Value::String("concrete".to_string()))
     );
     assert!(
-        with_edges
-            .pointer("/properties/data/properties/edges/maxItems")
-            .is_none()
+        with_edges.pointer("/properties/edges/maxItems").is_none()
     );
     assert_eq!(
         with_edges.pointer("/$defs/edge_provenance/enum"),
@@ -232,7 +226,7 @@ fn impact_variant_schemas_are_concrete_and_capture_profile_specific_constraints(
     assert!(
         propagation
             .pointer(
-                "/properties/data/items/properties/impacts/items/properties/output/properties/edges/maxItems"
+                "/items/properties/impacts/items/properties/output/properties/edges/maxItems"
             )
             .is_none()
     );
