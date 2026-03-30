@@ -61,6 +61,19 @@ def main() -> None:
 
     snapshot = {
         "generated_by": "scripts/collect-schema-snapshot.py",
+        "snapshot_scope": {
+            "captures": [
+                "schema --list",
+                "schema --id <schema-id>",
+                "schema resolve <command> [flags...]",
+            ],
+            "excludes": [
+                "runtime JSON output from diff -f json",
+                "runtime JSON output from changed -f json",
+                "runtime JSON output from impact -f json",
+                "runtime JSON output from id -f json",
+            ],
+        },
         "schema_count": len(schema_list),
         "schema_list": schema_list,
         "resolve_cases": resolve_cases,

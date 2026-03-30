@@ -57,14 +57,8 @@ fn setup_repo() -> (TempDir, PathBuf) {
     (dir, repo)
 }
 
-fn parse_payload_or_plain(bytes: &[u8]) -> Value {
-    let value: Value = serde_json::from_slice(bytes).expect("valid json output");
-    if let Some(data) = value.get("data")
-        && value.get("_schema").is_some()
-    {
-        return data.clone();
-    }
-    value
+fn parse_plain_json_output(bytes: &[u8]) -> Value {
+    serde_json::from_slice(bytes).expect("valid json output")
 }
 
 fn kind_name(value: &Value) -> Value {
@@ -197,7 +191,7 @@ fn current_payload_shapes_match_json_compat_restore_fixtures() {
         .write_stdin(diff_text.clone())
         .assert()
         .success();
-    let diff_actual = parse_payload_or_plain(diff_assert.get_output().stdout.as_ref());
+    let diff_actual = parse_plain_json_output(diff_assert.get_output().stdout.as_ref());
     assert_eq!(
         immediate_shape(&diff_actual),
         immediate_shape(&load_fixture("diff.json")),
@@ -215,7 +209,7 @@ fn current_payload_shapes_match_json_compat_restore_fixtures() {
         .write_stdin(diff_text.clone())
         .assert()
         .success();
-    let changed_actual = parse_payload_or_plain(changed_assert.get_output().stdout.as_ref());
+    let changed_actual = parse_plain_json_output(changed_assert.get_output().stdout.as_ref());
     assert_eq!(
         immediate_shape(&changed_actual),
         immediate_shape(&load_fixture("changed.json")),
@@ -235,7 +229,7 @@ fn current_payload_shapes_match_json_compat_restore_fixtures() {
         .write_stdin(diff_text)
         .assert()
         .success();
-    let impact_actual = parse_payload_or_plain(impact_assert.get_output().stdout.as_ref());
+    let impact_actual = parse_plain_json_output(impact_assert.get_output().stdout.as_ref());
     assert_eq!(
         immediate_shape(&impact_actual),
         immediate_shape(&load_fixture("impact.json")),
@@ -254,7 +248,7 @@ fn current_payload_shapes_match_json_compat_restore_fixtures() {
         .arg("json")
         .assert()
         .success();
-    let id_actual = parse_payload_or_plain(id_assert.get_output().stdout.as_ref());
+    let id_actual = parse_plain_json_output(id_assert.get_output().stdout.as_ref());
     assert_eq!(
         immediate_shape(&id_actual),
         immediate_shape(&load_fixture("id.json")),
