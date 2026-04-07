@@ -537,6 +537,11 @@ jobs:
           cargo test -q --locked --test engine_lsp 2>&1 | tee "$STRICT_E2E_LOG"
           status=${PIPESTATUS[0]}
           set -e
+          if [ "$status" -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+          fi
           echo "::endgroup::"
           exit $status
 
@@ -570,6 +575,11 @@ jobs:
           scripts/verify-lsp-graduation.sh --skip-regression 2>&1 | tee "$GRAD_LOG"
           status=${PIPESTATUS[0]}
           set -e
+          if [ "$status" -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+          fi
           exit $status
 
       - name: Publish LSP graduation check summary
@@ -784,6 +794,11 @@ jobs:
           cargo test -q --locked --test engine_lsp 2>&1 | tee "$STRICT_E2E_RETRY_LOG"
           status=${PIPESTATUS[0]}
           set -e
+          if [ "$status" -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+          fi
           echo "::endgroup::"
           exit $status
 
@@ -801,6 +816,11 @@ jobs:
           scripts/verify-lsp-graduation.sh --skip-regression 2>&1 | tee "$GRAD_RETRY_LOG"
           status=${PIPESTATUS[0]}
           set -e
+          if [ "$status" -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+          fi
           exit $status
 
       - name: Reclassify nightly flaky causes after retry absorption
@@ -831,43 +851,19 @@ jobs:
 
       - name: Finalize nightly result with retry policy
         if: always()
+        env:
+          INIT_STRICT_RESULT: ${{ steps.strict_e2e_initial.outputs.result }}
+          INIT_STRICT_OUTCOME: ${{ steps.strict_e2e_initial.outcome }}
+          INIT_GRAD_RESULT: ${{ steps.grad_check_initial.outputs.result }}
+          INIT_GRAD_OUTCOME: ${{ steps.grad_check_initial.outcome }}
+          RETRY_ENABLED: ${{ steps.retry_policy.outputs.enabled }}
+          RETRY_STRICT_RESULT: ${{ steps.strict_e2e_retry.outputs.result }}
+          RETRY_STRICT_OUTCOME: ${{ steps.strict_e2e_retry.outcome }}
+          RETRY_GRAD_RESULT: ${{ steps.grad_check_retry.outputs.result }}
+          RETRY_GRAD_OUTCOME: ${{ steps.grad_check_retry.outcome }}
         run: |
           set -euo pipefail
-
-          init_strict='${{ steps.strict_e2e_initial.outcome }}'
-          init_grad='${{ steps.grad_check_initial.outcome }}'
-          retry_enabled='${{ steps.retry_policy.outputs.enabled }}'
-          retry_strict='${{ steps.strict_e2e_retry.outcome }}'
-          retry_grad='${{ steps.grad_check_retry.outcome }}'
-
-          strict_ok=0
-          grad_ok=0
-
-          if [ "$init_strict" = "success" ] || [ "$retry_strict" = "success" ]; then
-            strict_ok=1
-          fi
-
-          if [ "$init_grad" = "success" ] || [ "$retry_grad" = "success" ]; then
-            grad_ok=1
-          fi
-
-          echo "[finalize] strict initial=$init_strict strict retry=${retry_strict:-skipped} grad initial=$init_grad grad retry=${retry_grad:-skipped} retry enabled=$retry_enabled strict_ok=$strict_ok grad_ok=$grad_ok"
-
-          {
-            echo "## retry finalize"
-            echo "- strict initial: $init_strict"
-            echo "- strict retry: ${retry_strict:-skipped}"
-            echo "- graduation initial: $init_grad"
-            echo "- graduation retry: ${retry_grad:-skipped}"
-            echo "- retry enabled: $retry_enabled"
-            echo "- strict final ok: $strict_ok"
-            echo "- graduation final ok: $grad_ok"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          if [[ "$init_strict" != "success" && "$retry_strict" != "success" ]] || [[ "$init_grad" != "success" && "$retry_grad" != "success" ]]; then
-            echo "nightly failed after applying retry policy" >&2
-            exit 1
-          fi
+          python3 scripts/finalize-nightly-retry-result.py --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Publish failure triage summary (cause/language/repro)
         if: failure()
