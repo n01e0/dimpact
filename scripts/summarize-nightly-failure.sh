@@ -14,7 +14,7 @@ log_dir = Path(sys.argv[1])
 class_json = Path(sys.argv[2])
 out_md = Path(sys.argv[3])
 
-CATEGORY_ORDER = ["install", "startup", "capability", "timeout"]
+CATEGORY_ORDER = ["install", "retry_absorbed", "startup", "logic", "capability", "timeout"]
 
 
 def lang_norm(lang: str) -> str:
@@ -57,6 +57,13 @@ def repro_for(cat: str, lang: str) -> str:
     if cat == "startup":
         gate = gate_for_lang(lang)
         return f"{gate} cargo test -q --test engine_lsp"
+    if cat == "retry_absorbed":
+        if l == "ruby":
+            return "gem install ruby-lsp --no-document && ruby-lsp --version && ruby-lsp --help"
+        return "rerun workflow_dispatch and confirm retry-setup.log reports result=recovered"
+    if cat == "logic":
+        gate = gate_for_lang(lang)
+        return f"env {gate} cargo test -q --test engine_lsp"
     if cat == "capability":
         gate = gate_for_lang(lang)
         return f"grep -n \"{gate.split('=')[0]}\" nightly-logs/engine-lsp-strict-preflight.log"
