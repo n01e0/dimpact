@@ -122,15 +122,20 @@ cargo test -q --test engine_lsp
 ### 6.1 triage（自動分類）
 
 1. `scripts/classify-nightly-flaky.sh` が `nightly-logs/*.log` を走査
-2. flaky を 4分類で集計
+2. flaky を分類し、retry 実行後は retry 吸収済みの install を再分類する
    - `install`
+   - `retry_absorbed`
    - `startup`
+   - `logic`
    - `capability`
    - `timeout`
 3. 生成物
    - `nightly-flaky-classification.json`
    - `nightly-flaky-classification.md`
-4. CI summary には分類結果が自動追記される
+4. retry 前の分類は retry policy 判定に使い、retry 後に最終分類を上書きする
+   - `nightly-flaky-classification-initial.json/.md`: retry policy 用スナップショット
+   - `nightly-flaky-classification.json/.md`: retry 吸収後の最終分類
+5. CI summary には初回分類結果が自動追記され、failure triage は最終分類を使う
 
 ### 6.2 retry（タイプ別ポリシー）
 
@@ -139,10 +144,12 @@ cargo test -q --test engine_lsp
 - `install` > 0: **retry 1回**（setup系を best-effort 再実行）
 - `startup` > 0: **retry 1回**
 - `timeout` > 0: **retry 1回**
-- `capability` のみ: **retry しない**（非一時要因扱い）
+- `logic` / `capability` のみ: **retry しない**（非一時要因扱い）
 
 再試行時は `engine_lsp` strict E2E / graduation check を policy-gated で再実行し、
-初回 + retry を統合して最終成功判定する。
+初回 + retry を統合して最終成功判定する。retry 後は Ruby install のような
+setup 失敗が回復したケースを `retry_absorbed` へ移し、残った strict failure を
+`logic` / `startup` / `timeout` として見直す。
 
 ### 6.3 failure summary（原因/言語/再現）
 

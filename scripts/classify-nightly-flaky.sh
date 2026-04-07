@@ -32,6 +32,16 @@ LANG_HINTS = {
     "rust": "rust",
 }
 
+GATE_LANG_HINTS = {
+    "TYPESCRIPT": "typescript",
+    "JAVASCRIPT": "javascript",
+    "PYTHON": "python",
+    "GO": "go",
+    "JAVA": "java",
+    "RUBY": "ruby",
+    "RUST": "rust",
+}
+
 FILE_LANG_HINTS = [
     ("install-ts-js", "typescript/javascript"),
     ("install-python", "python"),
@@ -70,7 +80,13 @@ TIMEOUT_PATTERNS = [
     re.compile(r"exit_code=124", re.I),
 ]
 
-CATEGORY_ORDER = ["install", "startup", "capability", "timeout"]
+LOGIC_PATTERNS = [
+    re.compile(r"cause=logic", re.I),
+    re.compile(r"logic error=", re.I),
+    re.compile(r"changed_symbols returned no symbols", re.I),
+]
+
+CATEGORY_ORDER = ["install", "retry_absorbed", "startup", "logic", "capability", "timeout"]
 
 
 def detect_lang_from_file(path: Path) -> str:
@@ -82,6 +98,14 @@ def detect_lang_from_file(path: Path) -> str:
 
 
 def detect_lang_from_line(line: str) -> str | None:
+    lane_m = re.search(r"lane=([a-z_]+)/", line, re.I)
+    if lane_m:
+        return LANG_HINTS.get(lane_m.group(1).strip().lower(), lane_m.group(1).strip().lower())
+
+    gate_m = re.search(r"DIMPACT_E2E_STRICT_LSP_([A-Z_]+)", line)
+    if gate_m:
+        return GATE_LANG_HINTS.get(gate_m.group(1).strip().upper())
+
     m = re.search(r"\[([^\]]+)\]", line)
     if not m:
         return None
@@ -91,8 +115,10 @@ def detect_lang_from_line(line: str) -> str | None:
 
 def category_hits(line: str):
     hits = []
+    is_preflight_success_echo = "DIMPACT_E2E_STRICT_LSP_" in line and "install=success" in line
+
     for p in INSTALL_PATTERNS:
-        if p.search(line):
+        if p.search(line) and not is_preflight_success_echo:
             hits.append("install")
             break
     for p in STARTUP_PATTERNS:
@@ -107,6 +133,10 @@ def category_hits(line: str):
         if p.search(line):
             hits.append("timeout")
             break
+    for p in LOGIC_PATTERNS:
+        if p.search(line):
+            hits.append("logic")
+            break
     # classify initialize-timeout primarily as startup + timeout
     if "initialize timeout or invalid response" in line.lower():
         if "startup" not in hits:
@@ -115,10 +145,39 @@ def category_hits(line: str):
             hits.append("timeout")
     return hits
 
+
+retry_absorbed = set()
+
+
+def canonical_lang(lang: str) -> str:
+    value = (lang or "unknown").strip().lower()
+    return LANG_HINTS.get(value, value)
+
 entries_by_cat = defaultdict(list)
 seen = set()
+log_files = sorted(log_dir.glob("*.log"))
 
-for path in sorted(log_dir.glob("*.log")):
+for path in log_files:
+    file_lang = detect_lang_from_file(path)
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        continue
+
+    for i, line in enumerate(lines, start=1):
+        retry_m = re.search(
+            r"retry-status:\s*language=([a-z_/.-]+)\s+category=([a-z_]+)\s+result=([a-z_-]+)",
+            line,
+            re.I,
+        )
+        if retry_m:
+            lang = canonical_lang(retry_m.group(1))
+            category = retry_m.group(2).strip().lower()
+            result = retry_m.group(3).strip().lower()
+            if category == "install" and result in {"recovered", "healthcheck-recovered"}:
+                retry_absorbed.add((lang, category))
+
+for path in log_files:
     file_lang = detect_lang_from_file(path)
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -131,10 +190,13 @@ for path in sorted(log_dir.glob("*.log")):
             continue
         line_lang = detect_lang_from_line(line)
         lang = line_lang or file_lang
+        lang = canonical_lang(lang)
         snippet = line.strip()
         if len(snippet) > 220:
             snippet = snippet[:217] + "..."
         for cat in cats:
+            if cat == "install" and (lang, "install") in retry_absorbed:
+                cat = "retry_absorbed"
             key = (cat, path.name, i, snippet)
             if key in seen:
                 continue
