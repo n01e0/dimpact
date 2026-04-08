@@ -1,0 +1,121 @@
+{
+  "generatedAt": "2026-04-08T02:26:18.766877+00:00",
+  "repo": "n01e0/dimpact",
+  "mainBranch": "main",
+  "mainRequiredChecks": {
+    "requiredContexts": [
+      "check",
+      "test",
+      "engine_lsp_regression",
+      "lsp_graduation_check",
+      "precision_regression_gate"
+    ],
+    "latestMainCiRun": {
+      "conclusion": "success",
+      "createdAt": "2026-04-08T01:51:49Z",
+      "databaseId": 24113420817,
+      "displayTitle": "Harden nightly retry finalizer aggregation (#600)",
+      "headSha": "51c42846322d9342f581ea8c2a610edd6fbaf96f",
+      "status": "completed",
+      "updatedAt": "2026-04-08T01:57:21Z",
+      "url": "https://github.com/n01e0/dimpact/actions/runs/24113420817"
+    },
+    "statusesOnLatestMainCiRun": [
+      {
+        "context": "check",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24113420817/job/70352600211"
+      },
+      {
+        "context": "test",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24113420817/job/70352600202"
+      },
+      {
+        "context": "engine_lsp_regression",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24113420817/job/70352600225"
+      },
+      {
+        "context": "lsp_graduation_check",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24113420817/job/70352600208"
+      },
+      {
+        "context": "precision_regression_gate",
+        "status": "success",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24113420817/job/70352600214"
+      }
+    ],
+    "failingOrMissingCount": 0,
+    "failingOrMissing": []
+  },
+  "nightlyStrictLsp": {
+    "workflow": "nightly-strict-lsp.yml",
+    "sampledRuns": 4,
+    "failureRuns": 4,
+    "failures": [
+      {
+        "runId": 24097546104,
+        "createdAt": "2026-04-07T18:24:04Z",
+        "updatedAt": "2026-04-07T18:27:52Z",
+        "headSha": "9c1de0445f17652714397b96aa6c2064ff3eb52b",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24097546104",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/24097546104/job/70299958061"
+          }
+        ]
+      },
+      {
+        "runId": 24044610166,
+        "createdAt": "2026-04-06T18:23:50Z",
+        "updatedAt": "2026-04-06T18:28:19Z",
+        "headSha": "9c1de0445f17652714397b96aa6c2064ff3eb52b",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24044610166",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/24044610166/job/70124729458"
+          }
+        ]
+      },
+      {
+        "runId": 24007486959,
+        "createdAt": "2026-04-05T18:14:26Z",
+        "updatedAt": "2026-04-05T18:18:29Z",
+        "headSha": "9c1de0445f17652714397b96aa6c2064ff3eb52b",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/24007486959",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/24007486959/job/70013485665"
+          }
+        ]
+      },
+      {
+        "runId": 23984680535,
+        "createdAt": "2026-04-04T18:13:27Z",
+        "updatedAt": "2026-04-04T18:17:46Z",
+        "headSha": "9c1de0445f17652714397b96aa6c2064ff3eb52b",
+        "url": "https://github.com/n01e0/dimpact/actions/runs/23984680535",
+        "failedJobs": [
+          {
+            "name": "strict_real_lsp_e2e",
+            "conclusion": "failure",
+            "url": "https://github.com/n01e0/dimpact/actions/runs/23984680535/job/69954577363"
+          }
+        ]
+      }
+    ]
+  },
+  "summary": {
+    "mainRequiredFailures": 0,
+    "nightlyFailureRuns": 4,
+    "failureBacklogTotal": 4
+  }
+}
