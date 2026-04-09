@@ -1768,6 +1768,7 @@ const PER_SEED_TIER2_FILES_MAX: usize = 2;
 // Keep stitched tier-3 scope small, but allow one continuation per bridge family.
 const PER_SEED_TIER3_FILES_MAX: usize = 2;
 const PER_SEED_TIER3_FILES_PER_BRIDGE_KIND_MAX: usize = 1;
+const USE_INTERNAL_STITCHED_REPRESENTATIVE_RANKING_PATH: bool = true;
 
 fn slice_selection_tier_value(tier: SliceSelectionTier) -> u8 {
     match tier {
@@ -2744,7 +2745,43 @@ fn compare_representative_candidates(
     a: &RepresentativeCandidate,
     b: &RepresentativeCandidate,
 ) -> std::cmp::Ordering {
-    compare_tier2_candidates(&a.file_candidate, &b.file_candidate)
+    let file_first_order = compare_tier2_candidates(&a.file_candidate, &b.file_candidate);
+    if !USE_INTERNAL_STITCHED_REPRESENTATIVE_RANKING_PATH {
+        return file_first_order;
+    }
+
+    file_first_order
+        .then_with(|| {
+            a.representative
+                .family_bucket
+                .cmp(&b.representative.family_bucket)
+        })
+        .then_with(|| {
+            a.representative
+                .closure_target_key
+                .cmp(&b.representative.closure_target_key)
+        })
+        .then_with(|| {
+            a.representative
+                .anchor_locality_key
+                .cmp(&b.representative.anchor_locality_key)
+        })
+        .then_with(|| {
+            a.representative
+                .budget_key
+                .cmp(&b.representative.budget_key)
+        })
+}
+
+fn into_representative_candidates(
+    seed_symbol_id: &str,
+    candidates: Vec<Tier2Candidate>,
+    tier: SliceSelectionTier,
+) -> Vec<RepresentativeCandidate> {
+    candidates
+        .into_iter()
+        .map(|candidate| into_representative_candidate(seed_symbol_id, candidate, tier))
+        .collect()
 }
 
 fn make_candidate_reason_with_tier(
@@ -3174,25 +3211,20 @@ fn collect_bridge_continuation_candidates<'a>(
             );
         }
 
-        let mut per_anchor = suppress_before_admit_continuation(
+        let per_anchor = suppress_before_admit_continuation(
             seed_symbol_id,
             seed_selection,
             per_anchor.into_values().collect(),
         );
-        per_anchor.sort_by(compare_tier2_candidates);
+        let mut per_anchor = into_representative_candidates(
+            seed_symbol_id,
+            per_anchor,
+            SliceSelectionTier::BridgeContinuation,
+        );
+        per_anchor.sort_by(compare_representative_candidates);
         continuation_candidates.extend(per_anchor.into_iter().take(1));
     }
 
-    let mut continuation_candidates = continuation_candidates
-        .into_iter()
-        .map(|candidate| {
-            into_representative_candidate(
-                seed_symbol_id,
-                candidate,
-                SliceSelectionTier::BridgeContinuation,
-            )
-        })
-        .collect::<Vec<_>>();
     continuation_candidates.sort_by(compare_representative_candidates);
     continuation_candidates
 }
@@ -3369,19 +3401,24 @@ fn plan_bounded_slice(
                 &mut seed_selection,
                 side_candidates.into_values().collect(),
             );
-            let mut side_candidates = suppress_weaker_same_family_rust_siblings(
+            let side_candidates = suppress_weaker_same_family_rust_siblings(
                 seed.id.0.as_str(),
                 &mut seed_selection,
                 side_candidates,
             );
-            side_candidates.sort_by(compare_tier2_candidates);
+            let mut side_candidates = into_representative_candidates(
+                seed.id.0.as_str(),
+                side_candidates,
+                SliceSelectionTier::BridgeCompletion,
+            );
+            side_candidates.sort_by(compare_representative_candidates);
             for candidate in side_candidates
                 .iter()
                 .skip(PER_BOUNDARY_SIDE_TIER2_FILES_MAX)
             {
                 seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
                     seed.id.0.as_str(),
-                    candidate,
+                    &candidate.file_candidate,
                     ImpactSlicePruneReason::RankedOut,
                 ));
             }
@@ -3392,17 +3429,7 @@ fn plan_bounded_slice(
             );
         }
 
-        tier2_candidates.sort_by(compare_tier2_candidates);
-        let tier2_candidates = tier2_candidates
-            .into_iter()
-            .map(|candidate| {
-                into_representative_candidate(
-                    seed.id.0.as_str(),
-                    candidate,
-                    SliceSelectionTier::BridgeCompletion,
-                )
-            })
-            .collect::<Vec<_>>();
+        tier2_candidates.sort_by(compare_representative_candidates);
         let mut selected_tier2_paths = std::collections::BTreeSet::new();
         let mut admitted_tier2_candidates = Vec::new();
         for candidate in tier2_candidates {
@@ -7061,6 +7088,57 @@ fn caller() -> i32 {
         assert_eq!(
             representative.observed_supporting_steps_compact[0].step_family,
             ImpactBridgeExecutionStepFamily::RequireRelativeLoad
+        );
+    }
+
+    #[test]
+    fn representative_ranking_uses_internal_projection_tiebreakers_after_file_first_scores() {
+        let a = into_representative_candidate(
+            "rust:main.rs:fn:entry:1",
+            Tier2Candidate {
+                path: "leaf.rs".to_string(),
+                via_symbol_id: "rust:wrap.rs:fn:wrap:3".to_string(),
+                via_path: "wrap.rs".to_string(),
+                completion_symbol_id: "rust:leaf.rs:fn:leaf_a:9".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![ImpactSliceEvidenceKind::ReturnFlow],
+                    vec![],
+                    0,
+                ),
+            },
+            SliceSelectionTier::BridgeCompletion,
+        );
+        let b = into_representative_candidate(
+            "rust:main.rs:fn:entry:1",
+            Tier2Candidate {
+                path: "leaf.rs".to_string(),
+                via_symbol_id: "rust:wrap.rs:fn:wrap:3".to_string(),
+                via_path: "wrap.rs".to_string(),
+                completion_symbol_id: "rust:leaf.rs:fn:leaf_b:9".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::ReturnContinuation,
+                    vec![ImpactSliceEvidenceKind::ReturnFlow],
+                    vec![],
+                    0,
+                ),
+            },
+            SliceSelectionTier::BridgeCompletion,
+        );
+
+        assert_eq!(
+            compare_tier2_candidates(&a.file_candidate, &b.file_candidate),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            compare_representative_candidates(&a, &b),
+            std::cmp::Ordering::Less
+        );
+        assert_ne!(
+            a.representative.closure_target_key,
+            b.representative.closure_target_key
         );
     }
 
