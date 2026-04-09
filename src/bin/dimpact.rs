@@ -9,6 +9,7 @@ use dimpact::dfg_to_dot;
 use dimpact::engine::{AutoPolicy, EngineKind, make_engine_with_auto_policy};
 use dimpact::impact::{
     ImpactBridgeExecutionFamily, ImpactBridgeExecutionStepCompact, ImpactBridgeExecutionStepFamily,
+    ImpactSliceRepresentativeExplanationMetadata,
 };
 use dimpact::ir::SymbolId;
 use dimpact::ir::reference::{EdgeCertainty, EdgeProvenance, RefKind, Reference, SymbolIndex};
@@ -1886,6 +1887,28 @@ struct RepresentativeCandidate {
     representative: StitchedChainRepresentative,
 }
 
+fn to_impact_representative_explanation(
+    representative: &StitchedChainRepresentative,
+) -> ImpactSliceRepresentativeExplanationMetadata {
+    ImpactSliceRepresentativeExplanationMetadata {
+        family_bucket: Some(representative.family_bucket.as_str().to_string()),
+        closure_target_key: Some(representative.closure_target_key.clone()),
+        duplicate_key: Some(representative.duplicate_key.clone()),
+        budget_key: Some(representative.budget_key.clone()),
+        winner_reason_codes: representative.explanation.winner_reason_codes.clone(),
+        loser_reason_codes: representative.explanation.loser_reason_codes.clone(),
+        closure_summary: Some(representative.explanation.closure_summary.clone()),
+        family_summary: Some(representative.explanation.family_summary.clone()),
+        budget_summary: Some(representative.explanation.budget_summary.clone()),
+        duplicate_summary: representative.explanation.duplicate_summary.clone(),
+        winning_bridge_execution_chain_compact: representative
+            .winning_bridge_execution_chain_compact
+            .clone(),
+        observed_supporting_steps_compact: representative.observed_supporting_steps_compact.clone(),
+        negative_chain_signals: representative.negative_chain_signals.clone(),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct SliceSelectionFileState {
     scopes: ImpactSliceScopes,
@@ -2898,6 +2921,7 @@ fn make_candidate_reason_with_tier(
     candidate: &Tier2Candidate,
     tier: SliceSelectionTier,
 ) -> ImpactSliceReasonMetadata {
+    let representative = make_stitched_chain_representative(seed_symbol_id, candidate, tier);
     ImpactSliceReasonMetadata {
         seed_symbol_id: seed_symbol_id.to_string(),
         tier: slice_selection_tier_value(tier),
@@ -2906,6 +2930,7 @@ fn make_candidate_reason_with_tier(
         via_path: Some(candidate.via_path.clone()),
         bridge_kind: candidate.bridge_kind,
         scoring: Some(candidate.scoring.clone()),
+        representative_explanation: Some(to_impact_representative_explanation(&representative)),
     }
 }
 
@@ -2933,6 +2958,7 @@ fn make_pruned_candidate_with_tier(
     prune_reason: ImpactSlicePruneReason,
     tier: SliceSelectionTier,
 ) -> dimpact::ImpactSlicePrunedCandidate {
+    let representative = make_stitched_chain_representative(seed_symbol_id, candidate, tier);
     let compact_explanation = match prune_reason {
         ImpactSlicePruneReason::SuppressedBeforeAdmit => {
             let suppressor = if candidate_is_weak_ruby_require_relative(candidate) {
@@ -2966,6 +2992,7 @@ fn make_pruned_candidate_with_tier(
         prune_reason,
         scoring: Some(candidate.scoring.clone()),
         compact_explanation,
+        representative_explanation: Some(to_impact_representative_explanation(&representative)),
     }
 }
 
@@ -3404,6 +3431,7 @@ fn plan_bounded_slice(
     for seed in seeds {
         let mut seed_selection = SliceSelectionAccumulator::default();
         let root_reason = ImpactSliceReasonMetadata {
+            representative_explanation: None,
             seed_symbol_id: seed.id.0.clone(),
             tier: slice_selection_tier_value(SliceSelectionTier::Root),
             kind: root_reason_kind,
@@ -3433,6 +3461,7 @@ fn plan_bounded_slice(
                 seed_selection.add_reason(
                     boundary_file,
                     ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: slice_selection_tier_value(SliceSelectionTier::DirectBoundary),
                         kind: boundary.kind,
@@ -5156,6 +5185,7 @@ fn caller() -> i32 {
         assert_eq!(
             left_leaf.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -5182,6 +5212,7 @@ fn caller() -> i32 {
         assert_eq!(
             right_leaf.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -5310,6 +5341,7 @@ fn caller() -> i32 {
         assert_eq!(
             leaf_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -5331,6 +5363,7 @@ fn caller() -> i32 {
         assert_eq!(
             plan.slice_selection.pruned_candidates,
             vec![dimpact::ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 path: "zzz_final_helper.rs".to_string(),
                 tier: 2,
@@ -5409,6 +5442,7 @@ fn caller() -> i32 {
         assert_eq!(
             value_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -5498,6 +5532,7 @@ fn caller() -> i32 {
         assert_eq!(
             out_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 3,
                 kind: ImpactSliceReasonKind::BridgeContinuationFile,
@@ -5598,6 +5633,7 @@ fn caller() -> i32 {
         assert_eq!(
             value_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -5624,6 +5660,7 @@ fn caller() -> i32 {
         assert_eq!(
             out_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 3,
                 kind: ImpactSliceReasonKind::BridgeContinuationFile,
@@ -5650,6 +5687,7 @@ fn caller() -> i32 {
         assert_eq!(
             final_leaf_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 3,
                 kind: ImpactSliceReasonKind::BridgeContinuationFile,
@@ -5744,6 +5782,7 @@ fn caller() -> i32 {
         assert_eq!(
             a_final_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 3,
                 kind: ImpactSliceReasonKind::BridgeContinuationFile,
@@ -6022,6 +6061,7 @@ fn caller() -> i32 {
         assert_eq!(
             step_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -6191,6 +6231,7 @@ fn caller() -> i32 {
         assert_eq!(
             steady_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -6227,6 +6268,7 @@ fn caller() -> i32 {
         assert_eq!(
             plan.slice_selection.pruned_candidates,
             vec![dimpact::ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 path: "plain.rs".to_string(),
                 tier: 2,
@@ -6345,6 +6387,7 @@ fn caller() -> i32 {
         assert_eq!(
             leaf_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -6366,6 +6409,7 @@ fn caller() -> i32 {
         assert_eq!(
             plan.slice_selection.pruned_candidates,
             vec![dimpact::ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 path: "lib/zzz_helper.rb".to_string(),
                 tier: 2,
@@ -6535,6 +6579,7 @@ fn caller() -> i32 {
         assert_eq!(
             leaf_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -6556,6 +6601,7 @@ fn caller() -> i32 {
         assert_eq!(
             plan.slice_selection.pruned_candidates,
             vec![dimpact::ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 path: "shared.rs".to_string(),
                 tier: 2,
@@ -6648,6 +6694,7 @@ fn caller() -> i32 {
         assert_eq!(
             leaf_file.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -6666,6 +6713,7 @@ fn caller() -> i32 {
         assert_eq!(
             plan.slice_selection.pruned_candidates,
             vec![dimpact::ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 path: "lib/runtime.rb".to_string(),
                 tier: 2,
@@ -6966,6 +7014,7 @@ fn caller() -> i32 {
         assert_eq!(
             runtime_file_meta.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 3,
                 kind: ImpactSliceReasonKind::ModuleCompanionFile,
@@ -7137,6 +7186,7 @@ fn caller() -> i32 {
         assert_eq!(
             main.reasons,
             vec![ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 tier: 0,
                 kind: ImpactSliceReasonKind::SeedFile,
