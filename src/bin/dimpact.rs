@@ -1765,9 +1765,9 @@ enum SliceSelectionTier {
 
 const PER_BOUNDARY_SIDE_TIER2_FILES_MAX: usize = 1;
 const PER_SEED_TIER2_FILES_MAX: usize = 2;
-// Keep stitched tier-3 scope small, but allow one continuation per bridge family.
+// Keep stitched tier-3 scope small, but allow one continuation per representative family.
 const PER_SEED_TIER3_FILES_MAX: usize = 2;
-const PER_SEED_TIER3_FILES_PER_BRIDGE_KIND_MAX: usize = 1;
+const PER_SEED_TIER3_FILES_PER_REPRESENTATIVE_FAMILY_MAX: usize = 1;
 const USE_INTERNAL_STITCHED_REPRESENTATIVE_RANKING_PATH: bool = true;
 
 fn slice_selection_tier_value(tier: SliceSelectionTier) -> u8 {
@@ -2811,6 +2811,77 @@ fn retain_best_representative_per_duplicate_key(
     strongest_by_duplicate_key.into_values().collect()
 }
 
+fn retain_best_representative_per_budget_key(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    candidates: Vec<RepresentativeCandidate>,
+    tier: SliceSelectionTier,
+) -> Vec<RepresentativeCandidate> {
+    let mut strongest_by_budget_key =
+        std::collections::BTreeMap::<String, RepresentativeCandidate>::new();
+
+    for candidate in candidates {
+        match strongest_by_budget_key.entry(candidate.representative.budget_key.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                if compare_representative_candidates(&candidate, entry.get()).is_lt() {
+                    seed_selection.add_pruned_candidate(make_pruned_candidate_with_tier(
+                        seed_symbol_id,
+                        &entry.get().file_candidate,
+                        ImpactSlicePruneReason::BridgeBudgetExhausted,
+                        tier,
+                    ));
+                    entry.insert(candidate);
+                } else {
+                    seed_selection.add_pruned_candidate(make_pruned_candidate_with_tier(
+                        seed_symbol_id,
+                        &candidate.file_candidate,
+                        ImpactSlicePruneReason::BridgeBudgetExhausted,
+                        tier,
+                    ));
+                }
+            }
+        }
+    }
+
+    strongest_by_budget_key.into_values().collect()
+}
+
+fn retain_representatives_per_family_bucket(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    candidates: Vec<RepresentativeCandidate>,
+    tier: SliceSelectionTier,
+) -> Vec<RepresentativeCandidate> {
+    let mut kept = Vec::new();
+    let mut family_bucket_counts = std::collections::BTreeMap::new();
+
+    for candidate in candidates {
+        let family_bucket_count = family_bucket_counts
+            .get(&candidate.representative.family_bucket)
+            .copied()
+            .unwrap_or_default();
+        if family_bucket_count >= PER_SEED_TIER3_FILES_PER_REPRESENTATIVE_FAMILY_MAX {
+            seed_selection.add_pruned_candidate(make_pruned_candidate_with_tier(
+                seed_symbol_id,
+                &candidate.file_candidate,
+                ImpactSlicePruneReason::BridgeBudgetExhausted,
+                tier,
+            ));
+            continue;
+        }
+
+        *family_bucket_counts
+            .entry(candidate.representative.family_bucket)
+            .or_insert(0usize) += 1;
+        kept.push(candidate);
+    }
+
+    kept
+}
+
 fn into_representative_candidates(
     seed_symbol_id: &str,
     candidates: Vec<Tier2Candidate>,
@@ -3268,6 +3339,12 @@ fn collect_bridge_continuation_candidates<'a>(
             per_anchor,
             SliceSelectionTier::BridgeContinuation,
         );
+        per_anchor = retain_best_representative_per_budget_key(
+            seed_symbol_id,
+            seed_selection,
+            per_anchor,
+            SliceSelectionTier::BridgeContinuation,
+        );
         per_anchor.sort_by(compare_representative_candidates);
         continuation_candidates.extend(per_anchor.into_iter().take(1));
     }
@@ -3278,7 +3355,19 @@ fn collect_bridge_continuation_candidates<'a>(
         continuation_candidates,
         SliceSelectionTier::BridgeContinuation,
     );
+    continuation_candidates = retain_best_representative_per_budget_key(
+        seed_symbol_id,
+        seed_selection,
+        continuation_candidates,
+        SliceSelectionTier::BridgeContinuation,
+    );
     continuation_candidates.sort_by(compare_representative_candidates);
+    continuation_candidates = retain_representatives_per_family_bucket(
+        seed_symbol_id,
+        seed_selection,
+        continuation_candidates,
+        SliceSelectionTier::BridgeContinuation,
+    );
     continuation_candidates
 }
 
@@ -3470,6 +3559,12 @@ fn plan_bounded_slice(
                 side_candidates,
                 SliceSelectionTier::BridgeCompletion,
             );
+            side_candidates = retain_best_representative_per_budget_key(
+                seed.id.0.as_str(),
+                &mut seed_selection,
+                side_candidates,
+                SliceSelectionTier::BridgeCompletion,
+            );
             side_candidates.sort_by(compare_representative_candidates);
             for candidate in side_candidates
                 .iter()
@@ -3489,6 +3584,12 @@ fn plan_bounded_slice(
         }
 
         let mut tier2_candidates = retain_best_representative_per_duplicate_key(
+            seed.id.0.as_str(),
+            &mut seed_selection,
+            tier2_candidates,
+            SliceSelectionTier::BridgeCompletion,
+        );
+        tier2_candidates = retain_best_representative_per_budget_key(
             seed.id.0.as_str(),
             &mut seed_selection,
             tier2_candidates,
@@ -3535,25 +3636,12 @@ fn plan_bounded_slice(
             &mut tier2_semantic_evidence_by_symbol_id,
         );
         let mut selected_continuation_paths = std::collections::BTreeSet::new();
-        let mut selected_continuation_bridge_kinds = std::collections::BTreeMap::new();
         for candidate in continuation_candidates {
             if selected_continuation_paths.contains(&candidate.file_candidate.path) {
                 seed_selection.add_reason(
                     candidate.file_candidate.path.as_str(),
                     make_continuation_reason(seed.id.0.as_str(), &candidate.file_candidate),
                 );
-                continue;
-            }
-            let selected_bridge_kind_count = selected_continuation_bridge_kinds
-                .get(&candidate.file_candidate.bridge_kind)
-                .copied()
-                .unwrap_or_default();
-            if selected_bridge_kind_count >= PER_SEED_TIER3_FILES_PER_BRIDGE_KIND_MAX {
-                seed_selection.add_pruned_candidate(make_continuation_pruned_candidate(
-                    seed.id.0.as_str(),
-                    &candidate.file_candidate,
-                    ImpactSlicePruneReason::BridgeBudgetExhausted,
-                ));
                 continue;
             }
             if selected_continuation_paths.len() >= PER_SEED_TIER3_FILES_MAX {
@@ -3569,9 +3657,6 @@ fn plan_bounded_slice(
                 make_continuation_reason(seed.id.0.as_str(), &candidate.file_candidate),
             );
             selected_continuation_paths.insert(candidate.file_candidate.path.clone());
-            *selected_continuation_bridge_kinds
-                .entry(candidate.file_candidate.bridge_kind)
-                .or_insert(0usize) += 1;
         }
 
         overall.merge(&seed_selection);
@@ -7272,6 +7357,122 @@ fn caller() -> i32 {
                 && candidate.compact_explanation.as_deref()
                     == Some("suppressed_before_admit=weaker_same_chain_duplicate")
         }));
+    }
+
+    #[test]
+    fn representative_chain_budget_keeps_stronger_same_budget_projection() {
+        let stronger = into_representative_candidate(
+            "ruby:service.rb:method:run:12",
+            Tier2Candidate {
+                path: "winner.rb".to_string(),
+                via_symbol_id: "ruby:anchor_a.rb:method:resolve_a:8".to_string(),
+                via_path: "anchor_a.rb".to_string(),
+                completion_symbol_id: "ruby:closer.rb:method:finish:14".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![ImpactSliceEvidenceKind::AliasChain],
+                    vec![],
+                    1,
+                ),
+            },
+            SliceSelectionTier::BridgeContinuation,
+        );
+        let mut weaker = into_representative_candidate(
+            "ruby:service.rb:method:run:12",
+            Tier2Candidate {
+                path: "loser.rb".to_string(),
+                via_symbol_id: "ruby:anchor_b.rb:method:resolve_b:8".to_string(),
+                via_path: "anchor_b.rb".to_string(),
+                completion_symbol_id: "ruby:other.rb:method:finish:14".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![ImpactSliceEvidenceKind::AliasChain],
+                    vec![],
+                    0,
+                ),
+            },
+            SliceSelectionTier::BridgeContinuation,
+        );
+
+        weaker.representative.budget_key = stronger.representative.budget_key.clone();
+
+        let mut selection = SliceSelectionAccumulator::default();
+        let retained = retain_best_representative_per_budget_key(
+            "ruby:service.rb:method:run:12",
+            &mut selection,
+            vec![weaker, stronger.clone()],
+            SliceSelectionTier::BridgeContinuation,
+        );
+
+        assert_eq!(retained.len(), 1);
+        assert_eq!(
+            retained[0].file_candidate.path,
+            stronger.file_candidate.path
+        );
+        assert!(selection.pruned_candidates.iter().any(|candidate| {
+            candidate.path == "loser.rb"
+                && candidate.prune_reason == ImpactSlicePruneReason::BridgeBudgetExhausted
+        }));
+    }
+
+    #[test]
+    fn representative_family_budget_uses_family_bucket_not_bridge_kind() {
+        let alias_rep = into_representative_candidate(
+            "ruby:service.rb:method:run:12",
+            Tier2Candidate {
+                path: "alias.rb".to_string(),
+                via_symbol_id: "ruby:bridge.rb:method:resolve:8".to_string(),
+                via_path: "bridge.rb".to_string(),
+                completion_symbol_id: "ruby:alias.rb:method:finish:14".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![ImpactSliceEvidenceKind::AliasChain],
+                    vec![],
+                    0,
+                ),
+            },
+            SliceSelectionTier::BridgeContinuation,
+        );
+        let mixed_rep = into_representative_candidate(
+            "ruby:service.rb:method:run:12",
+            Tier2Candidate {
+                path: "mixed.rb".to_string(),
+                via_symbol_id: "ruby:bridge.rb:method:resolve:8".to_string(),
+                via_path: "bridge.rb".to_string(),
+                completion_symbol_id: "ruby:mixed.rb:method:finish:14".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![ImpactSliceEvidenceKind::AliasChain],
+                    vec![ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad],
+                    0,
+                ),
+            },
+            SliceSelectionTier::BridgeContinuation,
+        );
+
+        assert_eq!(
+            alias_rep.file_candidate.bridge_kind,
+            mixed_rep.file_candidate.bridge_kind
+        );
+        assert_ne!(
+            alias_rep.representative.family_bucket,
+            mixed_rep.representative.family_bucket
+        );
+
+        let mut selection = SliceSelectionAccumulator::default();
+        let retained = retain_representatives_per_family_bucket(
+            "ruby:service.rb:method:run:12",
+            &mut selection,
+            vec![alias_rep.clone(), mixed_rep.clone()],
+            SliceSelectionTier::BridgeContinuation,
+        );
+
+        assert_eq!(retained.len(), 2);
+        assert_eq!(selection.pruned_candidates.len(), 0);
     }
 
     #[test]
