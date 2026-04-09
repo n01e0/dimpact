@@ -89,7 +89,7 @@ pub struct ImpactSliceScopes {
     pub explanation: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImpactSliceReasonMetadata {
     pub seed_symbol_id: String,
     pub tier: u8,
@@ -102,6 +102,63 @@ pub struct ImpactSliceReasonMetadata {
     pub bridge_kind: Option<ImpactSliceBridgeKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scoring: Option<ImpactSliceCandidateScoringSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub representative_explanation: Option<ImpactSliceRepresentativeExplanationMetadata>,
+}
+
+impl PartialEq for ImpactSliceReasonMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.seed_symbol_id == other.seed_symbol_id
+            && self.tier == other.tier
+            && self.kind == other.kind
+            && self.via_symbol_id == other.via_symbol_id
+            && self.via_path == other.via_path
+            && self.bridge_kind == other.bridge_kind
+            && self.scoring == other.scoring
+    }
+}
+
+impl Eq for ImpactSliceReasonMetadata {}
+
+impl PartialOrd for ImpactSliceReasonMetadata {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ImpactSliceReasonMetadata {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            &self.seed_symbol_id,
+            self.tier,
+            self.kind,
+            &self.via_symbol_id,
+            &self.via_path,
+            self.bridge_kind,
+            &self.scoring,
+        )
+            .cmp(&(
+                &other.seed_symbol_id,
+                other.tier,
+                other.kind,
+                &other.via_symbol_id,
+                &other.via_path,
+                other.bridge_kind,
+                &other.scoring,
+            ))
+    }
+}
+
+impl std::hash::Hash for ImpactSliceReasonMetadata {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.seed_symbol_id.hash(state);
+        self.tier.hash(state);
+        self.kind.hash(state);
+        self.via_symbol_id.hash(state);
+        self.via_path.hash(state);
+        self.bridge_kind.hash(state);
+        self.scoring.hash(state);
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -238,7 +295,7 @@ pub struct ImpactSliceScoreTuple {
     pub lexical_tiebreak: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImpactSlicePrunedCandidate {
     pub seed_symbol_id: String,
     pub path: String,
@@ -255,6 +312,75 @@ pub struct ImpactSlicePrunedCandidate {
     pub scoring: Option<ImpactSliceCandidateScoringSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_explanation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub representative_explanation: Option<ImpactSliceRepresentativeExplanationMetadata>,
+}
+
+impl PartialEq for ImpactSlicePrunedCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.seed_symbol_id == other.seed_symbol_id
+            && self.path == other.path
+            && self.tier == other.tier
+            && self.kind == other.kind
+            && self.via_symbol_id == other.via_symbol_id
+            && self.via_path == other.via_path
+            && self.bridge_kind == other.bridge_kind
+            && self.prune_reason == other.prune_reason
+            && self.scoring == other.scoring
+            && self.compact_explanation == other.compact_explanation
+    }
+}
+
+impl Eq for ImpactSlicePrunedCandidate {}
+
+impl PartialOrd for ImpactSlicePrunedCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ImpactSlicePrunedCandidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            &self.seed_symbol_id,
+            &self.path,
+            self.tier,
+            self.kind,
+            &self.via_symbol_id,
+            &self.via_path,
+            self.bridge_kind,
+            self.prune_reason,
+            &self.scoring,
+            &self.compact_explanation,
+        )
+            .cmp(&(
+                &other.seed_symbol_id,
+                &other.path,
+                other.tier,
+                other.kind,
+                &other.via_symbol_id,
+                &other.via_path,
+                other.bridge_kind,
+                other.prune_reason,
+                &other.scoring,
+                &other.compact_explanation,
+            ))
+    }
+}
+
+impl std::hash::Hash for ImpactSlicePrunedCandidate {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.seed_symbol_id.hash(state);
+        self.path.hash(state);
+        self.tier.hash(state);
+        self.kind.hash(state);
+        self.via_symbol_id.hash(state);
+        self.via_path.hash(state);
+        self.bridge_kind.hash(state);
+        self.prune_reason.hash(state);
+        self.scoring.hash(state);
+        self.compact_explanation.hash(state);
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -378,7 +504,7 @@ pub struct ImpactWitnessSliceFileContext {
     pub selected_vs_pruned_reasons: Vec<ImpactWitnessSliceSelectedVsPrunedReason>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ImpactBridgeExecutionFamily {
     ReturnContinuation,
@@ -388,7 +514,7 @@ pub enum ImpactBridgeExecutionFamily {
     NestedMultiInputContinuation,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ImpactBridgeExecutionStepFamily {
     CallsiteInputBinding,
@@ -398,7 +524,7 @@ pub enum ImpactBridgeExecutionStepFamily {
     RequireRelativeLoad,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ImpactBridgeExecutionStepCompact {
     pub family: ImpactBridgeExecutionFamily,
     pub step_family: ImpactBridgeExecutionStepFamily,
@@ -411,6 +537,36 @@ pub struct ImpactBridgeExecutionStepCompact {
     pub reason_kind: Option<ImpactSliceReasonKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ImpactSliceRepresentativeExplanationMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closure_target_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub winner_reason_codes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loser_reason_codes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closure_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub winning_bridge_execution_chain_compact: Vec<ImpactBridgeExecutionStepCompact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_supporting_steps_compact: Vec<ImpactBridgeExecutionStepCompact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub negative_chain_signals: Vec<String>,
 }
 
 type ImpactBridgeExecutionStepKey = (
@@ -1141,6 +1297,30 @@ fn selected_reason_matches_pruned_candidate(
     reason: &ImpactSliceReasonMetadata,
     candidate: &ImpactSlicePrunedCandidate,
 ) -> bool {
+    if let (Some(selected), Some(pruned)) = (
+        reason.representative_explanation.as_ref(),
+        candidate.representative_explanation.as_ref(),
+    ) {
+        if matches!(
+            candidate.prune_reason,
+            ImpactSlicePruneReason::WeakerSameChainDuplicate
+        ) && selected.duplicate_key.is_some()
+            && selected.duplicate_key == pruned.duplicate_key
+        {
+            return true;
+        }
+        if matches!(
+            candidate.prune_reason,
+            ImpactSlicePruneReason::BridgeBudgetExhausted
+        ) && ((selected.budget_key.is_some() && selected.budget_key == pruned.budget_key)
+            || (selected.family_bucket.is_some()
+                && selected.family_bucket == pruned.family_bucket
+                && reason.kind == candidate.kind))
+        {
+            return true;
+        }
+    }
+
     matches!(
         reason.kind,
         ImpactSliceReasonKind::BridgeCompletionFile | ImpactSliceReasonKind::BridgeContinuationFile
@@ -1156,6 +1336,38 @@ fn selected_reason_matches_pruned_candidate(
         && reason.kind == candidate.kind
         && reason.via_symbol_id == candidate.via_symbol_id
         && reason.via_path == candidate.via_path
+}
+
+fn representative_selected_vs_pruned_summary(
+    selected: Option<&ImpactSliceRepresentativeExplanationMetadata>,
+    pruned: Option<&ImpactSliceRepresentativeExplanationMetadata>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if let Some(selected) = selected {
+        if let Some(summary) = selected.closure_summary.as_ref() {
+            parts.push(summary.clone());
+        }
+        if let Some(summary) = selected.family_summary.as_ref() {
+            parts.push(summary.clone());
+        }
+        if !selected.winner_reason_codes.is_empty() {
+            parts.push(format!("winner={}", selected.winner_reason_codes.join(",")));
+        }
+    }
+
+    if let Some(pruned) = pruned {
+        if let Some(summary) = pruned.duplicate_summary.as_ref() {
+            parts.push(summary.clone());
+        } else if let Some(summary) = pruned.budget_summary.as_ref() {
+            parts.push(summary.clone());
+        }
+        if !pruned.loser_reason_codes.is_empty() {
+            parts.push(format!("loser={}", pruned.loser_reason_codes.join(",")));
+        }
+    }
+
+    (!parts.is_empty()).then(|| parts.join("; "))
 }
 
 fn build_selected_vs_pruned_reasons(
@@ -1187,6 +1399,10 @@ fn build_selected_vs_pruned_reasons(
                 selected_vs_pruned_winning_support(selected_scoring, pruned_scoring);
             let losing_side_reason =
                 selected_vs_pruned_losing_side_reason(selected_scoring, pruned_scoring);
+            let representative_summary = representative_selected_vs_pruned_summary(
+                reason.representative_explanation.as_ref(),
+                candidate.representative_explanation.as_ref(),
+            );
             reasons.push(ImpactWitnessSliceSelectedVsPrunedReason {
                 via_symbol_id: reason.via_symbol_id.clone(),
                 via_path: reason.via_path.clone(),
@@ -1199,16 +1415,18 @@ fn build_selected_vs_pruned_reasons(
                 winning_support: winning_support.clone(),
                 losing_side_reason: losing_side_reason.clone(),
                 compact_explanation: candidate.compact_explanation.clone(),
-                summary: selected_vs_pruned_summary(
-                    selected_path,
-                    &candidate.path,
-                    selected_better_by,
-                    selected_scoring,
-                    pruned_scoring,
-                    winning_primary_evidence_kinds.as_deref(),
-                    winning_support.as_ref(),
-                    losing_side_reason.as_deref(),
-                ),
+                summary: representative_summary.unwrap_or_else(|| {
+                    selected_vs_pruned_summary(
+                        selected_path,
+                        &candidate.path,
+                        selected_better_by,
+                        selected_scoring,
+                        pruned_scoring,
+                        winning_primary_evidence_kinds.as_deref(),
+                        winning_support.as_ref(),
+                        losing_side_reason.as_deref(),
+                    )
+                }),
             });
         }
     }
@@ -1499,6 +1717,56 @@ fn bridge_execution_representative_family(
     }
 }
 
+fn build_bridge_execution_provenance_from_representatives(
+    slice_context: &ImpactWitnessSliceContext,
+    provenance_chain: &[EdgeProvenance],
+) -> Option<(
+    Option<ImpactBridgeExecutionFamily>,
+    Vec<ImpactBridgeExecutionStepCompact>,
+    Vec<ImpactBridgeExecutionStepCompact>,
+)> {
+    let mut winning_steps = Vec::new();
+    let mut seen_winning_steps = HashSet::new();
+    let mut supporting_steps = Vec::new();
+    let mut seen_supporting_steps = HashSet::new();
+
+    for file_context in &slice_context.selected_files_on_path {
+        for reason in file_context
+            .selection_reasons
+            .iter()
+            .chain(file_context.seed_reasons.iter())
+        {
+            let Some(representative) = reason.representative_explanation.as_ref() else {
+                continue;
+            };
+            for step in &representative.winning_bridge_execution_chain_compact {
+                push_unique_bridge_execution_step(
+                    &mut winning_steps,
+                    &mut seen_winning_steps,
+                    step.clone(),
+                );
+            }
+            for step in &representative.observed_supporting_steps_compact {
+                push_unique_bridge_execution_step(
+                    &mut supporting_steps,
+                    &mut seen_supporting_steps,
+                    step.clone(),
+                );
+            }
+        }
+    }
+
+    if winning_steps.is_empty() && supporting_steps.is_empty() {
+        return None;
+    }
+
+    let representative_family =
+        bridge_execution_representative_family(&winning_steps, provenance_chain).or_else(|| {
+            bridge_execution_representative_family(&supporting_steps, provenance_chain)
+        });
+    Some((representative_family, winning_steps, supporting_steps))
+}
+
 fn build_bridge_execution_provenance_compact(
     slice_context: &ImpactWitnessSliceContext,
     provenance_chain: &[EdgeProvenance],
@@ -1507,6 +1775,12 @@ fn build_bridge_execution_provenance_compact(
     Vec<ImpactBridgeExecutionStepCompact>,
     Vec<ImpactBridgeExecutionStepCompact>,
 ) {
+    if let Some(representative_steps) =
+        build_bridge_execution_provenance_from_representatives(slice_context, provenance_chain)
+    {
+        return representative_steps;
+    }
+
     let mut winning_steps = Vec::new();
     let mut seen_winning_steps = HashSet::new();
     let mut supporting_steps = Vec::new();
@@ -2986,6 +3260,7 @@ fn foo() { bar(); }
         let mut out = compute_impact(std::slice::from_ref(&seed), &index, &refs, &opts);
 
         let wrapper_seed_reason = ImpactSliceReasonMetadata {
+            representative_explanation: None,
             seed_symbol_id: seed.id.0.clone(),
             tier: 2,
             kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -2995,6 +3270,7 @@ fn foo() { bar(); }
             scoring: None,
         };
         let wrapper_other_reason = ImpactSliceReasonMetadata {
+            representative_explanation: None,
             seed_symbol_id: "rust:other.rs:fn:other:1".to_string(),
             tier: 1,
             kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -3014,6 +3290,7 @@ fn foo() { bar(); }
                         explanation: true,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 0,
                         kind: ImpactSliceReasonKind::ChangedFile,
@@ -3040,6 +3317,7 @@ fn foo() { bar(); }
                         explanation: true,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 1,
                         kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -3057,6 +3335,7 @@ fn foo() { bar(); }
                         explanation: true,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 3,
                         kind: ImpactSliceReasonKind::ModuleCompanionFile,
@@ -3086,6 +3365,7 @@ fn foo() { bar(); }
                         path: "main.rs".to_string(),
                         witness_hops: vec![0],
                         selection_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 0,
                             kind: ImpactSliceReasonKind::ChangedFile,
@@ -3095,6 +3375,7 @@ fn foo() { bar(); }
                             scoring: None,
                         }],
                         seed_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 0,
                             kind: ImpactSliceReasonKind::ChangedFile,
@@ -3110,6 +3391,7 @@ fn foo() { bar(); }
                         witness_hops: vec![0, 1],
                         selection_reasons: vec![wrapper_seed_reason, wrapper_other_reason,],
                         seed_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 2,
                             kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -3124,6 +3406,7 @@ fn foo() { bar(); }
                         path: "callee.rs".to_string(),
                         witness_hops: vec![1],
                         selection_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 1,
                             kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -3133,6 +3416,7 @@ fn foo() { bar(); }
                             scoring: None,
                         }],
                         seed_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 1,
                             kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -3262,6 +3546,7 @@ fn foo() { bar(); }
         let mut out = compute_impact(std::slice::from_ref(&seed), &index, &refs, &opts);
 
         let selected_reason = ImpactSliceReasonMetadata {
+            representative_explanation: None,
             seed_symbol_id: seed.id.0.clone(),
             tier: 2,
             kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -3301,6 +3586,7 @@ fn foo() { bar(); }
                         explanation: true,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 0,
                         kind: ImpactSliceReasonKind::ChangedFile,
@@ -3318,6 +3604,7 @@ fn foo() { bar(); }
                         explanation: true,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 1,
                         kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -3338,6 +3625,7 @@ fn foo() { bar(); }
                 },
             ],
             pruned_candidates: vec![ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id: seed.id.0.clone(),
                 path: "aaa_helper.rs".to_string(),
                 tier: 2,
@@ -3426,6 +3714,7 @@ fn foo() { bar(); }
         let reasons = build_selected_vs_pruned_reasons(
             "lib/leaf.rb",
             &[ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed_symbol_id.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -3459,6 +3748,7 @@ fn foo() { bar(); }
                 }),
             }],
             &[ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id,
                 path: "lib/helper.rb".to_string(),
                 tier: 2,
@@ -3527,6 +3817,7 @@ fn foo() { bar(); }
         let reasons = build_selected_vs_pruned_reasons(
             "leaf.rs",
             &[ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed_symbol_id.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -3556,6 +3847,7 @@ fn foo() { bar(); }
                 }),
             }],
             &[ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id,
                 path: "aaa_helper.rs".to_string(),
                 tier: 2,
@@ -3616,6 +3908,7 @@ fn foo() { bar(); }
         let reasons = build_selected_vs_pruned_reasons(
             "leaf.rs",
             &[ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed_symbol_id.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -3645,6 +3938,7 @@ fn foo() { bar(); }
                 }),
             }],
             &[ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id,
                 path: "zzz_final_helper.rs".to_string(),
                 tier: 2,
@@ -3705,6 +3999,7 @@ fn foo() { bar(); }
         let reasons = build_selected_vs_pruned_reasons(
             "leaf.rs",
             &[ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: "rust:main.rs:fn:caller:5".to_string(),
                 tier: 3,
                 kind: ImpactSliceReasonKind::BridgeContinuationFile,
@@ -3737,6 +4032,7 @@ fn foo() { bar(); }
                 }),
             }],
             &[ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id: "rust:main.rs:fn:caller:5".to_string(),
                 path: "alt_leaf.rs".to_string(),
                 tier: 3,
@@ -3789,6 +4085,7 @@ fn foo() { bar(); }
         let reasons = build_selected_vs_pruned_reasons(
             "step.rs",
             &[ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed_symbol_id.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -3822,6 +4119,7 @@ fn foo() { bar(); }
                 }),
             }],
             &[ImpactSlicePrunedCandidate {
+                representative_explanation: None,
                 seed_symbol_id,
                 path: "later.rs".to_string(),
                 tier: 2,
@@ -3889,6 +4187,7 @@ fn foo() { bar(); }
         let reasons = build_selected_vs_pruned_reasons(
             "lib/route_runtime.rb",
             &[ImpactSliceReasonMetadata {
+                representative_explanation: None,
                 seed_symbol_id: seed_symbol_id.clone(),
                 tier: 2,
                 kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -3922,6 +4221,7 @@ fn foo() { bar(); }
             }],
             &[
                 ImpactSlicePrunedCandidate {
+                    representative_explanation: None,
                     seed_symbol_id: seed_symbol_id.clone(),
                     path: "lib/route_runtime.rb".to_string(),
                     tier: 2,
@@ -3956,6 +4256,7 @@ fn foo() { bar(); }
                     ),
                 },
                 ImpactSlicePrunedCandidate {
+                    representative_explanation: None,
                     seed_symbol_id,
                     path: "lib/fallback_runtime.rb".to_string(),
                     tier: 2,
@@ -4153,6 +4454,7 @@ fn foo() { bar(); }
                         explanation: true,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 0,
                         kind: ImpactSliceReasonKind::SeedFile,
@@ -4170,6 +4472,7 @@ fn foo() { bar(); }
                         explanation: false,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 2,
                         kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -4187,6 +4490,7 @@ fn foo() { bar(); }
                         explanation: true,
                     },
                     reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: seed.id.0.clone(),
                         tier: 1,
                         kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -4215,6 +4519,7 @@ fn foo() { bar(); }
                         path: "main.rs".to_string(),
                         witness_hops: vec![0],
                         selection_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 0,
                             kind: ImpactSliceReasonKind::SeedFile,
@@ -4224,6 +4529,7 @@ fn foo() { bar(); }
                             scoring: None,
                         }],
                         seed_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 0,
                             kind: ImpactSliceReasonKind::SeedFile,
@@ -4238,6 +4544,7 @@ fn foo() { bar(); }
                         path: "callee.rs".to_string(),
                         witness_hops: vec![1],
                         selection_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 1,
                             kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -4247,6 +4554,7 @@ fn foo() { bar(); }
                             scoring: None,
                         }],
                         seed_reasons: vec![ImpactSliceReasonMetadata {
+                            representative_explanation: None,
                             seed_symbol_id: seed.id.0.clone(),
                             tier: 1,
                             kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -4289,6 +4597,7 @@ fn foo() { bar(); }
                     witness_hops: vec![0],
                     selection_reasons: vec![],
                     seed_reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: "ruby:app/runner.rb:method:entry:3".to_string(),
                         tier: 1,
                         kind: ImpactSliceReasonKind::DirectCalleeFile,
@@ -4304,6 +4613,7 @@ fn foo() { bar(); }
                     witness_hops: vec![1],
                     selection_reasons: vec![],
                     seed_reasons: vec![ImpactSliceReasonMetadata {
+                        representative_explanation: None,
                         seed_symbol_id: "ruby:app/runner.rb:method:entry:3".to_string(),
                         tier: 2,
                         kind: ImpactSliceReasonKind::BridgeCompletionFile,
@@ -4685,5 +4995,193 @@ fn foo() { bar(); }
         let round_tripped: ImpactSliceCandidateScoringSummary =
             serde_json::from_value(value).expect("deserialize scoring summary");
         assert_eq!(round_tripped, scoring);
+    }
+
+    #[test]
+    fn selected_vs_pruned_prefers_representative_explanation_for_same_chain_duplicate() {
+        let reasons = build_selected_vs_pruned_reasons(
+            "lib/alias_leaf.rb",
+            &[ImpactSliceReasonMetadata {
+                representative_explanation: Some(ImpactSliceRepresentativeExplanationMetadata {
+                    family_bucket: Some("alias_result".to_string()),
+                    closure_target_key: Some(
+                        "ruby:lib/alias_leaf.rb:method:alias_finish:3".to_string(),
+                    ),
+                    duplicate_key: Some("dup-key".to_string()),
+                    budget_key: Some("dup-key".to_string()),
+                    winner_reason_codes: vec!["file_first_candidate_projection".to_string()],
+                    loser_reason_codes: vec![],
+                    closure_summary: Some(
+                        "file-first candidate currently closes at ruby:lib/alias_leaf.rb:method:alias_finish:3"
+                            .to_string(),
+                    ),
+                    family_summary: Some("family bucket=alias_result".to_string()),
+                    budget_summary: Some("representative budget key=dup-key".to_string()),
+                    duplicate_summary: Some("representative duplicate key=dup-key".to_string()),
+                    winning_bridge_execution_chain_compact: vec![],
+                    observed_supporting_steps_compact: vec![],
+                    negative_chain_signals: vec![],
+                }),
+                seed_symbol_id: "ruby:app/runner.rb:method:entry:3".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("ruby:lib/service.rb:method:bounce:3".to_string()),
+                via_path: Some("lib/service.rb".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::AliasContinuation,
+                    primary_evidence_kinds: vec![ImpactSliceEvidenceKind::AliasChain],
+                    secondary_evidence_kinds: vec![],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 1,
+                        primary_evidence_count: 1,
+                        secondary_evidence_count: 0,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 1,
+                        call_position_rank: 3,
+                        lexical_tiebreak: "lib/alias_leaf.rb".to_string(),
+                    },
+                    support: None,
+                }),
+            }],
+            &[ImpactSlicePrunedCandidate {
+                representative_explanation: Some(ImpactSliceRepresentativeExplanationMetadata {
+                    family_bucket: Some("alias_result".to_string()),
+                    closure_target_key: Some(
+                        "ruby:lib/alias_leaf.rb:method:alias_finish:3".to_string(),
+                    ),
+                    duplicate_key: Some("dup-key".to_string()),
+                    budget_key: Some("dup-key".to_string()),
+                    winner_reason_codes: vec![],
+                    loser_reason_codes: vec!["same_chain_duplicate".to_string()],
+                    closure_summary: Some(
+                        "file-first candidate currently closes at ruby:lib/alias_leaf.rb:method:alias_finish:3"
+                            .to_string(),
+                    ),
+                    family_summary: Some("family bucket=alias_result".to_string()),
+                    budget_summary: Some("representative budget key=dup-key".to_string()),
+                    duplicate_summary: Some("representative duplicate key=dup-key".to_string()),
+                    winning_bridge_execution_chain_compact: vec![],
+                    observed_supporting_steps_compact: vec![],
+                    negative_chain_signals: vec![],
+                }),
+                seed_symbol_id: "ruby:app/runner.rb:method:entry:3".to_string(),
+                path: "lib/noisy_alias_leaf.rb".to_string(),
+                tier: 2,
+                kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                via_symbol_id: Some("ruby:lib/service.rb:method:bounce:3".to_string()),
+                via_path: Some("lib/service.rb".to_string()),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                prune_reason: ImpactSlicePruneReason::WeakerSameChainDuplicate,
+                scoring: Some(ImpactSliceCandidateScoringSummary {
+                    source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+                    lane: ImpactSliceCandidateLane::AliasContinuation,
+                    primary_evidence_kinds: vec![ImpactSliceEvidenceKind::AliasChain],
+                    secondary_evidence_kinds: vec![],
+                    negative_evidence_kinds: vec![],
+                    score_tuple: ImpactSliceScoreTuple {
+                        source_rank: 0,
+                        lane_rank: 1,
+                        primary_evidence_count: 1,
+                        secondary_evidence_count: 0,
+                        negative_evidence_count: 0,
+                        semantic_support_rank: 0,
+                        call_position_rank: 2,
+                        lexical_tiebreak: "lib/noisy_alias_leaf.rb".to_string(),
+                    },
+                    support: None,
+                }),
+                compact_explanation: Some(
+                    "suppressed_before_admit=weaker_same_chain_duplicate".to_string(),
+                ),
+            }],
+        );
+
+        assert_eq!(reasons.len(), 1);
+        assert!(
+            reasons[0]
+                .summary
+                .contains("representative duplicate key=dup-key")
+        );
+        assert!(
+            reasons[0]
+                .summary
+                .contains("winner=file_first_candidate_projection")
+        );
+    }
+
+    #[test]
+    fn build_bridge_execution_provenance_compact_prefers_representative_winning_chain() {
+        let winning_step = ImpactBridgeExecutionStepCompact {
+            family: ImpactBridgeExecutionFamily::AliasResultStitch,
+            step_family: ImpactBridgeExecutionStepFamily::AliasResultStitch,
+            anchor_symbol_id: "ruby:lib/service.rb:method:bounce:3".to_string(),
+            anchor_path: Some("lib/service.rb".to_string()),
+            bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+            reason_kind: Some(ImpactSliceReasonKind::BridgeCompletionFile),
+            summary: Some("winning representative step".to_string()),
+        };
+        let supporting_step = ImpactBridgeExecutionStepCompact {
+            family: ImpactBridgeExecutionFamily::MixedRequireRelativeAliasStitch,
+            step_family: ImpactBridgeExecutionStepFamily::RequireRelativeLoad,
+            anchor_symbol_id: "ruby:lib/service.rb:method:bounce:3".to_string(),
+            anchor_path: Some("lib/service.rb".to_string()),
+            bridge_kind: Some(ImpactSliceBridgeKind::RequireRelativeChain),
+            reason_kind: Some(ImpactSliceReasonKind::BridgeCompletionFile),
+            summary: Some("supporting representative step".to_string()),
+        };
+        let slice_context = ImpactWitnessSliceContext {
+            seed_symbol_id: "ruby:app/runner.rb:method:entry:3".to_string(),
+            selected_files_on_path: vec![ImpactWitnessSliceFileContext {
+                path: "lib/alias_leaf.rb".to_string(),
+                witness_hops: vec![1],
+                selection_reasons: vec![ImpactSliceReasonMetadata {
+                    representative_explanation: Some(
+                        ImpactSliceRepresentativeExplanationMetadata {
+                            family_bucket: Some("alias_result".to_string()),
+                            closure_target_key: Some(
+                                "ruby:lib/alias_leaf.rb:method:alias_finish:3".to_string(),
+                            ),
+                            duplicate_key: Some("dup-key".to_string()),
+                            budget_key: Some("budget-key".to_string()),
+                            winner_reason_codes: vec![
+                                "file_first_candidate_projection".to_string(),
+                            ],
+                            loser_reason_codes: vec![],
+                            closure_summary: Some("representative winner".to_string()),
+                            family_summary: Some("family bucket=alias_result".to_string()),
+                            budget_summary: Some(
+                                "representative budget key=budget-key".to_string(),
+                            ),
+                            duplicate_summary: Some(
+                                "representative duplicate key=dup-key".to_string(),
+                            ),
+                            winning_bridge_execution_chain_compact: vec![winning_step.clone()],
+                            observed_supporting_steps_compact: vec![supporting_step.clone()],
+                            negative_chain_signals: vec![],
+                        },
+                    ),
+                    seed_symbol_id: "ruby:app/runner.rb:method:entry:3".to_string(),
+                    tier: 2,
+                    kind: ImpactSliceReasonKind::BridgeCompletionFile,
+                    via_symbol_id: Some("ruby:lib/service.rb:method:bounce:3".to_string()),
+                    via_path: Some("lib/service.rb".to_string()),
+                    bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                    scoring: None,
+                }],
+                seed_reasons: vec![],
+                selected_vs_pruned_reasons: vec![],
+            }],
+        };
+
+        let (family, winning_steps, supporting_steps) =
+            build_bridge_execution_provenance_compact(&slice_context, &[]);
+
+        assert_eq!(family, Some(ImpactBridgeExecutionFamily::AliasResultStitch));
+        assert_eq!(winning_steps, vec![winning_step]);
+        assert_eq!(supporting_steps, vec![supporting_step]);
     }
 }
