@@ -7,6 +7,9 @@ use dimpact::compute_impact;
 use dimpact::dfg::{DataFlowGraph, DependencyKind, PdgBuilder, RubyDfgBuilder, RustDfgBuilder};
 use dimpact::dfg_to_dot;
 use dimpact::engine::{AutoPolicy, EngineKind, make_engine_with_auto_policy};
+use dimpact::impact::{
+    ImpactBridgeExecutionFamily, ImpactBridgeExecutionStepCompact, ImpactBridgeExecutionStepFamily,
+};
 use dimpact::ir::SymbolId;
 use dimpact::ir::reference::{EdgeCertainty, EdgeProvenance, RefKind, Reference, SymbolIndex};
 use dimpact::languages::path::normalize_path_like;
@@ -1800,6 +1803,88 @@ struct Tier2Candidate {
     scoring: ImpactSliceCandidateScoringSummary,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StitchedChainFamily {
+    Return,
+    AliasResult,
+    Mixed,
+    Nested,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StitchedChainFamilyBucket {
+    ReturnResult,
+    AliasResult,
+    MixedResult,
+    NestedContinuation,
+}
+
+impl StitchedChainFamilyBucket {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ReturnResult => "return_result",
+            Self::AliasResult => "alias_result",
+            Self::MixedResult => "mixed_result",
+            Self::NestedContinuation => "nested_continuation",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StitchedStepFamily {
+    SummaryReturnBridge,
+    NestedSummaryBridge,
+    AliasResultStitch,
+    RequireRelativeLoad,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StitchedChainExplanation {
+    winner_reason_codes: Vec<String>,
+    loser_reason_codes: Vec<String>,
+    closure_summary: String,
+    family_summary: String,
+    budget_summary: String,
+    duplicate_summary: Option<String>,
+    selected_anchor_symbol_id: String,
+    closure_target_key: String,
+    family_bucket: StitchedChainFamilyBucket,
+    winning_bridge_execution_chain_compact: Vec<ImpactBridgeExecutionStepCompact>,
+    observed_supporting_steps_compact: Vec<ImpactBridgeExecutionStepCompact>,
+    negative_chain_signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StitchedChainRepresentative {
+    seed_symbol_id: String,
+    entry_boundary_symbol_id: String,
+    anchor_symbol_id: String,
+    family: StitchedChainFamily,
+    family_bucket: StitchedChainFamilyBucket,
+    step_families: Vec<StitchedStepFamily>,
+    terminal_symbol_id: Option<String>,
+    terminal_path: Option<String>,
+    caller_result_symbol_id: Option<String>,
+    nested_continuation_symbol_id: Option<String>,
+    reaches_caller_result: bool,
+    reaches_nested_continuation: bool,
+    has_require_relative_load: bool,
+    closure_target_key: String,
+    anchor_locality_key: String,
+    duplicate_key: String,
+    budget_key: String,
+    winning_bridge_execution_chain_compact: Vec<ImpactBridgeExecutionStepCompact>,
+    observed_supporting_steps_compact: Vec<ImpactBridgeExecutionStepCompact>,
+    negative_chain_signals: Vec<String>,
+    explanation: StitchedChainExplanation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepresentativeCandidate {
+    file_candidate: Tier2Candidate,
+    representative: StitchedChainRepresentative,
+}
+
 #[derive(Debug, Clone, Default)]
 struct SliceSelectionFileState {
     scopes: ImpactSliceScopes,
@@ -2383,6 +2468,285 @@ fn candidate_tier(candidate: &Tier2Candidate) -> SliceSelectionTier {
     }
 }
 
+fn candidate_has_require_relative_load_support(candidate: &Tier2Candidate) -> bool {
+    candidate.bridge_kind == Some(ImpactSliceBridgeKind::RequireRelativeChain)
+        || candidate
+            .scoring
+            .primary_evidence_kinds
+            .iter()
+            .chain(candidate.scoring.secondary_evidence_kinds.iter())
+            .any(|kind| {
+                matches!(
+                    kind,
+                    ImpactSliceEvidenceKind::RequireRelativeEdge
+                        | ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad
+                )
+            })
+}
+
+fn stitched_chain_family_for_candidate(
+    candidate: &Tier2Candidate,
+    tier: SliceSelectionTier,
+) -> StitchedChainFamily {
+    if tier == SliceSelectionTier::BridgeContinuation
+        && candidate.scoring.lane == ImpactSliceCandidateLane::AliasContinuation
+        && candidate.scoring.score_tuple.semantic_support_rank > 0
+    {
+        return StitchedChainFamily::Nested;
+    }
+
+    match candidate.scoring.lane {
+        ImpactSliceCandidateLane::ReturnContinuation => StitchedChainFamily::Return,
+        ImpactSliceCandidateLane::AliasContinuation => {
+            if candidate_has_require_relative_load_support(candidate) {
+                StitchedChainFamily::Mixed
+            } else {
+                StitchedChainFamily::AliasResult
+            }
+        }
+        ImpactSliceCandidateLane::RequireRelativeContinuation => StitchedChainFamily::Mixed,
+        ImpactSliceCandidateLane::ModuleCompanionFallback => StitchedChainFamily::AliasResult,
+    }
+}
+
+fn stitched_chain_family_bucket(family: StitchedChainFamily) -> StitchedChainFamilyBucket {
+    match family {
+        StitchedChainFamily::Return => StitchedChainFamilyBucket::ReturnResult,
+        StitchedChainFamily::AliasResult => StitchedChainFamilyBucket::AliasResult,
+        StitchedChainFamily::Mixed => StitchedChainFamilyBucket::MixedResult,
+        StitchedChainFamily::Nested => StitchedChainFamilyBucket::NestedContinuation,
+    }
+}
+
+fn stitched_chain_anchor_symbol_id(candidate: &Tier2Candidate, tier: SliceSelectionTier) -> String {
+    match tier {
+        SliceSelectionTier::BridgeContinuation => candidate.via_symbol_id.clone(),
+        _ => candidate.completion_symbol_id.clone(),
+    }
+}
+
+fn stitched_chain_anchor_locality_key(
+    candidate: &Tier2Candidate,
+    tier: SliceSelectionTier,
+) -> String {
+    let anchor_symbol_id = stitched_chain_anchor_symbol_id(candidate, tier);
+    if !anchor_symbol_id.is_empty() {
+        anchor_symbol_id
+    } else {
+        candidate.via_path.clone()
+    }
+}
+
+fn stitched_chain_closure_target_key(candidate: &Tier2Candidate) -> String {
+    if !candidate.completion_symbol_id.is_empty() {
+        candidate.completion_symbol_id.clone()
+    } else {
+        candidate.path.clone()
+    }
+}
+
+fn stitched_step_families_for_candidate(
+    candidate: &Tier2Candidate,
+    tier: SliceSelectionTier,
+) -> Vec<StitchedStepFamily> {
+    let mut step_families = Vec::new();
+    match (tier, candidate.bridge_kind) {
+        (SliceSelectionTier::BridgeCompletion, Some(ImpactSliceBridgeKind::WrapperReturn)) => {
+            step_families.push(StitchedStepFamily::SummaryReturnBridge)
+        }
+        (SliceSelectionTier::BridgeContinuation, Some(ImpactSliceBridgeKind::WrapperReturn)) => {
+            step_families.push(StitchedStepFamily::NestedSummaryBridge)
+        }
+        (
+            SliceSelectionTier::BridgeCompletion | SliceSelectionTier::BridgeContinuation,
+            Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+        ) => step_families.push(StitchedStepFamily::AliasResultStitch),
+        (_, Some(ImpactSliceBridgeKind::RequireRelativeChain)) => {
+            step_families.push(StitchedStepFamily::RequireRelativeLoad)
+        }
+        _ => {}
+    }
+    if candidate_has_require_relative_load_support(candidate)
+        && !step_families.contains(&StitchedStepFamily::RequireRelativeLoad)
+    {
+        step_families.push(StitchedStepFamily::RequireRelativeLoad);
+    }
+    step_families
+}
+
+fn stitched_step_family_as_compact_family(
+    family: StitchedChainFamily,
+) -> ImpactBridgeExecutionFamily {
+    match family {
+        StitchedChainFamily::Return => ImpactBridgeExecutionFamily::ReturnContinuation,
+        StitchedChainFamily::AliasResult => ImpactBridgeExecutionFamily::AliasResultStitch,
+        StitchedChainFamily::Mixed => ImpactBridgeExecutionFamily::MixedRequireRelativeAliasStitch,
+        StitchedChainFamily::Nested => ImpactBridgeExecutionFamily::NestedMultiInputContinuation,
+    }
+}
+
+fn stitched_step_family_as_compact_step_family(
+    step_family: StitchedStepFamily,
+) -> ImpactBridgeExecutionStepFamily {
+    match step_family {
+        StitchedStepFamily::SummaryReturnBridge => {
+            ImpactBridgeExecutionStepFamily::SummaryReturnBridge
+        }
+        StitchedStepFamily::NestedSummaryBridge => {
+            ImpactBridgeExecutionStepFamily::NestedSummaryBridge
+        }
+        StitchedStepFamily::AliasResultStitch => ImpactBridgeExecutionStepFamily::AliasResultStitch,
+        StitchedStepFamily::RequireRelativeLoad => {
+            ImpactBridgeExecutionStepFamily::RequireRelativeLoad
+        }
+    }
+}
+
+fn make_stitched_chain_compact_step(
+    candidate: &Tier2Candidate,
+    tier: SliceSelectionTier,
+    family: StitchedChainFamily,
+    step_family: StitchedStepFamily,
+    anchor_symbol_id: &str,
+) -> ImpactBridgeExecutionStepCompact {
+    ImpactBridgeExecutionStepCompact {
+        family: stitched_step_family_as_compact_family(family),
+        step_family: stitched_step_family_as_compact_step_family(step_family),
+        anchor_symbol_id: anchor_symbol_id.to_string(),
+        anchor_path: Some(match tier {
+            SliceSelectionTier::BridgeContinuation => candidate.via_path.clone(),
+            _ => candidate.path.clone(),
+        }),
+        bridge_kind: candidate.bridge_kind,
+        reason_kind: Some(candidate_reason_kind_for_tier(candidate, tier)),
+        summary: Some(format!(
+            "file-first projection via {}",
+            candidate.path.as_str()
+        )),
+    }
+}
+
+fn make_stitched_chain_representative(
+    seed_symbol_id: &str,
+    candidate: &Tier2Candidate,
+    tier: SliceSelectionTier,
+) -> StitchedChainRepresentative {
+    let family = stitched_chain_family_for_candidate(candidate, tier);
+    let family_bucket = stitched_chain_family_bucket(family);
+    let anchor_symbol_id = stitched_chain_anchor_symbol_id(candidate, tier);
+    let anchor_locality_key = stitched_chain_anchor_locality_key(candidate, tier);
+    let closure_target_key = stitched_chain_closure_target_key(candidate);
+    let step_families = stitched_step_families_for_candidate(candidate, tier);
+    let winning_bridge_execution_chain_compact = step_families
+        .iter()
+        .filter(|step_family| **step_family != StitchedStepFamily::RequireRelativeLoad)
+        .map(|step_family| {
+            make_stitched_chain_compact_step(
+                candidate,
+                tier,
+                family,
+                *step_family,
+                &anchor_symbol_id,
+            )
+        })
+        .collect::<Vec<_>>();
+    let observed_supporting_steps_compact = step_families
+        .iter()
+        .filter(|step_family| **step_family == StitchedStepFamily::RequireRelativeLoad)
+        .map(|step_family| {
+            make_stitched_chain_compact_step(
+                candidate,
+                tier,
+                family,
+                *step_family,
+                &anchor_symbol_id,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut negative_chain_signals = Vec::new();
+    if candidate_has_helper_noise_signal(candidate) {
+        negative_chain_signals.push("helper_only_stitch".to_string());
+    }
+    if candidate.scoring.lane == ImpactSliceCandidateLane::RequireRelativeContinuation {
+        negative_chain_signals.push("support_only_require_relative".to_string());
+    }
+    let duplicate_key = format!(
+        "{}|{}|{}|{}|{}",
+        seed_symbol_id,
+        candidate.via_symbol_id,
+        family_bucket.as_str(),
+        closure_target_key,
+        anchor_locality_key,
+    );
+    let budget_key = format!(
+        "{}|{}|{}|{}",
+        seed_symbol_id,
+        candidate.via_symbol_id,
+        family_bucket.as_str(),
+        closure_target_key,
+    );
+    let explanation = StitchedChainExplanation {
+        winner_reason_codes: vec!["file_first_candidate_projection".to_string()],
+        loser_reason_codes: Vec::new(),
+        closure_summary: format!(
+            "file-first candidate currently closes at {}",
+            closure_target_key
+        ),
+        family_summary: format!("family bucket={}", family_bucket.as_str()),
+        budget_summary: format!("representative budget key={budget_key}"),
+        duplicate_summary: Some(format!("representative duplicate key={duplicate_key}")),
+        selected_anchor_symbol_id: anchor_symbol_id.clone(),
+        closure_target_key: closure_target_key.clone(),
+        family_bucket,
+        winning_bridge_execution_chain_compact: winning_bridge_execution_chain_compact.clone(),
+        observed_supporting_steps_compact: observed_supporting_steps_compact.clone(),
+        negative_chain_signals: negative_chain_signals.clone(),
+    };
+
+    StitchedChainRepresentative {
+        seed_symbol_id: seed_symbol_id.to_string(),
+        entry_boundary_symbol_id: candidate.via_symbol_id.clone(),
+        anchor_symbol_id,
+        family,
+        family_bucket,
+        step_families,
+        terminal_symbol_id: Some(candidate.completion_symbol_id.clone()),
+        terminal_path: Some(candidate.path.clone()),
+        caller_result_symbol_id: None,
+        nested_continuation_symbol_id: None,
+        reaches_caller_result: false,
+        reaches_nested_continuation: false,
+        has_require_relative_load: candidate_has_require_relative_load_support(candidate),
+        closure_target_key,
+        anchor_locality_key,
+        duplicate_key,
+        budget_key,
+        winning_bridge_execution_chain_compact,
+        observed_supporting_steps_compact,
+        negative_chain_signals,
+        explanation,
+    }
+}
+
+fn into_representative_candidate(
+    seed_symbol_id: &str,
+    candidate: Tier2Candidate,
+    tier: SliceSelectionTier,
+) -> RepresentativeCandidate {
+    let representative = make_stitched_chain_representative(seed_symbol_id, &candidate, tier);
+    RepresentativeCandidate {
+        file_candidate: candidate,
+        representative,
+    }
+}
+
+fn compare_representative_candidates(
+    a: &RepresentativeCandidate,
+    b: &RepresentativeCandidate,
+) -> std::cmp::Ordering {
+    compare_tier2_candidates(&a.file_candidate, &b.file_candidate)
+}
+
 fn make_candidate_reason_with_tier(
     seed_symbol_id: &str,
     candidate: &Tier2Candidate,
@@ -2696,7 +3060,7 @@ fn collect_bridge_continuation_candidates<'a>(
     root_file: &str,
     direct_boundary_paths: &std::collections::BTreeSet<String>,
     selected_tier2_paths: &std::collections::BTreeSet<String>,
-    anchors: &[Tier2Candidate],
+    anchors: &[RepresentativeCandidate],
     symbol_file_by_id: &std::collections::HashMap<String, &'a str>,
     symbol_by_id: &std::collections::HashMap<String, &'a dimpact::Symbol>,
     refs: &[Reference],
@@ -2705,32 +3069,40 @@ fn collect_bridge_continuation_candidates<'a>(
         String,
         Tier2SemanticEvidence,
     >,
-) -> Vec<Tier2Candidate> {
+) -> Vec<RepresentativeCandidate> {
     let mut continuation_candidates = Vec::new();
 
     for anchor in anchors
         .iter()
-        .filter(|candidate| continuation_ready_bridge_anchor(candidate))
+        .filter(|candidate| continuation_ready_bridge_anchor(&candidate.file_candidate))
     {
-        let Some(anchor_symbol) = symbol_by_id.get(&anchor.completion_symbol_id).copied() else {
+        let anchor_candidate = &anchor.file_candidate;
+        let Some(anchor_symbol) = symbol_by_id
+            .get(&anchor_candidate.completion_symbol_id)
+            .copied()
+        else {
             continue;
         };
-        let anchor_file = anchor.path.as_str();
+        let anchor_file = anchor_candidate.path.as_str();
         let side_refs: Vec<_> = refs
             .iter()
             .filter(|r| is_call_graph_ref(r))
             .filter_map(|reference| {
                 let continuation_symbol_id = match direction {
-                    ImpactDirection::Callers if reference.to.0 == anchor.completion_symbol_id => {
+                    ImpactDirection::Callers
+                        if reference.to.0 == anchor_candidate.completion_symbol_id =>
+                    {
                         Some(reference.from.0.as_str())
                     }
-                    ImpactDirection::Callees if reference.from.0 == anchor.completion_symbol_id => {
+                    ImpactDirection::Callees
+                        if reference.from.0 == anchor_candidate.completion_symbol_id =>
+                    {
                         Some(reference.to.0.as_str())
                     }
                     ImpactDirection::Both => {
-                        if reference.to.0 == anchor.completion_symbol_id {
+                        if reference.to.0 == anchor_candidate.completion_symbol_id {
                             Some(reference.from.0.as_str())
-                        } else if reference.from.0 == anchor.completion_symbol_id {
+                        } else if reference.from.0 == anchor_candidate.completion_symbol_id {
                             Some(reference.to.0.as_str())
                         } else {
                             None
@@ -2741,7 +3113,7 @@ fn collect_bridge_continuation_candidates<'a>(
                 let continuation_file = symbol_file_by_id.get(continuation_symbol_id).copied()?;
                 if continuation_file == root_file
                     || continuation_file == anchor_file
-                    || continuation_file == anchor.via_path
+                    || continuation_file == anchor_candidate.via_path
                 {
                     return None;
                 }
@@ -2783,13 +3155,13 @@ fn collect_bridge_continuation_candidates<'a>(
                 &semantic_evidence,
             );
             let bridge_kind = tier2_bridge_kind_for_lane(scoring.lane);
-            if bridge_kind != anchor.bridge_kind {
+            if bridge_kind != anchor_candidate.bridge_kind {
                 continue;
             }
             let candidate = Tier2Candidate {
                 path: continuation_file.to_string(),
-                via_symbol_id: anchor.completion_symbol_id.clone(),
-                via_path: anchor.path.clone(),
+                via_symbol_id: anchor_candidate.completion_symbol_id.clone(),
+                via_path: anchor_candidate.path.clone(),
                 completion_symbol_id: continuation_symbol_id,
                 bridge_kind,
                 scoring,
@@ -2811,7 +3183,17 @@ fn collect_bridge_continuation_candidates<'a>(
         continuation_candidates.extend(per_anchor.into_iter().take(1));
     }
 
-    continuation_candidates.sort_by(compare_tier2_candidates);
+    let mut continuation_candidates = continuation_candidates
+        .into_iter()
+        .map(|candidate| {
+            into_representative_candidate(
+                seed_symbol_id,
+                candidate,
+                SliceSelectionTier::BridgeContinuation,
+            )
+        })
+        .collect::<Vec<_>>();
+    continuation_candidates.sort_by(compare_representative_candidates);
     continuation_candidates
 }
 
@@ -3011,29 +3393,39 @@ fn plan_bounded_slice(
         }
 
         tier2_candidates.sort_by(compare_tier2_candidates);
+        let tier2_candidates = tier2_candidates
+            .into_iter()
+            .map(|candidate| {
+                into_representative_candidate(
+                    seed.id.0.as_str(),
+                    candidate,
+                    SliceSelectionTier::BridgeCompletion,
+                )
+            })
+            .collect::<Vec<_>>();
         let mut selected_tier2_paths = std::collections::BTreeSet::new();
         let mut admitted_tier2_candidates = Vec::new();
         for candidate in tier2_candidates {
-            if selected_tier2_paths.contains(&candidate.path) {
+            if selected_tier2_paths.contains(&candidate.file_candidate.path) {
                 seed_selection.add_reason(
-                    candidate.path.as_str(),
-                    make_tier2_reason(seed.id.0.as_str(), &candidate),
+                    candidate.file_candidate.path.as_str(),
+                    make_tier2_reason(seed.id.0.as_str(), &candidate.file_candidate),
                 );
                 continue;
             }
             if selected_tier2_paths.len() >= PER_SEED_TIER2_FILES_MAX {
                 seed_selection.add_pruned_candidate(make_tier2_pruned_candidate(
                     seed.id.0.as_str(),
-                    &candidate,
+                    &candidate.file_candidate,
                     ImpactSlicePruneReason::BridgeBudgetExhausted,
                 ));
                 continue;
             }
             seed_selection.add_reason(
-                candidate.path.as_str(),
-                make_tier2_reason(seed.id.0.as_str(), &candidate),
+                candidate.file_candidate.path.as_str(),
+                make_tier2_reason(seed.id.0.as_str(), &candidate.file_candidate),
             );
-            selected_tier2_paths.insert(candidate.path.clone());
+            selected_tier2_paths.insert(candidate.file_candidate.path.clone());
             admitted_tier2_candidates.push(candidate);
         }
 
@@ -3053,21 +3445,21 @@ fn plan_bounded_slice(
         let mut selected_continuation_paths = std::collections::BTreeSet::new();
         let mut selected_continuation_bridge_kinds = std::collections::BTreeMap::new();
         for candidate in continuation_candidates {
-            if selected_continuation_paths.contains(&candidate.path) {
+            if selected_continuation_paths.contains(&candidate.file_candidate.path) {
                 seed_selection.add_reason(
-                    candidate.path.as_str(),
-                    make_continuation_reason(seed.id.0.as_str(), &candidate),
+                    candidate.file_candidate.path.as_str(),
+                    make_continuation_reason(seed.id.0.as_str(), &candidate.file_candidate),
                 );
                 continue;
             }
             let selected_bridge_kind_count = selected_continuation_bridge_kinds
-                .get(&candidate.bridge_kind)
+                .get(&candidate.file_candidate.bridge_kind)
                 .copied()
                 .unwrap_or_default();
             if selected_bridge_kind_count >= PER_SEED_TIER3_FILES_PER_BRIDGE_KIND_MAX {
                 seed_selection.add_pruned_candidate(make_continuation_pruned_candidate(
                     seed.id.0.as_str(),
-                    &candidate,
+                    &candidate.file_candidate,
                     ImpactSlicePruneReason::BridgeBudgetExhausted,
                 ));
                 continue;
@@ -3075,18 +3467,18 @@ fn plan_bounded_slice(
             if selected_continuation_paths.len() >= PER_SEED_TIER3_FILES_MAX {
                 seed_selection.add_pruned_candidate(make_continuation_pruned_candidate(
                     seed.id.0.as_str(),
-                    &candidate,
+                    &candidate.file_candidate,
                     ImpactSlicePruneReason::BridgeBudgetExhausted,
                 ));
                 continue;
             }
             seed_selection.add_reason(
-                candidate.path.as_str(),
-                make_continuation_reason(seed.id.0.as_str(), &candidate),
+                candidate.file_candidate.path.as_str(),
+                make_continuation_reason(seed.id.0.as_str(), &candidate.file_candidate),
             );
-            selected_continuation_paths.insert(candidate.path);
+            selected_continuation_paths.insert(candidate.file_candidate.path.clone());
             *selected_continuation_bridge_kinds
-                .entry(candidate.bridge_kind)
+                .entry(candidate.file_candidate.bridge_kind)
                 .or_insert(0usize) += 1;
         }
 
@@ -4034,6 +4426,35 @@ fn caller() -> i32 {
         let diff = String::from_utf8(diff_out.stdout).unwrap();
         let files = parse_unified_diff(&diff).expect("parse diff");
         (dir, path, files)
+    }
+
+    fn test_candidate_scoring(
+        lane: ImpactSliceCandidateLane,
+        primary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
+        secondary_evidence_kinds: Vec<ImpactSliceEvidenceKind>,
+        semantic_support_rank: u8,
+    ) -> ImpactSliceCandidateScoringSummary {
+        ImpactSliceCandidateScoringSummary {
+            source_kind: ImpactSliceCandidateSourceKind::GraphSecondHop,
+            lane,
+            primary_evidence_kinds,
+            secondary_evidence_kinds,
+            negative_evidence_kinds: Vec::new(),
+            score_tuple: ImpactSliceScoreTuple {
+                source_rank: 0,
+                lane_rank: 0,
+                primary_evidence_count: 1,
+                secondary_evidence_count: 0,
+                negative_evidence_count: 0,
+                semantic_support_rank,
+                call_position_rank: 7,
+                lexical_tiebreak: "leaf.rs".to_string(),
+            },
+            support: Some(ImpactSliceCandidateSupportMetadata {
+                local_dfg_support: semantic_support_rank > 0,
+                ..ImpactSliceCandidateSupportMetadata::default()
+            }),
+        }
     }
 
     #[test]
@@ -6547,6 +6968,99 @@ fn caller() -> i32 {
                 bridge_kind: None,
                 scoring: None,
             }]
+        );
+    }
+
+    #[test]
+    fn stitched_chain_representative_projects_bridge_completion_candidate() {
+        let candidate = Tier2Candidate {
+            path: "leaf.rs".to_string(),
+            via_symbol_id: "rust:wrapper.rs:fn:wrap:3".to_string(),
+            via_path: "wrapper.rs".to_string(),
+            completion_symbol_id: "rust:leaf.rs:fn:leaf:9".to_string(),
+            bridge_kind: Some(ImpactSliceBridgeKind::WrapperReturn),
+            scoring: test_candidate_scoring(
+                ImpactSliceCandidateLane::ReturnContinuation,
+                vec![ImpactSliceEvidenceKind::ReturnFlow],
+                vec![],
+                0,
+            ),
+        };
+
+        let representative = make_stitched_chain_representative(
+            "rust:main.rs:fn:entry:1",
+            &candidate,
+            SliceSelectionTier::BridgeCompletion,
+        );
+
+        assert_eq!(
+            representative.entry_boundary_symbol_id,
+            candidate.via_symbol_id
+        );
+        assert_eq!(
+            representative.anchor_symbol_id,
+            candidate.completion_symbol_id
+        );
+        assert_eq!(representative.family, StitchedChainFamily::Return);
+        assert_eq!(
+            representative.family_bucket,
+            StitchedChainFamilyBucket::ReturnResult
+        );
+        assert_eq!(
+            representative.closure_target_key,
+            "rust:leaf.rs:fn:leaf:9".to_string()
+        );
+        assert_eq!(
+            representative.duplicate_key,
+            "rust:main.rs:fn:entry:1|rust:wrapper.rs:fn:wrap:3|return_result|rust:leaf.rs:fn:leaf:9|rust:leaf.rs:fn:leaf:9"
+        );
+        assert_eq!(
+            representative.winning_bridge_execution_chain_compact[0].step_family,
+            ImpactBridgeExecutionStepFamily::SummaryReturnBridge
+        );
+        assert!(representative.observed_supporting_steps_compact.is_empty());
+    }
+
+    #[test]
+    fn stitched_chain_representative_projects_continuation_candidate_with_support_step() {
+        let candidate = Tier2Candidate {
+            path: "closer.rb".to_string(),
+            via_symbol_id: "ruby:bridge.rb:method:resolve:8".to_string(),
+            via_path: "bridge.rb".to_string(),
+            completion_symbol_id: "ruby:closer.rb:method:finish:14".to_string(),
+            bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+            scoring: test_candidate_scoring(
+                ImpactSliceCandidateLane::AliasContinuation,
+                vec![ImpactSliceEvidenceKind::AliasChain],
+                vec![ImpactSliceEvidenceKind::ExplicitRequireRelativeLoad],
+                1,
+            ),
+        };
+
+        let representative = make_stitched_chain_representative(
+            "ruby:service.rb:method:run:12",
+            &candidate,
+            SliceSelectionTier::BridgeContinuation,
+        );
+
+        assert_eq!(representative.anchor_symbol_id, candidate.via_symbol_id);
+        assert_eq!(representative.family, StitchedChainFamily::Nested);
+        assert_eq!(
+            representative.family_bucket,
+            StitchedChainFamilyBucket::NestedContinuation
+        );
+        assert!(representative.has_require_relative_load);
+        assert_eq!(
+            representative.budget_key,
+            "ruby:service.rb:method:run:12|ruby:bridge.rb:method:resolve:8|nested_continuation|ruby:closer.rb:method:finish:14"
+        );
+        assert_eq!(
+            representative.winning_bridge_execution_chain_compact[0].step_family,
+            ImpactBridgeExecutionStepFamily::AliasResultStitch
+        );
+        assert_eq!(
+            representative.observed_supporting_steps_compact[0].step_family,
+            ImpactBridgeExecutionStepFamily::RequireRelativeLoad
         );
     }
 
