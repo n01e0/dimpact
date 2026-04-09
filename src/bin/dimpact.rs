@@ -3778,6 +3778,7 @@ fn build_pdg_context(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_grouped_impact_outputs(
     seeds: &[dimpact::Symbol],
     refs: &[Reference],
@@ -3942,6 +3943,7 @@ fn merge_pdg_references(
     merged
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_impact(
     fmt: OutputFormat,
     lang_opt: LangOpt,
@@ -5078,8 +5080,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5155,8 +5157,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5255,8 +5257,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5319,8 +5321,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5420,8 +5422,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5509,8 +5511,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5620,8 +5622,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5757,8 +5759,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -5911,8 +5913,8 @@ fn caller() -> i32 {
         let cwd = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(root).expect("chdir temp repo");
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -6047,8 +6049,8 @@ fn caller() -> i32 {
         let cwd = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(root).expect("chdir temp repo");
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -6208,8 +6210,8 @@ fn caller() -> i32 {
         let cwd = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(root).expect("chdir temp repo");
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -6365,8 +6367,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -6488,8 +6490,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -6566,8 +6568,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -6681,8 +6683,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -7077,8 +7079,8 @@ fn caller() -> i32 {
         ];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
@@ -7132,8 +7134,8 @@ fn caller() -> i32 {
         let refs = vec![call_ref(seed.id.0.as_str(), js.id.0.as_str(), "main.rs", 4)];
 
         let plan = plan_bounded_slice(
-            &[seed.file.clone()],
-            &[seed.file.clone()],
+            std::slice::from_ref(&seed.file),
+            std::slice::from_ref(&seed.file),
             std::slice::from_ref(&seed),
             &index,
             &refs,
