@@ -2773,6 +2773,44 @@ fn compare_representative_candidates(
         })
 }
 
+fn retain_best_representative_per_duplicate_key(
+    seed_symbol_id: &str,
+    seed_selection: &mut SliceSelectionAccumulator,
+    candidates: Vec<RepresentativeCandidate>,
+    tier: SliceSelectionTier,
+) -> Vec<RepresentativeCandidate> {
+    let mut strongest_by_duplicate_key =
+        std::collections::BTreeMap::<String, RepresentativeCandidate>::new();
+
+    for candidate in candidates {
+        match strongest_by_duplicate_key.entry(candidate.representative.duplicate_key.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                if compare_representative_candidates(&candidate, entry.get()).is_lt() {
+                    seed_selection.add_pruned_candidate(make_pruned_candidate_with_tier(
+                        seed_symbol_id,
+                        &entry.get().file_candidate,
+                        ImpactSlicePruneReason::WeakerSameChainDuplicate,
+                        tier,
+                    ));
+                    entry.insert(candidate);
+                } else {
+                    seed_selection.add_pruned_candidate(make_pruned_candidate_with_tier(
+                        seed_symbol_id,
+                        &candidate.file_candidate,
+                        ImpactSlicePruneReason::WeakerSameChainDuplicate,
+                        tier,
+                    ));
+                }
+            }
+        }
+    }
+
+    strongest_by_duplicate_key.into_values().collect()
+}
+
 fn into_representative_candidates(
     seed_symbol_id: &str,
     candidates: Vec<Tier2Candidate>,
@@ -2839,6 +2877,9 @@ fn make_pruned_candidate_with_tier(
         }
         ImpactSlicePruneReason::WeakerSamePathDuplicate => {
             Some("suppressed_before_admit=weaker_same_path_duplicate".to_string())
+        }
+        ImpactSlicePruneReason::WeakerSameChainDuplicate => {
+            Some("suppressed_before_admit=weaker_same_chain_duplicate".to_string())
         }
         _ => None,
     };
@@ -3216,8 +3257,14 @@ fn collect_bridge_continuation_candidates<'a>(
             seed_selection,
             per_anchor.into_values().collect(),
         );
-        let mut per_anchor = into_representative_candidates(
+        let per_anchor = into_representative_candidates(
             seed_symbol_id,
+            per_anchor,
+            SliceSelectionTier::BridgeContinuation,
+        );
+        let mut per_anchor = retain_best_representative_per_duplicate_key(
+            seed_symbol_id,
+            seed_selection,
             per_anchor,
             SliceSelectionTier::BridgeContinuation,
         );
@@ -3225,6 +3272,12 @@ fn collect_bridge_continuation_candidates<'a>(
         continuation_candidates.extend(per_anchor.into_iter().take(1));
     }
 
+    let mut continuation_candidates = retain_best_representative_per_duplicate_key(
+        seed_symbol_id,
+        seed_selection,
+        continuation_candidates,
+        SliceSelectionTier::BridgeContinuation,
+    );
     continuation_candidates.sort_by(compare_representative_candidates);
     continuation_candidates
 }
@@ -3406,8 +3459,14 @@ fn plan_bounded_slice(
                 &mut seed_selection,
                 side_candidates,
             );
-            let mut side_candidates = into_representative_candidates(
+            let side_candidates = into_representative_candidates(
                 seed.id.0.as_str(),
+                side_candidates,
+                SliceSelectionTier::BridgeCompletion,
+            );
+            let mut side_candidates = retain_best_representative_per_duplicate_key(
+                seed.id.0.as_str(),
+                &mut seed_selection,
                 side_candidates,
                 SliceSelectionTier::BridgeCompletion,
             );
@@ -3429,6 +3488,12 @@ fn plan_bounded_slice(
             );
         }
 
+        let mut tier2_candidates = retain_best_representative_per_duplicate_key(
+            seed.id.0.as_str(),
+            &mut seed_selection,
+            tier2_candidates,
+            SliceSelectionTier::BridgeCompletion,
+        );
         tier2_candidates.sort_by(compare_representative_candidates);
         let mut selected_tier2_paths = std::collections::BTreeSet::new();
         let mut admitted_tier2_candidates = Vec::new();
@@ -7140,6 +7205,73 @@ fn caller() -> i32 {
             a.representative.closure_target_key,
             b.representative.closure_target_key
         );
+    }
+
+    #[test]
+    fn representative_duplicate_suppression_keeps_stronger_same_chain_projection() {
+        let stronger = into_representative_candidate(
+            "rust:main.rs:fn:entry:1",
+            Tier2Candidate {
+                path: "winner.rs".to_string(),
+                via_symbol_id: "rust:wrap.rs:fn:wrap:3".to_string(),
+                via_path: "wrap.rs".to_string(),
+                completion_symbol_id: "rust:winner.rs:fn:leaf:9".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![ImpactSliceEvidenceKind::AliasChain],
+                    vec![],
+                    1,
+                ),
+            },
+            SliceSelectionTier::BridgeCompletion,
+        );
+        let mut weaker = into_representative_candidate(
+            "rust:main.rs:fn:entry:1",
+            Tier2Candidate {
+                path: "loser.rs".to_string(),
+                via_symbol_id: "rust:wrap.rs:fn:wrap:3".to_string(),
+                via_path: "wrap.rs".to_string(),
+                completion_symbol_id: "rust:loser.rs:fn:leaf:9".to_string(),
+                bridge_kind: Some(ImpactSliceBridgeKind::BoundaryAliasContinuation),
+                scoring: test_candidate_scoring(
+                    ImpactSliceCandidateLane::AliasContinuation,
+                    vec![ImpactSliceEvidenceKind::AliasChain],
+                    vec![],
+                    0,
+                ),
+            },
+            SliceSelectionTier::BridgeCompletion,
+        );
+
+        weaker.representative.duplicate_key = stronger.representative.duplicate_key.clone();
+        weaker.representative.entry_boundary_symbol_id =
+            stronger.representative.entry_boundary_symbol_id.clone();
+        weaker.representative.anchor_locality_key =
+            stronger.representative.anchor_locality_key.clone();
+        weaker.representative.closure_target_key =
+            stronger.representative.closure_target_key.clone();
+        weaker.representative.budget_key = stronger.representative.budget_key.clone();
+
+        let mut selection = SliceSelectionAccumulator::default();
+        let retained = retain_best_representative_per_duplicate_key(
+            "rust:main.rs:fn:entry:1",
+            &mut selection,
+            vec![weaker, stronger.clone()],
+            SliceSelectionTier::BridgeCompletion,
+        );
+
+        assert_eq!(retained.len(), 1);
+        assert_eq!(
+            retained[0].file_candidate.path,
+            stronger.file_candidate.path
+        );
+        assert!(selection.pruned_candidates.iter().any(|candidate| {
+            candidate.path == "loser.rs"
+                && candidate.prune_reason == ImpactSlicePruneReason::WeakerSameChainDuplicate
+                && candidate.compact_explanation.as_deref()
+                    == Some("suppressed_before_admit=weaker_same_chain_duplicate")
+        }));
     }
 
     #[test]

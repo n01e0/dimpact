@@ -266,6 +266,7 @@ pub enum ImpactSlicePruneReason {
     LocalDfgBudgetExhausted,
     SuppressedBeforeAdmit,
     WeakerSamePathDuplicate,
+    WeakerSameChainDuplicate,
     WeakerSameFamilySibling,
     RankedOut,
 }
@@ -1147,6 +1148,7 @@ fn selected_reason_matches_pruned_candidate(
         candidate.prune_reason,
         ImpactSlicePruneReason::RankedOut
             | ImpactSlicePruneReason::SuppressedBeforeAdmit
+            | ImpactSlicePruneReason::WeakerSameChainDuplicate
             | ImpactSlicePruneReason::WeakerSameFamilySibling
     ) && candidate.path != selected_path
         && reason.seed_symbol_id == candidate.seed_symbol_id
