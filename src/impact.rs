@@ -1338,38 +1338,6 @@ fn selected_reason_matches_pruned_candidate(
         && reason.via_path == candidate.via_path
 }
 
-fn representative_selected_vs_pruned_summary(
-    selected: Option<&ImpactSliceRepresentativeExplanationMetadata>,
-    pruned: Option<&ImpactSliceRepresentativeExplanationMetadata>,
-) -> Option<String> {
-    let mut parts = Vec::new();
-
-    if let Some(selected) = selected {
-        if let Some(summary) = selected.closure_summary.as_ref() {
-            parts.push(summary.clone());
-        }
-        if let Some(summary) = selected.family_summary.as_ref() {
-            parts.push(summary.clone());
-        }
-        if !selected.winner_reason_codes.is_empty() {
-            parts.push(format!("winner={}", selected.winner_reason_codes.join(",")));
-        }
-    }
-
-    if let Some(pruned) = pruned {
-        if let Some(summary) = pruned.duplicate_summary.as_ref() {
-            parts.push(summary.clone());
-        } else if let Some(summary) = pruned.budget_summary.as_ref() {
-            parts.push(summary.clone());
-        }
-        if !pruned.loser_reason_codes.is_empty() {
-            parts.push(format!("loser={}", pruned.loser_reason_codes.join(",")));
-        }
-    }
-
-    (!parts.is_empty()).then(|| parts.join("; "))
-}
-
 fn build_selected_vs_pruned_reasons(
     selected_path: &str,
     seed_reasons: &[ImpactSliceReasonMetadata],
@@ -1399,10 +1367,6 @@ fn build_selected_vs_pruned_reasons(
                 selected_vs_pruned_winning_support(selected_scoring, pruned_scoring);
             let losing_side_reason =
                 selected_vs_pruned_losing_side_reason(selected_scoring, pruned_scoring);
-            let representative_summary = representative_selected_vs_pruned_summary(
-                reason.representative_explanation.as_ref(),
-                candidate.representative_explanation.as_ref(),
-            );
             reasons.push(ImpactWitnessSliceSelectedVsPrunedReason {
                 via_symbol_id: reason.via_symbol_id.clone(),
                 via_path: reason.via_path.clone(),
@@ -1415,18 +1379,16 @@ fn build_selected_vs_pruned_reasons(
                 winning_support: winning_support.clone(),
                 losing_side_reason: losing_side_reason.clone(),
                 compact_explanation: candidate.compact_explanation.clone(),
-                summary: representative_summary.unwrap_or_else(|| {
-                    selected_vs_pruned_summary(
-                        selected_path,
-                        &candidate.path,
-                        selected_better_by,
-                        selected_scoring,
-                        pruned_scoring,
-                        winning_primary_evidence_kinds.as_deref(),
-                        winning_support.as_ref(),
-                        losing_side_reason.as_deref(),
-                    )
-                }),
+                summary: selected_vs_pruned_summary(
+                    selected_path,
+                    &candidate.path,
+                    selected_better_by,
+                    selected_scoring,
+                    pruned_scoring,
+                    winning_primary_evidence_kinds.as_deref(),
+                    winning_support.as_ref(),
+                    losing_side_reason.as_deref(),
+                ),
             });
         }
     }
@@ -1681,6 +1643,34 @@ fn build_observed_supporting_step_summary(
     )
 }
 
+fn normalize_representative_winning_step(
+    step: &ImpactBridgeExecutionStepCompact,
+) -> ImpactBridgeExecutionStepCompact {
+    let mut normalized = step.clone();
+    if let Some(reason_kind) = step.reason_kind {
+        normalized.summary = Some(bridge_execution_step_summary(
+            step.step_family,
+            step.bridge_kind,
+            reason_kind,
+        ));
+    }
+    normalized
+}
+
+fn normalize_representative_supporting_step(
+    step: &ImpactBridgeExecutionStepCompact,
+) -> ImpactBridgeExecutionStepCompact {
+    let mut normalized = step.clone();
+    if let (Some(bridge_kind), Some(reason_kind)) = (step.bridge_kind, step.reason_kind) {
+        normalized.summary = Some(build_observed_supporting_step_summary(
+            step.step_family,
+            bridge_kind,
+            reason_kind,
+        ));
+    }
+    normalized
+}
+
 fn bridge_execution_representative_family(
     bridge_steps: &[ImpactBridgeExecutionStepCompact],
     provenance_chain: &[EdgeProvenance],
@@ -1743,14 +1733,14 @@ fn build_bridge_execution_provenance_from_representatives(
                 push_unique_bridge_execution_step(
                     &mut winning_steps,
                     &mut seen_winning_steps,
-                    step.clone(),
+                    normalize_representative_winning_step(step),
                 );
             }
             for step in &representative.observed_supporting_steps_compact {
                 push_unique_bridge_execution_step(
                     &mut supporting_steps,
                     &mut seen_supporting_steps,
-                    step.clone(),
+                    normalize_representative_supporting_step(step),
                 );
             }
         }
@@ -1775,11 +1765,8 @@ fn build_bridge_execution_provenance_compact(
     Vec<ImpactBridgeExecutionStepCompact>,
     Vec<ImpactBridgeExecutionStepCompact>,
 ) {
-    if let Some(representative_steps) =
-        build_bridge_execution_provenance_from_representatives(slice_context, provenance_chain)
-    {
-        return representative_steps;
-    }
+    let representative_steps =
+        build_bridge_execution_provenance_from_representatives(slice_context, provenance_chain);
 
     let mut winning_steps = Vec::new();
     let mut seen_winning_steps = HashSet::new();
@@ -1845,7 +1832,7 @@ fn build_bridge_execution_provenance_compact(
         }
     }
 
-    let representative_family =
+    let mut representative_family =
         bridge_execution_representative_family(&winning_steps, provenance_chain);
 
     if let (Some(entry_family), Some(boundary_reason)) = (
@@ -1885,6 +1872,26 @@ fn build_bridge_execution_provenance_compact(
             winning_steps.insert(0, boundary_step);
         }
     }
+
+    if let Some((rep_family, rep_winning_steps, rep_supporting_steps)) = representative_steps {
+        if representative_family.is_none() {
+            representative_family = rep_family;
+        }
+        for step in rep_winning_steps {
+            push_unique_bridge_execution_step(&mut winning_steps, &mut seen_winning_steps, step);
+        }
+        for step in rep_supporting_steps {
+            push_unique_bridge_execution_step(
+                &mut supporting_steps,
+                &mut seen_supporting_steps,
+                step,
+            );
+        }
+    }
+
+    representative_family =
+        bridge_execution_representative_family(&winning_steps, provenance_chain)
+            .or(representative_family);
 
     (representative_family, winning_steps, supporting_steps)
 }
@@ -5104,13 +5111,9 @@ fn foo() { bar(); }
         assert!(
             reasons[0]
                 .summary
-                .contains("representative duplicate key=dup-key")
+                .contains("selected over lib/noisy_alias_leaf.rb")
         );
-        assert!(
-            reasons[0]
-                .summary
-                .contains("winner=file_first_candidate_projection")
-        );
+        assert!(reasons[0].summary.contains("stronger semantic support"));
     }
 
     #[test]
@@ -5181,7 +5184,58 @@ fn foo() { bar(); }
             build_bridge_execution_provenance_compact(&slice_context, &[]);
 
         assert_eq!(family, Some(ImpactBridgeExecutionFamily::AliasResultStitch));
-        assert_eq!(winning_steps, vec![winning_step]);
-        assert_eq!(supporting_steps, vec![supporting_step]);
+        assert_eq!(winning_steps.len(), 1);
+        assert_eq!(
+            winning_steps[0].family,
+            ImpactBridgeExecutionFamily::AliasResultStitch
+        );
+        assert_eq!(
+            winning_steps[0].step_family,
+            ImpactBridgeExecutionStepFamily::AliasResultStitch
+        );
+        assert_eq!(
+            winning_steps[0].anchor_symbol_id,
+            "ruby:lib/service.rb:method:bounce:3"
+        );
+        assert_eq!(
+            winning_steps[0].anchor_path.as_deref(),
+            Some("lib/service.rb")
+        );
+        assert_eq!(
+            winning_steps[0].bridge_kind,
+            Some(ImpactSliceBridgeKind::BoundaryAliasContinuation)
+        );
+        assert_eq!(
+            winning_steps[0].reason_kind,
+            Some(ImpactSliceReasonKind::BridgeCompletionFile)
+        );
+        assert!(winning_steps[0].summary.is_some());
+
+        assert_eq!(supporting_steps.len(), 1);
+        assert_eq!(
+            supporting_steps[0].family,
+            ImpactBridgeExecutionFamily::MixedRequireRelativeAliasStitch
+        );
+        assert_eq!(
+            supporting_steps[0].step_family,
+            ImpactBridgeExecutionStepFamily::RequireRelativeLoad
+        );
+        assert_eq!(
+            supporting_steps[0].anchor_symbol_id,
+            "ruby:lib/service.rb:method:bounce:3"
+        );
+        assert_eq!(
+            supporting_steps[0].anchor_path.as_deref(),
+            Some("lib/service.rb")
+        );
+        assert_eq!(
+            supporting_steps[0].bridge_kind,
+            Some(ImpactSliceBridgeKind::RequireRelativeChain)
+        );
+        assert_eq!(
+            supporting_steps[0].reason_kind,
+            Some(ImpactSliceReasonKind::BridgeCompletionFile)
+        );
+        assert!(supporting_steps[0].summary.is_some());
     }
 }
